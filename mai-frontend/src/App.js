@@ -68,15 +68,42 @@ function App() {
             <p className="token-label">MAI TOKEN</p>
           </div>
 
-          {/* Tap Coin Button & Floating Effects */}
+          {/* Tap Coin Button with Space MAI Token Image & Floating Effects */}
           <div className="tap-section">
-            <button className="tap-button" onClick={handleCardClick}>
-              <div className="coin-icon">🪙</div>
+            <button
+              className="tap-button"
+              onClick={handleCardClick}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                cursor: 'pointer',
+                padding: 0,
+                position: 'relative'
+              }}
+            >
+              <img 
+                src="/coin.png" 
+                alt="MAI Coin" 
+                style={{
+                  width: '220px',
+                  height: '220px',
+                  borderRadius: '50%',
+                  objectFit: 'cover',
+                  boxShadow: '0 10px 25px rgba(0,0,0,0.3)'
+                }} 
+              />
               {clicks.map((click) => (
                 <span
                   key={click.id}
                   className="floating-click"
-                  style={{ top: `${click.y}px`, left: `${click.x}px` }}
+                  style={{
+                    top: `${click.y}px`,
+                    left: `${click.x}px`,
+                    position: 'absolute',
+                    color: '#fff',
+                    fontWeight: 'bold',
+                    pointerEvents: 'none'
+                  }}
                   onAnimationEnd={() => handleAnimationEnd(click.id)}
                 >
                   +1
