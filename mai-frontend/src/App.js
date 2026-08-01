@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { TonConnectUIProvider, TonConnectButton, useTonAddress } from '@tonconnect/ui-react';
 
 // Telegram Channel and Group Links
 const TASK_LINKS = {
@@ -59,9 +60,8 @@ function AppContent() {
   const [currentView, setCurrentView] = useState('main'); // 'main' or 'boost'
   const [selectedLevel, setSelectedLevel] = useState(null); // Selected level for modal
 
-  // Wallet Connection State
-  const [walletConnected, setWalletConnected] = useState(false);
-  const [userFriendlyAddress, setUserFriendlyAddress] = useState('');
+  // TON Address Custom Hook
+  const userFriendlyAddress = useTonAddress();
 
   // Balance Persistence
   const [balance, setBalance] = useState(() => {
@@ -462,16 +462,6 @@ function AppContent() {
       setShowAdModal(false);
       setAdCooldown(newCount >= 20 ? 86400 : 3);
       alert("Success! +2.0 MAI claimed.");
-    }
-  };
-
-  const handleToggleWallet = () => {
-    if (walletConnected) {
-      setWalletConnected(false);
-      setUserFriendlyAddress('');
-    } else {
-      setWalletConnected(true);
-      setUserFriendlyAddress('EQB...MAI_WALLET');
     }
   };
 
@@ -974,23 +964,10 @@ function AppContent() {
                   </p>
 
                   <div style={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
-                    <button
-                      onClick={handleToggleWallet}
-                      style={{
-                        padding: '10px 20px',
-                        background: walletConnected ? 'rgba(0, 255, 102, 0.2)' : 'linear-gradient(135deg, #00f0ff, #0066ff)',
-                        color: walletConnected ? '#00FF66' : '#fff',
-                        border: walletConnected ? '1px solid #00FF66' : 'none',
-                        borderRadius: '12px',
-                        fontWeight: 'bold',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      {walletConnected ? 'Disconnect Wallet' : 'Connect Wallet'}
-                    </button>
+                    <TonConnectButton />
                   </div>
 
-                  {walletConnected ? (
+                  {userFriendlyAddress ? (
                     <div style={{ backgroundColor: 'rgba(0, 255, 102, 0.15)', border: '1px solid #00FF66', padding: '10px', borderRadius: '10px', width: '100%', wordBreak: 'break-all', fontSize: '11px', color: '#00FF66' }}>
                       ✓ Connected:<br />{userFriendlyAddress}
                     </div>
@@ -1227,10 +1204,12 @@ function AppContent() {
   );
 }
 
-// Main App Component Rendering Content Directly
+// App Component with TonConnectUIProvider
 function App() {
   return (
-    <AppContent />
+    <TonConnectUIProvider manifestUrl="https://raw.githubusercontent.com/ton-connect/docs/main/public/tonconnect-manifest.json">
+      <AppContent />
+    </TonConnectUIProvider>
   );
 }
 
