@@ -620,9 +620,9 @@ function MainApp() {
                 <h2 style={{ color: '#00f0ff', marginTop: 0 }}>Invite Friends</h2>
                 <div style={{ backgroundColor: 'rgba(15, 25, 55, 0.75)', padding: '20px', borderRadius: '16px', border: '1px solid rgba(0,240,255,0.3)' }}>
                   <div style={{ backgroundColor: 'rgba(0,0,0,0.4)', padding: '10px', borderRadius: '8px', border: '1px solid #00f0ff', fontSize: '12px', color: '#00f0ff', wordBreak: 'break-all', marginBottom: '15px' }}>
-                    https://t.me/MAITokenBot?start=r_{userId || '7680002112'}
+                    https://t.me/maitoken_bot?start=r_{userId || '7680002112'}
                   </div>
-                  <button onClick={() => { navigator.clipboard.writeText(`https://t.me/MAITokenBot?start=r_${userId || '7680002112'}`); alert("Copied!"); }} style={{ width: '100%', padding: '12px', background: 'linear-gradient(135deg, #00f0ff, #0066ff)', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}>Copy Invite Link</button>
+                  <button onClick={() => { navigator.clipboard.writeText(`https://t.me/maitoken_bot?start=r_${userId || '7680002112'}`); alert("Copied!"); }} style={{ width: '100%', padding: '12px', background: 'linear-gradient(135deg, #00f0ff, #0066ff)', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}>Copy Invite Link</button>
                 </div>
               </div>
             )}
