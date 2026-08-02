@@ -158,20 +158,36 @@ function MainApp() {
     return () => clearInterval(timer);
   }, [showAdModal, adTimer]);
 
-  // Retrieve Actual Telegram User ID
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp) {
-      window.Telegram.WebApp.ready();
-      const user = window.Telegram.WebApp.initDataUnsafe?.user;
-      if (user && user.id) {
-        setUserId(user.id);
-      } else {
-        setUserId(7680002112);
+  // Retrieve Actual Telegram User ID (Updated Version)
+useEffect(() => {
+  const fetchTelegramUser = () => {
+    if (typeof window !== 'undefined') {
+      // Check if Telegram WebApp API is available
+      if (window.Telegram && window.Telegram.WebApp) {
+        window.Telegram.WebApp.ready();
+        const user = window.Telegram.WebApp.initDataUnsafe?.user;
+        
+        if (user && user.id) {
+          setUserId(user.id);
+          return; // Exit the function if successful
+        }
       }
-    } else {
-      setUserId(7680002112);
+      
+      // Fallback ID if running outside Telegram or if user data is missing
+      setUserId(7680002112); 
     }
-  }, []);
+  };
+
+  // Try to fetch immediately on component mount
+  fetchTelegramUser();
+
+  // Retry after 500ms in case the Telegram WebApp script loads slowly
+  const timer = setTimeout(() => {
+    fetchTelegramUser();
+  }, 500);
+
+  return () => clearTimeout(timer);
+}, []);
 
   useEffect(() => {
     const timer = setInterval(() => {
