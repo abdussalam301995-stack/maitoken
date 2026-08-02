@@ -88,6 +88,8 @@ function MainApp() {
 
   const [canClaim, setCanClaim] = useState(() => claimTimer <= 0);
   const canvasRef = useRef(null);
+  
+  // Telegram User ID State
   const [userId, setUserId] = useState(null);
 
   const [completedTasks, setCompletedTasks] = useState(() => {
@@ -136,6 +138,7 @@ function MainApp() {
       setClaimTimer((prev) => {
         if (prev <= 1) {
           setCanClaim(true);
+          clearInterval(timerInterval);
           return 0;
         }
         return prev - 1;
@@ -155,8 +158,9 @@ function MainApp() {
     return () => clearInterval(timer);
   }, [showAdModal, adTimer]);
 
+  // Retrieve Actual Telegram User ID
   useEffect(() => {
-    if (window.Telegram && window.Telegram.WebApp) {
+    if (typeof window !== 'undefined' && window.Telegram && window.Telegram.WebApp) {
       window.Telegram.WebApp.ready();
       const user = window.Telegram.WebApp.initDataUnsafe?.user;
       if (user && user.id) {
@@ -351,7 +355,6 @@ function MainApp() {
 
   const handleLogoTouch = () => {
     setIsLogoClicked(true);
-    // Vibrate device if supported
     if (navigator.vibrate) navigator.vibrate(50); 
     setTimeout(() => setIsLogoClicked(false), 300);
   };
@@ -381,7 +384,7 @@ function MainApp() {
       const res = await fetch('https://maitoken.onrender.com', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: userId || 7680002112, taskKey: taskKey })
+        body: JSON.stringify({ userId: userId, taskKey: taskKey })
       });
       const data = await res.json();
       if (data.isJoined) {
@@ -460,7 +463,13 @@ function MainApp() {
 
   // Safe fallback for copying text in non-secure or WebView environments
   const handleCopyLink = () => {
-    const link = `https://t.me/maitoken_bot?start=r_${userId || '7680002112'}`;
+    if (!userId) {
+      alert("Waiting for user ID to load...");
+      return;
+    }
+    
+    const link = `https://t.me/maitoken_bot?start=r_${userId}`;
+    
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(link)
         .then(() => alert("Copied!"))
@@ -473,8 +482,11 @@ function MainApp() {
   const fallbackCopy = (text) => {
     const textArea = document.createElement("textarea");
     textArea.value = text;
+    // Avoid scrolling to bottom
     textArea.style.position = "fixed"; 
-    textArea.style.left = "-999999px"; 
+    textArea.style.top = "0";
+    textArea.style.left = "0";
+    textArea.style.opacity = "0";
     document.body.appendChild(textArea);
     textArea.focus();
     textArea.select();
@@ -483,7 +495,7 @@ function MainApp() {
       alert("Copied!");
     } catch (err) {
       console.error('Fallback: Oops, unable to copy', err);
-      alert("Failed to copy automatically. Please copy the link manually.");
+      alert("Failed to copy. Please manually copy the link above.");
     }
     document.body.removeChild(textArea);
   };
@@ -555,7 +567,7 @@ function MainApp() {
         <div style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(0,240,255,0.2)', backgroundColor: 'rgba(5, 10, 25, 0.4)', backdropFilter: 'blur(10px)', width: '100%', boxSizing: 'border-box' }}>
           <div style={{ textAlign: 'left' }}>
             <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#ffffff' }}>User</div>
-            <div style={{ fontSize: '12px', color: '#00f0ff', fontWeight: '500' }}>ID: {userId || '7680002112'}</div>
+            <div style={{ fontSize: '12px', color: '#00f0ff', fontWeight: '500' }}>ID: {userId || 'Loading...'}</div>
           </div>
           
           <div style={{ backgroundColor: 'rgba(10, 20, 45, 0.7)', padding: '6px 14px 6px 8px', borderRadius: '25px', border: '1px solid rgba(0, 240, 255, 0.6)', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 0 20px rgba(0,240,255,0.3)' }}>
@@ -571,7 +583,7 @@ function MainApp() {
           <div style={{ padding: '20px', maxWidth: '450px', margin: '0 auto', height: '80vh', display: 'flex', flexDirection: 'column' }}>
             <button 
               onClick={() => setCurrentView('main')}
-              style={{ background: 'none', border: 'none', color: '#00f0ff', fontSize: '14px', cursor: 'pointer', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '5px' }}
+              style={{ background: 'none', border: 'none', color: '#00f0ff', fontSize: '14px', cursor: 'pointer', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '5px', WebkitTapHighlightColor: 'transparent', outline: 'none' }}
             >
               ⬅ Back to Home
             </button>
@@ -609,7 +621,8 @@ function MainApp() {
                         color: isUnlocked ? '#000' : '#80a0c0', 
                         border: isUnlocked ? 'none' : '1px solid rgba(0,240,255,0.4)', 
                         borderRadius: '10px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer',
-                        boxShadow: isUnlocked ? '0 0 15px rgba(0, 255, 102, 0.4)' : 'none'
+                        boxShadow: isUnlocked ? '0 0 15px rgba(0, 255, 102, 0.4)' : 'none',
+                        WebkitTapHighlightColor: 'transparent', outline: 'none'
                       }}>
                       {isUnlocked ? 'Unlock' : 'Lock'}
                     </button>
@@ -634,7 +647,10 @@ function MainApp() {
                     width: '240px', height: '240px', borderRadius: '50%', margin: '15px auto 20px auto', 
                     padding: '6px', background: 'linear-gradient(145deg, #00f0ff, #e000ff)', 
                     boxShadow: '0 0 60px rgba(0, 240, 255, 0.8)', display: 'flex', alignItems: 'center', 
-                    justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s'
+                    justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s',
+                    WebkitTapHighlightColor: 'transparent', 
+                    outline: 'none', 
+                    userSelect: 'none' 
                   }}>
                   <div style={{ width: '100%', height: '100%', borderRadius: '50%', overflow: 'hidden', border: '3px solid #00f0ff' }}>
                     <img src="/mai-coin.jpg" alt="MAI Coin" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -647,7 +663,7 @@ function MainApp() {
 
                 <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', width: '95%', margin: '0 auto', alignItems: 'stretch' }}>
                   {canClaim ? (
-                    <button onClick={handleClaimBonus} style={{ flex: 1, padding: '16px 8px', background: 'linear-gradient(135deg, #00FF66, #009933)', color: '#000', border: 'none', borderRadius: '16px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer', boxShadow: '0 0 20px rgba(0,255,102,0.4)' }}>
+                    <button onClick={handleClaimBonus} style={{ flex: 1, padding: '16px 8px', background: 'linear-gradient(135deg, #00FF66, #009933)', color: '#000', border: 'none', borderRadius: '16px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer', boxShadow: '0 0 20px rgba(0,255,102,0.4)', WebkitTapHighlightColor: 'transparent', outline: 'none' }}>
                       CLAIM BONUS (+1.66 MAI)
                     </button>
                   ) : (
@@ -657,19 +673,20 @@ function MainApp() {
                     </div>
                   )}
 
-                  <button onClick={() => setCurrentView('boost')} style={{ flex: 1, padding: '16px 8px', background: 'linear-gradient(135deg, #ff9900, #ff5500)', color: '#fff', border: 'none', borderRadius: '16px', fontWeight: '900', fontSize: '15px', cursor: 'pointer', boxShadow: '0 0 20px rgba(255, 153, 0, 0.4)' }}>
+                  <button onClick={() => setCurrentView('boost')} style={{ flex: 1, padding: '16px 8px', background: 'linear-gradient(135deg, #ff9900, #ff5500)', color: '#fff', border: 'none', borderRadius: '16px', fontWeight: '900', fontSize: '15px', cursor: 'pointer', boxShadow: '0 0 20px rgba(255, 153, 0, 0.4)', WebkitTapHighlightColor: 'transparent', outline: 'none' }}>
                     🚀 BOOST
                   </button>
                 </div>
               </div>
             )}
 
+            {/* Task Tab */}
             {activeTab === 'task' && (
               <div style={{ padding: '20px', maxWidth: '400px', margin: '0 auto' }}>
                 <h2 style={{ color: '#00f0ff', marginTop: 0 }}>Task Center</h2>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px', backgroundColor: 'rgba(10, 20, 45, 0.7)', padding: '4px', borderRadius: '12px', border: '1px solid rgba(0,240,255,0.3)' }}>
                   {['daily', 'partner', 'exclusive'].map((cat) => (
-                    <button key={cat} onClick={() => setTaskCategory(cat)} style={{ width: '32%', padding: '10px 0', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '12px', backgroundColor: taskCategory === cat ? '#00f0ff' : 'transparent', color: taskCategory === cat ? '#000' : '#80d4ff', cursor: 'pointer', textTransform: 'capitalize' }}>{cat}</button>
+                    <button key={cat} onClick={() => setTaskCategory(cat)} style={{ width: '32%', padding: '10px 0', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '12px', backgroundColor: taskCategory === cat ? '#00f0ff' : 'transparent', color: taskCategory === cat ? '#000' : '#80d4ff', cursor: 'pointer', textTransform: 'capitalize', WebkitTapHighlightColor: 'transparent', outline: 'none' }}>{cat}</button>
                   ))}
                 </div>
                 {taskCategory === 'daily' && (
@@ -679,29 +696,34 @@ function MainApp() {
                         <h4 style={{ margin: '0 0 4px 0', fontSize: '14px' }}>Watch Sponsored Ad</h4>
                         <p style={{ margin: 0, fontSize: '12px', color: '#00f0ff' }}>+2.0000 MAI ({adCount}/20)</p>
                       </div>
-                      <button onClick={handleStartAd} disabled={adCooldown > 0 || adCount >= 20} style={{ background: adCooldown > 0 ? '#102035' : 'linear-gradient(135deg, #00f0ff, #0066ff)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>{adCooldown > 0 ? formatTime(adCooldown) : 'Watch Ad'}</button>
+                      <button onClick={handleStartAd} disabled={adCooldown > 0 || adCount >= 20} style={{ background: adCooldown > 0 ? '#102035' : 'linear-gradient(135deg, #00f0ff, #0066ff)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', outline: 'none' }}>{adCooldown > 0 ? formatTime(adCooldown) : 'Watch Ad'}</button>
                     </div>
                     <div style={{ backgroundColor: 'rgba(15, 25, 55, 0.75)', padding: '16px', borderRadius: '16px', border: '1px solid rgba(0,240,255,0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
                         <h4 style={{ margin: '0 0 4px 0', fontSize: '14px' }}>Join MAI News Channel</h4>
                         <p style={{ margin: 0, fontSize: '12px', color: '#00f0ff' }}>+5.0000 MAI</p>
                       </div>
-                      <button onClick={() => handleVerifyTask('newsChannel', 5.0)} disabled={completedTasks['newsChannel']} style={{ background: completedTasks['newsChannel'] ? '#00cc55' : 'linear-gradient(135deg, #00f0ff, #0066ff)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>{completedTasks['newsChannel'] ? '✓ Done' : 'Join & Verify'}</button>
+                      <button onClick={() => handleVerifyTask('newsChannel', 5.0)} disabled={completedTasks['newsChannel']} style={{ background: completedTasks['newsChannel'] ? '#00cc55' : 'linear-gradient(135deg, #00f0ff, #0066ff)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', outline: 'none' }}>{completedTasks['newsChannel'] ? '✓ Done' : 'Join & Verify'}</button>
                     </div>
                   </div>
                 )}
               </div>
             )}
 
+            {/* Friends Tab - Safely restored fallback wrapper */}
             {activeTab === 'friends' && (
               <div style={{ padding: '25px 20px', textAlign: 'center', maxWidth: '400px', margin: '0 auto' }}>
                 <h2 style={{ color: '#00f0ff', marginTop: 0 }}>Invite Friends</h2>
                 <div style={{ backgroundColor: 'rgba(15, 25, 55, 0.75)', padding: '20px', borderRadius: '16px', border: '1px solid rgba(0,240,255,0.3)' }}>
                   <div style={{ backgroundColor: 'rgba(0,0,0,0.4)', padding: '10px', borderRadius: '8px', border: '1px solid #00f0ff', fontSize: '12px', color: '#00f0ff', wordBreak: 'break-all', marginBottom: '15px' }}>
-                    https://t.me/maitoken_bot?start=r_{userId || '7680002112'}
+                    https://t.me/maitoken_bot?start=r_{userId || 'Loading...'}
                   </div>
-                  {/* Safely implemented fallback copy logic here */}
-                  <button onClick={handleCopyLink} style={{ width: '100%', padding: '12px', background: 'linear-gradient(135deg, #00f0ff, #0066ff)', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}>Copy Invite Link</button>
+                  <button 
+                    onClick={handleCopyLink} 
+                    style={{ width: '100%', padding: '12px', background: 'linear-gradient(135deg, #00f0ff, #0066ff)', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', outline: 'none' }}
+                  >
+                    Copy Invite Link
+                  </button>
                 </div>
               </div>
             )}
@@ -731,7 +753,6 @@ function MainApp() {
         const shortfall = selectedLevel.needHolding - balance;
         const isUnlocked = shortfall <= 0;
         
-        // Modal Row Styling Template
         const rowStyle = {
           display: 'flex', justifyContent: 'space-between', alignItems: 'center', 
           backgroundColor: 'rgba(15, 25, 55, 0.9)', padding: '14px 16px', 
@@ -750,14 +771,12 @@ function MainApp() {
               boxShadow: '0 0 40px rgba(0,240,255,0.3)' 
             }}>
               
-              {/* Prominent Level Box */}
               <div style={{ textAlign: 'center', marginBottom: '25px' }}>
                 <div style={{ display: 'inline-block', backgroundColor: 'rgba(0, 240, 255, 0.1)', padding: '12px 30px', borderRadius: '16px', border: '2px solid #00f0ff', boxShadow: '0 0 20px rgba(0, 240, 255, 0.5)' }}>
                   <h2 style={{ margin: 0, color: '#00f0ff', fontSize: '28px', fontWeight: '900' }}>LVL {selectedLevel.level}</h2>
                 </div>
               </div>
 
-              {/* 4 Details Rows */}
               <div style={rowStyle}>
                 <span style={{ fontSize: '13px', color: '#d0e8ff', fontWeight: '600' }}>Mining Speed</span>
                 <span style={{ fontSize: '14px', color: '#00FF66', fontWeight: 'bold' }}>{selectedLevel.miningSpeed} MAI per Day</span>
@@ -780,12 +799,11 @@ function MainApp() {
                 </span>
               </div>
 
-              {/* Action Buttons */}
               <div style={{ marginTop: '25px', display: 'flex', gap: '15px', justifyContent: 'center' }}>
                 {isUnlocked ? (
                   <button 
                     onClick={() => setSelectedLevel(null)} 
-                    style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, #00FF66, #009933)', color: '#000', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '15px', cursor: 'pointer', boxShadow: '0 0 20px rgba(0, 255, 102, 0.4)' }}
+                    style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, #00FF66, #009933)', color: '#000', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '15px', cursor: 'pointer', boxShadow: '0 0 20px rgba(0, 255, 102, 0.4)', WebkitTapHighlightColor: 'transparent', outline: 'none' }}
                   >
                     CLOSE
                   </button>
@@ -793,13 +811,13 @@ function MainApp() {
                   <>
                     <button 
                       onClick={() => { alert("Redirecting to Buy MAI..."); setSelectedLevel(null); }} 
-                      style={{ flex: 1, padding: '14px', background: 'linear-gradient(135deg, #00f0ff, #0066ff)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '15px', cursor: 'pointer', boxShadow: '0 0 15px rgba(0, 240, 255, 0.4)' }}
+                      style={{ flex: 1, padding: '14px', background: 'linear-gradient(135deg, #00f0ff, #0066ff)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '15px', cursor: 'pointer', boxShadow: '0 0 15px rgba(0, 240, 255, 0.4)', WebkitTapHighlightColor: 'transparent', outline: 'none' }}
                     >
                       BUY
                     </button>
                     <button 
                       onClick={() => setSelectedLevel(null)} 
-                      style={{ flex: 1, padding: '14px', backgroundColor: 'rgba(255, 68, 68, 0.1)', color: '#ff4444', border: '1px solid #ff4444', borderRadius: '12px', fontWeight: '900', fontSize: '15px', cursor: 'pointer' }}
+                      style={{ flex: 1, padding: '14px', backgroundColor: 'rgba(255, 68, 68, 0.1)', color: '#ff4444', border: '1px solid #ff4444', borderRadius: '12px', fontWeight: '900', fontSize: '15px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', outline: 'none' }}
                     >
                       CANCEL
                     </button>
@@ -812,7 +830,7 @@ function MainApp() {
         );
       })()}
 
-      {/* Ad Modal (Untouched) */}
+      {/* Ad Modal */}
       {showAdModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000 }}>
           <div style={{ backgroundColor: '#0a1428', border: '1px solid #00f0ff', borderRadius: '20px', padding: '24px', width: '85%', maxWidth: '340px', textAlign: 'center' }}>
@@ -823,17 +841,17 @@ function MainApp() {
             <div style={{ fontSize: '28px', fontWeight: '800', color: '#ff9900', marginBottom: '20px' }}>
               {adTimer > 0 ? `${adTimer}s` : '✓ Ready'}
             </div>
-            <button onClick={handleOpenAdLink} style={{ width: '100%', padding: '12px', backgroundColor: hasClickedOpen ? '#00cc55' : '#00f0ff', color: '#000', border: 'none', borderRadius: '10px', fontWeight: 'bold', marginBottom: '10px', cursor: 'pointer' }}>
+            <button onClick={handleOpenAdLink} style={{ width: '100%', padding: '12px', backgroundColor: hasClickedOpen ? '#00cc55' : '#00f0ff', color: '#000', border: 'none', borderRadius: '10px', fontWeight: 'bold', marginBottom: '10px', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', outline: 'none' }}>
               {hasClickedOpen ? '✓ Opened Link' : 'Open Now'}
             </button>
-            <button onClick={handleClaimAdReward} disabled={adTimer > 0 || !hasClickedOpen} style={{ width: '100%', padding: '12px', background: (adTimer > 0 || !hasClickedOpen) ? '#152338' : 'linear-gradient(135deg, #00FF66, #009933)', color: (adTimer > 0 || !hasClickedOpen) ? '#556b82' : '#000', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
+            <button onClick={handleClaimAdReward} disabled={adTimer > 0 || !hasClickedOpen} style={{ width: '100%', padding: '12px', background: (adTimer > 0 || !hasClickedOpen) ? '#152338' : 'linear-gradient(135deg, #00FF66, #009933)', color: (adTimer > 0 || !hasClickedOpen) ? '#556b82' : '#000', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', outline: 'none' }}>
               Claim +2.0 MAI
             </button>
           </div>
         </div>
       )}
 
-      {/* Navigation Bar (Untouched) */}
+      {/* Navigation Bar */}
       <div style={{ position: 'fixed', bottom: '16px', left: '50%', transform: 'translateX(-50%)', width: 'calc(100% - 32px)', maxWidth: '420px', backgroundColor: 'rgba(8, 15, 30, 0.85)', backdropFilter: 'blur(18px)', display: 'flex', justifyContent: 'space-around', alignItems: 'center', padding: '8px 4px', borderRadius: '24px', border: '1px solid rgba(255, 153, 0, 0.3)', zIndex: 1000 }}>
         {[
           { id: 'home', label: 'Home' },
@@ -843,7 +861,7 @@ function MainApp() {
         ].map((tab) => {
           const isActive = activeTab === tab.id && currentView === 'main';
           return (
-            <button key={tab.id} onClick={() => { setActiveTab(tab.id); setCurrentView('main'); }} style={{ background: isActive ? 'rgba(255, 153, 0, 0.15)' : 'transparent', border: isActive ? '1px solid rgba(255, 153, 0, 0.5)' : '1px solid transparent', borderRadius: '16px', padding: '8px 0', color: isActive ? '#ff9900' : '#80a0c0', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', flex: 1 }}>
+            <button key={tab.id} onClick={() => { setActiveTab(tab.id); setCurrentView('main'); }} style={{ background: isActive ? 'rgba(255, 153, 0, 0.15)' : 'transparent', border: isActive ? '1px solid rgba(255, 153, 0, 0.5)' : '1px solid transparent', borderRadius: '16px', padding: '8px 0', color: isActive ? '#ff9900' : '#80a0c0', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', flex: 1, WebkitTapHighlightColor: 'transparent', outline: 'none' }}>
               <NavIcon id={tab.id} isActive={isActive} />
               <span style={{ fontSize: '11px', fontWeight: isActive ? '800' : '500' }}>{tab.label}</span>
             </button>
