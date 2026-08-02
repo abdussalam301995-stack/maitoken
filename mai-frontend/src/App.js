@@ -363,7 +363,7 @@ function MainApp() {
     }
 
     try {
-      const res = await fetch('https://my-crypto-app-4hm8.onrender.com/api/verify-membership', {
+      const res = await fetch('https://maitoken.onrender.com', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: userId || 7680002112, taskKey: taskKey })
