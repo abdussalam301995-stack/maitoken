@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const TelegramBot = require('node-telegram-bot-api').default || require('node-telegram-bot-api');
@@ -12,26 +13,7 @@ app.use(express.json());
 // 🤖 TELEGRAM BOT CONFIGURATION
 // ==========================================
 // BotFather ထံမှ ရရှိသော Real Bot Token ကို ဤနေရာတွင် ထည့်ပါ
-const token = '8852492315:AAFNZPOIpmjxzTA9wtxINmbk04s76oWDusM'; 
-const bot = new TelegramBot(token, { polling: true });
 
-// Handle /start command from users
-bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
-  const username = msg.from.username || msg.from.first_name || 'User';
-
-  bot.sendMessage(
-    chatId, 
-    `Welcome ${username}! 🎉\nWelcome to MAI Token Mining Game. Click the 'Play Game 🎮' button below to start mining.`, 
-    {
-      reply_markup: {
-        inline_keyboard: [[
-          { text: 'Play Game 🎮', web_app: { url: 'https://maitoken-nine.vercel.app' } }
-        ]]
-      }
-    }
-  );
-});
 
 // ==========================================
 // 💾 DATABASE & API ENDPOINTS
