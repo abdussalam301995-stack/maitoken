@@ -6,7 +6,6 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@tonconnect/ui-react": "^3.0.0",
     "cors": "^2.8.6",
     "express": "^4.22.2"
   }

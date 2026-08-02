@@ -697,7 +697,7 @@ function MainApp() {
 // Wrap root component with TonConnectUIProvider
 export default function App() {
   return (
-    <TonConnectUIProvider manifestUrl="https://maitoken-nine.vercel.app/tonconnect-manifest.json">
+    <TonConnectUIProvider manifestUrl="https://maitoken-nine.vercel.app/tonconnect.manifest.json">
       <MainApp />
     </TonConnectUIProvider>
   );
