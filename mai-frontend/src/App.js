@@ -63,6 +63,9 @@ function MainApp() {
 
   const [currentView, setCurrentView] = useState('main');
   const [selectedLevel, setSelectedLevel] = useState(null);
+  
+  // Custom State for Logo Click Animation
+  const [isLogoClicked, setIsLogoClicked] = useState(false);
 
   // TON Connect Official Hooks
   const userFriendlyAddress = useTonAddress();
@@ -101,6 +104,11 @@ function MainApp() {
   const [adTimer, setAdTimer] = useState(10);
   const [hasClickedOpen, setHasClickedOpen] = useState(false);
 
+  // --- Dynamic Level Calculations ---
+  const getCurrentLevel = (bal) => Math.floor(bal / 1000);
+  const getLevelSpeed = (lvl) => lvl > 0 ? 10 + (lvl - 1) * 2 : 0;
+  const getTotalSpeed = (bal) => 5 + getLevelSpeed(getCurrentLevel(bal));
+
   // Sync wallet address to localStorage whenever connection state changes
   useEffect(() => {
     if (userFriendlyAddress) {
@@ -128,7 +136,6 @@ function MainApp() {
       setClaimTimer((prev) => {
         if (prev <= 1) {
           setCanClaim(true);
-          clearInterval(timerInterval);
           return 0;
         }
         return prev - 1;
@@ -330,13 +337,24 @@ function MainApp() {
     };
   }, [loading]);
 
+  // Main Mining Interval with Dynamic Speed
   useEffect(() => {
     if (loading) return;
     const miningInterval = setInterval(() => {
-      setBalance((prev) => prev + (5 / 86400));
+      setBalance((prev) => {
+        const speedPerSec = getTotalSpeed(prev) / 86400;
+        return prev + speedPerSec;
+      });
     }, 1000);
     return () => clearInterval(miningInterval);
   }, [loading]);
+
+  const handleLogoTouch = () => {
+    setIsLogoClicked(true);
+    // Vibrate device if supported
+    if (navigator.vibrate) navigator.vibrate(50); 
+    setTimeout(() => setIsLogoClicked(false), 300);
+  };
 
   const handleClaimBonus = () => {
     if (canClaim) {
@@ -353,15 +371,12 @@ function MainApp() {
       alert("Task already completed!");
       return;
     }
-
     const targetUrl = TASK_LINKS[taskKey] || 'https://t.me/MAICommunityChat';
-
     if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openTelegramLink) {
       window.Telegram.WebApp.openTelegramLink(targetUrl);
     } else {
       window.open(targetUrl, '_blank');
     }
-
     try {
       const res = await fetch('https://maitoken.onrender.com', {
         method: 'POST',
@@ -369,7 +384,6 @@ function MainApp() {
         body: JSON.stringify({ userId: userId || 7680002112, taskKey: taskKey })
       });
       const data = await res.json();
-
       if (data.isJoined) {
         setBalance((prev) => prev + rewardAmount);
         setCompletedTasks((prev) => ({ ...prev, [taskKey]: true }));
@@ -414,7 +428,6 @@ function MainApp() {
       alert("Please click 'Open Now' to verify engagement!");
       return;
     }
-
     try {
       const res = await fetch('https://my-crypto-app-4hm8.onrender.com/api/verify-ad', {
         method: 'POST',
@@ -422,13 +435,11 @@ function MainApp() {
         body: JSON.stringify({ watchedDuration: 10, hasClickedOpen: true })
       });
       const data = await res.json();
-
       if (data.success) {
         setBalance((prev) => prev + 2.0);
         const newCount = adCount + 1;
         setAdCount(newCount);
         setShowAdModal(false);
-
         if (newCount >= 20) {
           setAdCooldown(86400);
           alert("Success! +2.0 MAI claimed. Daily limit reached (20/20).");
@@ -447,6 +458,36 @@ function MainApp() {
     }
   };
 
+  // Safe fallback for copying text in non-secure or WebView environments
+  const handleCopyLink = () => {
+    const link = `https://t.me/maitoken_bot?start=r_${userId || '7680002112'}`;
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(link)
+        .then(() => alert("Copied!"))
+        .catch(() => fallbackCopy(link));
+    } else {
+      fallbackCopy(link);
+    }
+  };
+
+  const fallbackCopy = (text) => {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed"; 
+    textArea.style.left = "-999999px"; 
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+      document.execCommand('copy');
+      alert("Copied!");
+    } catch (err) {
+      console.error('Fallback: Oops, unable to copy', err);
+      alert("Failed to copy automatically. Please copy the link manually.");
+    }
+    document.body.removeChild(textArea);
+  };
+
   const formatTime = (seconds) => {
     const h = Math.floor(seconds / 3600).toString().padStart(2, '0');
     const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
@@ -454,9 +495,10 @@ function MainApp() {
     return `${h}:${m}:${s}`;
   };
 
+  // Generate 500 Levels
   const generateLevels = () => {
     const levels = [];
-    for (let lvl = 1; lvl <= 100; lvl++) {
+    for (let lvl = 1; lvl <= 500; lvl++) {
       levels.push({
         level: lvl,
         needHolding: lvl * 1000,
@@ -465,21 +507,14 @@ function MainApp() {
     }
     return levels;
   };
-
   const levelList = generateLevels();
 
   if (loading) {
     return (
       <div style={{ 
-        backgroundImage: "url('/space-bg.jpg')", 
-        backgroundSize: 'cover', 
-        backgroundPosition: 'center', 
-        minHeight: '100vh', 
-        display: 'flex', 
-        flexDirection: 'column', 
-        alignItems: 'center', 
-        justifyContent: 'center', 
-        color: '#fff' 
+        backgroundImage: "url('/space-bg.jpg')", backgroundSize: 'cover', backgroundPosition: 'center', 
+        minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', 
+        justifyContent: 'center', color: '#fff' 
       }}>
         <div style={{ width: '120px', height: '120px', borderRadius: '50%', border: '2px solid #00f0ff', overflow: 'hidden', boxShadow: '0 0 35px rgba(0, 240, 255, 0.8)', marginBottom: '20px' }}>
           <img src="/mai-coin.jpg" alt="MAI Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -492,16 +527,26 @@ function MainApp() {
 
   return (
     <div style={{ 
-      backgroundImage: "url('/space-bg.jpg')", 
-      backgroundSize: 'cover', 
-      backgroundPosition: 'center', 
-      backgroundAttachment: 'fixed', 
-      color: '#ffffff', 
-      minHeight: '100vh', 
-      paddingBottom: '90px', 
-      fontFamily: "'Inter', system-ui, -apple-system, sans-serif", 
-      position: 'relative' 
+      backgroundImage: "url('/space-bg.jpg')", backgroundSize: 'cover', backgroundPosition: 'center', 
+      backgroundAttachment: 'fixed', color: '#ffffff', minHeight: '100vh', paddingBottom: '90px', 
+      fontFamily: "'Inter', system-ui, -apple-system, sans-serif", position: 'relative' 
     }}>
+      
+      {/* Dynamic CSS Styles inserted directly for effects */}
+      <style>{`
+        @keyframes clickPop {
+          0% { transform: scale(1); filter: brightness(1); }
+          50% { transform: scale(0.85); filter: brightness(1.5) drop-shadow(0 0 40px #eb34ba); box-shadow: 0 0 100px rgba(235, 52, 186, 0.9); }
+          100% { transform: scale(1); filter: brightness(1); }
+        }
+        .anim-click { animation: clickPop 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
+        
+        /* Premium Custom Scrollbar for level list */
+        .premium-scroll::-webkit-scrollbar { width: 6px; }
+        .premium-scroll::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.2); border-radius: 10px; }
+        .premium-scroll::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #00f0ff, #e000ff); border-radius: 10px; }
+      `}</style>
+
       <canvas ref={canvasRef} style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 0 }} />
 
       <div style={{ position: 'relative', zIndex: 1 }}>
@@ -523,7 +568,7 @@ function MainApp() {
 
         {/* Views */}
         {currentView === 'boost' ? (
-          <div style={{ padding: '20px', maxWidth: '450px', margin: '0 auto' }}>
+          <div style={{ padding: '20px', maxWidth: '450px', margin: '0 auto', height: '80vh', display: 'flex', flexDirection: 'column' }}>
             <button 
               onClick={() => setCurrentView('main')}
               style={{ background: 'none', border: 'none', color: '#00f0ff', fontSize: '14px', cursor: 'pointer', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '5px' }}
@@ -531,47 +576,80 @@ function MainApp() {
               ⬅ Back to Home
             </button>
 
+            {/* Prominent MAI Logo Top Center */}
             <div style={{ textAlign: 'center', marginBottom: '15px' }}>
-              <img src="/mai-coin.jpg" alt="MAI Logo" style={{ width: '60px', height: '60px', borderRadius: '50%', border: '2px solid #00f0ff', boxShadow: '0 0 20px rgba(0,240,255,0.7)' }} />
+              <img src="/mai-coin.jpg" alt="MAI Logo" style={{ width: '80px', height: '80px', borderRadius: '50%', border: '3px solid #00f0ff', boxShadow: '0 0 30px rgba(0,240,255,0.9)' }} />
             </div>
 
-            <div style={{ color: '#00f0ff', fontSize: '12px', textAlign: 'center', fontWeight: 'bold', lineHeight: '1.5', marginBottom: '20px', backgroundColor: 'rgba(10, 20, 50, 0.6)', backdropFilter: 'blur(8px)', padding: '10px', borderRadius: '10px', border: '1px solid rgba(0,240,255,0.4)' }}>
-              HOLD MAI In Your Wallet to Boost Your Mining Rate. Sell MAI Your Level is down.
+            {/* Information Box */}
+            <div style={{ 
+              color: '#ffffff', fontSize: '13px', textAlign: 'center', fontWeight: '800', lineHeight: '1.6', 
+              marginBottom: '20px', backgroundColor: 'rgba(10, 20, 50, 0.8)', backdropFilter: 'blur(10px)', 
+              padding: '12px', borderRadius: '12px', border: '1px solid #ff9900', boxShadow: '0 0 15px rgba(255, 153, 0, 0.3)' 
+            }}>
+              HOLD MAI in your wallet to boost your mining rate.<br/>
+              <span style={{color: '#ff4444'}}>If you sell MAI, your level is DOWN.</span>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-              {levelList.map((item) => (
-                <div key={item.level} style={{ backgroundColor: 'rgba(10, 20, 45, 0.75)', backdropFilter: 'blur(8px)', border: '1px solid rgba(0, 240, 255, 0.3)', borderRadius: '14px', padding: '12px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#00f0ff' }}>LVL {item.level}</span>
-                    <img src="/mai-coin.jpg" alt="Logo" style={{ width: '18px', height: '18px', borderRadius: '50%' }} />
+            {/* 500 Levels Grid (Scrollable) */}
+            <div className="premium-scroll" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', overflowY: 'auto', paddingRight: '5px', paddingBottom: '20px', flex: 1 }}>
+              {levelList.map((item) => {
+                const isUnlocked = balance >= item.needHolding;
+                return (
+                  <div key={item.level} style={{ backgroundColor: isUnlocked ? 'rgba(0, 40, 20, 0.75)' : 'rgba(10, 20, 45, 0.75)', backdropFilter: 'blur(8px)', border: isUnlocked ? '1px solid rgba(0, 255, 102, 0.6)' : '1px solid rgba(0, 240, 255, 0.3)', borderRadius: '14px', padding: '16px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ fontSize: '16px', fontWeight: '900', color: isUnlocked ? '#00FF66' : '#00f0ff', marginBottom: '4px' }}>LVL {item.level}</div>
+                    <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#fff', marginBottom: '8px' }}>MAI LVL {item.level}</div>
+                    <div style={{ fontSize: '13px', color: '#ff9900', fontWeight: 'bold', marginBottom: '15px' }}>Speed {item.miningSpeed}/Day</div>
+                    
+                    <button 
+                      onClick={() => setSelectedLevel(item)} 
+                      style={{ 
+                        width: '90%', padding: '10px', 
+                        background: isUnlocked ? 'linear-gradient(135deg, #00FF66, #009933)' : 'linear-gradient(135deg, #152540, #0a1220)', 
+                        color: isUnlocked ? '#000' : '#80a0c0', 
+                        border: isUnlocked ? 'none' : '1px solid rgba(0,240,255,0.4)', 
+                        borderRadius: '10px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer',
+                        boxShadow: isUnlocked ? '0 0 15px rgba(0, 255, 102, 0.4)' : 'none'
+                      }}>
+                      {isUnlocked ? 'Unlock' : 'Lock'}
+                    </button>
                   </div>
-                  <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#fff', marginBottom: '4px' }}>MAI LVL {item.level}</div>
-                  <div style={{ fontSize: '11px', color: '#00FF66', marginBottom: '12px' }}>Speed {item.miningSpeed}/Day</div>
-                  <button onClick={() => setSelectedLevel(item)} style={{ width: '100%', padding: '8px', background: 'linear-gradient(135deg, #00f0ff, #0066ff)', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer' }}>Lock</button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ) : (
           <>
             {activeTab === 'home' && (
               <div style={{ padding: '30px 20px', textAlign: 'center' }}>
-                <div style={{ color: '#00f0ff', fontSize: '13px', fontWeight: 'bold', letterSpacing: '2px', marginBottom: '15px' }}>24H SPEED: 5.0000 MAI</div>
+                <div style={{ color: '#00f0ff', fontSize: '14px', fontWeight: '900', letterSpacing: '2px', marginBottom: '15px', textShadow: '0 0 8px #00f0ff' }}>
+                  24H SPEED: {getTotalSpeed(balance).toFixed(4)} MAI
+                </div>
                 
-                <div style={{ width: '240px', height: '240px', borderRadius: '50%', margin: '15px auto 20px auto', padding: '6px', background: 'linear-gradient(145deg, #00f0ff, #e000ff)', boxShadow: '0 0 60px rgba(0, 240, 255, 0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {/* Clickable 3D Logo */}
+                <div 
+                  onClick={handleLogoTouch}
+                  className={isLogoClicked ? "anim-click" : ""}
+                  style={{ 
+                    width: '240px', height: '240px', borderRadius: '50%', margin: '15px auto 20px auto', 
+                    padding: '6px', background: 'linear-gradient(145deg, #00f0ff, #e000ff)', 
+                    boxShadow: '0 0 60px rgba(0, 240, 255, 0.8)', display: 'flex', alignItems: 'center', 
+                    justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s'
+                  }}>
                   <div style={{ width: '100%', height: '100%', borderRadius: '50%', overflow: 'hidden', border: '3px solid #00f0ff' }}>
                     <img src="/mai-coin.jpg" alt="MAI Coin" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   </div>
                 </div>
 
                 <div style={{ color: '#d0e8ff', fontSize: '14px', marginBottom: '30px' }}>
-                  Auto Mining Speed: <span style={{ color: '#00FF66', fontWeight: 'bold' }}>+0.0000578 / sec</span>
+                  Auto Mining Speed: <span style={{ color: '#00FF66', fontWeight: 'bold' }}>+{(getTotalSpeed(balance) / 86400).toFixed(8)} / sec</span>
                 </div>
 
                 <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', width: '95%', margin: '0 auto', alignItems: 'stretch' }}>
                   {canClaim ? (
-                    <button onClick={handleClaimBonus} style={{ flex: 1, padding: '16px 8px', background: 'linear-gradient(135deg, #00FF66, #009933)', color: '#000', border: 'none', borderRadius: '16px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer' }}>CLAIM BONUS (+1.66 MAI)</button>
+                    <button onClick={handleClaimBonus} style={{ flex: 1, padding: '16px 8px', background: 'linear-gradient(135deg, #00FF66, #009933)', color: '#000', border: 'none', borderRadius: '16px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer', boxShadow: '0 0 20px rgba(0,255,102,0.4)' }}>
+                      CLAIM BONUS (+1.66 MAI)
+                    </button>
                   ) : (
                     <div style={{ flex: 1, padding: '10px 8px', backgroundColor: 'rgba(10, 20, 45, 0.85)', border: '1px solid rgba(0, 240, 255, 0.5)', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
                       <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: '700' }}>FARMING TIME</div>
@@ -579,7 +657,9 @@ function MainApp() {
                     </div>
                   )}
 
-                  <button onClick={() => setCurrentView('boost')} style={{ flex: 1, padding: '16px 8px', background: 'linear-gradient(135deg, #ff9900, #ff5500)', color: '#fff', border: 'none', borderRadius: '16px', fontWeight: '800', fontSize: '15px', cursor: 'pointer' }}>🚀 BOOST</button>
+                  <button onClick={() => setCurrentView('boost')} style={{ flex: 1, padding: '16px 8px', background: 'linear-gradient(135deg, #ff9900, #ff5500)', color: '#fff', border: 'none', borderRadius: '16px', fontWeight: '900', fontSize: '15px', cursor: 'pointer', boxShadow: '0 0 20px rgba(255, 153, 0, 0.4)' }}>
+                    🚀 BOOST
+                  </button>
                 </div>
               </div>
             )}
@@ -589,10 +669,9 @@ function MainApp() {
                 <h2 style={{ color: '#00f0ff', marginTop: 0 }}>Task Center</h2>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px', backgroundColor: 'rgba(10, 20, 45, 0.7)', padding: '4px', borderRadius: '12px', border: '1px solid rgba(0,240,255,0.3)' }}>
                   {['daily', 'partner', 'exclusive'].map((cat) => (
-                    <button key={cat} onClick={() => setTaskCategory(cat)} style={{ width: '32%', padding: '10px 0', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '12px', backgroundColor: taskCategory === cat ? '#00f0ff' : 'transparent', color: taskCategory === cat ? '#000' : '#80d4ff', cursor: 'pointer' }}>{cat}</button>
+                    <button key={cat} onClick={() => setTaskCategory(cat)} style={{ width: '32%', padding: '10px 0', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '12px', backgroundColor: taskCategory === cat ? '#00f0ff' : 'transparent', color: taskCategory === cat ? '#000' : '#80d4ff', cursor: 'pointer', textTransform: 'capitalize' }}>{cat}</button>
                   ))}
                 </div>
-
                 {taskCategory === 'daily' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                     <div style={{ backgroundColor: 'rgba(15, 25, 55, 0.75)', padding: '16px', borderRadius: '16px', border: '1px solid #00f0ff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -602,7 +681,6 @@ function MainApp() {
                       </div>
                       <button onClick={handleStartAd} disabled={adCooldown > 0 || adCount >= 20} style={{ background: adCooldown > 0 ? '#102035' : 'linear-gradient(135deg, #00f0ff, #0066ff)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>{adCooldown > 0 ? formatTime(adCooldown) : 'Watch Ad'}</button>
                     </div>
-
                     <div style={{ backgroundColor: 'rgba(15, 25, 55, 0.75)', padding: '16px', borderRadius: '16px', border: '1px solid rgba(0,240,255,0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
                         <h4 style={{ margin: '0 0 4px 0', fontSize: '14px' }}>Join MAI News Channel</h4>
@@ -622,7 +700,8 @@ function MainApp() {
                   <div style={{ backgroundColor: 'rgba(0,0,0,0.4)', padding: '10px', borderRadius: '8px', border: '1px solid #00f0ff', fontSize: '12px', color: '#00f0ff', wordBreak: 'break-all', marginBottom: '15px' }}>
                     https://t.me/maitoken_bot?start=r_{userId || '7680002112'}
                   </div>
-                  <button onClick={() => { navigator.clipboard.writeText(`https://t.me/maitoken_bot?start=r_${userId || '7680002112'}`); alert("Copied!"); }} style={{ width: '100%', padding: '12px', background: 'linear-gradient(135deg, #00f0ff, #0066ff)', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}>Copy Invite Link</button>
+                  {/* Safely implemented fallback copy logic here */}
+                  <button onClick={handleCopyLink} style={{ width: '100%', padding: '12px', background: 'linear-gradient(135deg, #00f0ff, #0066ff)', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}>Copy Invite Link</button>
                 </div>
               </div>
             )}
@@ -632,12 +711,9 @@ function MainApp() {
                 <h2 style={{ color: '#00f0ff', marginTop: 0 }}>User Profile</h2>
                 <div style={{ backgroundColor: 'rgba(15, 25, 55, 0.75)', padding: '20px', borderRadius: '16px', border: '1px solid #00f0ff', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px' }}>
                   <h3 style={{ color: '#00f0ff', margin: 0, fontSize: '16px' }}>TON Wallet Connection</h3>
-                  
-                  {/* Official TON Connect Button Integration */}
                   <div style={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
                     <TonConnectButton />
                   </div>
-
                   {userFriendlyAddress && (
                     <div style={{ fontSize: '12px', color: '#00FF66', wordBreak: 'break-all', marginTop: '5px', fontWeight: '600' }}>
                       Connected: {userFriendlyAddress.substring(0, 6)}...{userFriendlyAddress.substring(userFriendlyAddress.length - 4)}
@@ -648,10 +724,95 @@ function MainApp() {
             )}
           </>
         )}
-
       </div>
 
-      {/* Ad Modal */}
+      {/* --- LEVEL DETAILS MODAL (Pop-up Page) --- */}
+      {selectedLevel && (() => {
+        const shortfall = selectedLevel.needHolding - balance;
+        const isUnlocked = shortfall <= 0;
+        
+        // Modal Row Styling Template
+        const rowStyle = {
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', 
+          backgroundColor: 'rgba(15, 25, 55, 0.9)', padding: '14px 16px', 
+          borderRadius: '12px', border: '1px solid rgba(0,240,255,0.2)', marginBottom: '10px'
+        };
+
+        return (
+          <div style={{ 
+            position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', 
+            backgroundColor: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)', 
+            zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center' 
+          }}>
+            <div style={{ 
+              width: '90%', maxWidth: '380px', backgroundColor: '#0a1428', 
+              borderRadius: '24px', padding: '25px 20px', border: '2px solid #00f0ff', 
+              boxShadow: '0 0 40px rgba(0,240,255,0.3)' 
+            }}>
+              
+              {/* Prominent Level Box */}
+              <div style={{ textAlign: 'center', marginBottom: '25px' }}>
+                <div style={{ display: 'inline-block', backgroundColor: 'rgba(0, 240, 255, 0.1)', padding: '12px 30px', borderRadius: '16px', border: '2px solid #00f0ff', boxShadow: '0 0 20px rgba(0, 240, 255, 0.5)' }}>
+                  <h2 style={{ margin: 0, color: '#00f0ff', fontSize: '28px', fontWeight: '900' }}>LVL {selectedLevel.level}</h2>
+                </div>
+              </div>
+
+              {/* 4 Details Rows */}
+              <div style={rowStyle}>
+                <span style={{ fontSize: '13px', color: '#d0e8ff', fontWeight: '600' }}>Mining Speed</span>
+                <span style={{ fontSize: '14px', color: '#00FF66', fontWeight: 'bold' }}>{selectedLevel.miningSpeed} MAI per Day</span>
+              </div>
+
+              <div style={rowStyle}>
+                <span style={{ fontSize: '13px', color: '#d0e8ff', fontWeight: '600' }}>Need-Holding unlock level</span>
+                <span style={{ fontSize: '14px', color: '#ff9900', fontWeight: 'bold' }}>{selectedLevel.needHolding} MAI</span>
+              </div>
+
+              <div style={rowStyle}>
+                <span style={{ fontSize: '16px', color: '#fff', fontWeight: '900' }}>Your Holding</span>
+                <span style={{ fontSize: '18px', color: '#00f0ff', fontWeight: '900' }}>{balance.toFixed(4)} MAI</span>
+              </div>
+
+              <div style={rowStyle}>
+                <span style={{ fontSize: '13px', color: '#d0e8ff', fontWeight: '600' }}>Need to unlock</span>
+                <span style={{ fontSize: '14px', fontWeight: 'bold', color: isUnlocked ? '#00FF66' : '#ff4444' }}>
+                  {isUnlocked ? '0 MAI' : `${shortfall.toFixed(4)} MAI`}
+                </span>
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ marginTop: '25px', display: 'flex', gap: '15px', justifyContent: 'center' }}>
+                {isUnlocked ? (
+                  <button 
+                    onClick={() => setSelectedLevel(null)} 
+                    style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, #00FF66, #009933)', color: '#000', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '15px', cursor: 'pointer', boxShadow: '0 0 20px rgba(0, 255, 102, 0.4)' }}
+                  >
+                    CLOSE
+                  </button>
+                ) : (
+                  <>
+                    <button 
+                      onClick={() => { alert("Redirecting to Buy MAI..."); setSelectedLevel(null); }} 
+                      style={{ flex: 1, padding: '14px', background: 'linear-gradient(135deg, #00f0ff, #0066ff)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '900', fontSize: '15px', cursor: 'pointer', boxShadow: '0 0 15px rgba(0, 240, 255, 0.4)' }}
+                    >
+                      BUY
+                    </button>
+                    <button 
+                      onClick={() => setSelectedLevel(null)} 
+                      style={{ flex: 1, padding: '14px', backgroundColor: 'rgba(255, 68, 68, 0.1)', color: '#ff4444', border: '1px solid #ff4444', borderRadius: '12px', fontWeight: '900', fontSize: '15px', cursor: 'pointer' }}
+                    >
+                      CANCEL
+                    </button>
+                  </>
+                )}
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Ad Modal (Untouched) */}
       {showAdModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000 }}>
           <div style={{ backgroundColor: '#0a1428', border: '1px solid #00f0ff', borderRadius: '20px', padding: '24px', width: '85%', maxWidth: '340px', textAlign: 'center' }}>
@@ -672,7 +833,7 @@ function MainApp() {
         </div>
       )}
 
-      {/* Navigation Bar */}
+      {/* Navigation Bar (Untouched) */}
       <div style={{ position: 'fixed', bottom: '16px', left: '50%', transform: 'translateX(-50%)', width: 'calc(100% - 32px)', maxWidth: '420px', backgroundColor: 'rgba(8, 15, 30, 0.85)', backdropFilter: 'blur(18px)', display: 'flex', justifyContent: 'space-around', alignItems: 'center', padding: '8px 4px', borderRadius: '24px', border: '1px solid rgba(255, 153, 0, 0.3)', zIndex: 1000 }}>
         {[
           { id: 'home', label: 'Home' },
@@ -694,7 +855,6 @@ function MainApp() {
   );
 }
 
-// Wrap root component with TonConnectUIProvider
 export default function App() {
   return (
     <TonConnectUIProvider manifestUrl="https://maitoken-nine.vercel.app/tonconnect.manifest.json">
