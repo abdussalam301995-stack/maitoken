@@ -5,6 +5,7 @@ import {
   useTonAddress, 
   useTonConnectUI 
 } from '@tonconnect/ui-react';
+import Tasks from './Tasks';
 
 // Telegram Channel and Group Links
 const TASK_LINKS = {
@@ -696,36 +697,9 @@ useEffect(() => {
               </div>
             )}
 
-            {/* Task Tab */}
             {activeTab === 'task' && (
-              <div style={{ padding: '20px', maxWidth: '400px', margin: '0 auto' }}>
-                <h2 style={{ color: '#00f0ff', marginTop: 0 }}>Task Center</h2>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px', backgroundColor: 'rgba(10, 20, 45, 0.7)', padding: '4px', borderRadius: '12px', border: '1px solid rgba(0,240,255,0.3)' }}>
-                  {['daily', 'partner', 'exclusive'].map((cat) => (
-                    <button key={cat} onClick={() => setTaskCategory(cat)} style={{ width: '32%', padding: '10px 0', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '12px', backgroundColor: taskCategory === cat ? '#00f0ff' : 'transparent', color: taskCategory === cat ? '#000' : '#80d4ff', cursor: 'pointer', textTransform: 'capitalize', WebkitTapHighlightColor: 'transparent', outline: 'none' }}>{cat}</button>
-                  ))}
-                </div>
-                {taskCategory === 'daily' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                    <div style={{ backgroundColor: 'rgba(15, 25, 55, 0.75)', padding: '16px', borderRadius: '16px', border: '1px solid #00f0ff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <h4 style={{ margin: '0 0 4px 0', fontSize: '14px' }}>Watch Sponsored Ad</h4>
-                        <p style={{ margin: 0, fontSize: '12px', color: '#00f0ff' }}>+2.0000 MAI ({adCount}/20)</p>
-                      </div>
-                      <button onClick={handleStartAd} disabled={adCooldown > 0 || adCount >= 20} style={{ background: adCooldown > 0 ? '#102035' : 'linear-gradient(135deg, #00f0ff, #0066ff)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', outline: 'none' }}>{adCooldown > 0 ? formatTime(adCooldown) : 'Watch Ad'}</button>
-                    </div>
-                    <div style={{ backgroundColor: 'rgba(15, 25, 55, 0.75)', padding: '16px', borderRadius: '16px', border: '1px solid rgba(0,240,255,0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <h4 style={{ margin: '0 0 4px 0', fontSize: '14px' }}>Join MAI News Channel</h4>
-                        <p style={{ margin: 0, fontSize: '12px', color: '#00f0ff' }}>+5.0000 MAI</p>
-                      </div>
-                      <button onClick={() => handleVerifyTask('newsChannel', 5.0)} disabled={completedTasks['newsChannel']} style={{ background: completedTasks['newsChannel'] ? '#00cc55' : 'linear-gradient(135deg, #00f0ff, #0066ff)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', outline: 'none' }}>{completedTasks['newsChannel'] ? '✓ Done' : 'Join & Verify'}</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
+  <Tasks />
+)}
             {/* Friends Tab - Safely restored fallback wrapper */}
             {activeTab === 'friends' && (
               <div style={{ padding: '25px 20px', textAlign: 'center', maxWidth: '400px', margin: '0 auto' }}>
