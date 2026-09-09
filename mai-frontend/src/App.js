@@ -478,7 +478,6 @@ useEffect(() => {
     }
   };
 
-  // Safe fallback for copying text in non-secure or WebView environments
   const handleCopyLink = () => {
     if (!userId) {
       alert("Waiting for user ID to load...");
@@ -499,7 +498,6 @@ useEffect(() => {
   const fallbackCopy = (text) => {
     const textArea = document.createElement("textarea");
     textArea.value = text;
-    // Avoid scrolling to bottom
     textArea.style.position = "fixed"; 
     textArea.style.top = "0";
     textArea.style.left = "0";
@@ -524,7 +522,6 @@ useEffect(() => {
     return `${h}:${m}:${s}`;
   };
 
-  // Generate 500 Levels
   const generateLevels = () => {
     const levels = [];
     for (let lvl = 1; lvl <= 500; lvl++) {
@@ -545,8 +542,9 @@ useEffect(() => {
         minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', 
         justifyContent: 'center', color: '#fff' 
       }}>
-        <div style={{ width: '120px', height: '120px', borderRadius: '50%', border: '2px solid #00f0ff', overflow: 'hidden', boxShadow: '0 0 35px rgba(0, 240, 255, 0.8)', marginBottom: '20px' }}>
-          <img src="/mai-coin.jpg" alt="MAI Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        {/* Changed Loading Logo Border to Gold */}
+        <div style={{ width: '120px', height: '120px', borderRadius: '50%', border: '2px solid #ffaa00', overflow: 'hidden', boxShadow: '0 0 35px rgba(255, 170, 0, 0.8)', marginBottom: '20px' }}>
+          <img src="/1000043312.png" alt="MAI Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         </div>
         <h2 style={{ color: '#00f0ff', letterSpacing: '3px', margin: '0 0 10px 0', textShadow: '0 0 12px #00f0ff' }}>MAI NETWORK</h2>
         <p style={{ color: '#ffb3ec', fontSize: '14px', fontWeight: 'bold' }}>Loading Cosmic World... {progress}%</p>
@@ -561,16 +559,15 @@ useEffect(() => {
       fontFamily: "'Inter', system-ui, -apple-system, sans-serif", position: 'relative' 
     }}>
       
-      {/* Dynamic CSS Styles inserted directly for effects */}
+      {/* Updated CSS for Click Animation to match the gold logo */}
       <style>{`
         @keyframes clickPop {
           0% { transform: scale(1); filter: brightness(1); }
-          50% { transform: scale(0.85); filter: brightness(1.5) drop-shadow(0 0 40px #eb34ba); box-shadow: 0 0 100px rgba(235, 52, 186, 0.9); }
+          50% { transform: scale(0.85); filter: brightness(1.2) drop-shadow(0 0 40px #ffaa00); box-shadow: 0 0 100px rgba(255, 170, 0, 0.9); }
           100% { transform: scale(1); filter: brightness(1); }
         }
         .anim-click { animation: clickPop 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
         
-        /* Premium Custom Scrollbar for level list */
         .premium-scroll::-webkit-scrollbar { width: 6px; }
         .premium-scroll::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.2); border-radius: 10px; }
         .premium-scroll::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #00f0ff, #e000ff); border-radius: 10px; }
@@ -588,8 +585,9 @@ useEffect(() => {
           </div>
           
           <div style={{ backgroundColor: 'rgba(10, 20, 45, 0.7)', padding: '6px 14px 6px 8px', borderRadius: '25px', border: '1px solid rgba(0, 240, 255, 0.6)', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 0 20px rgba(0,240,255,0.3)' }}>
-            <div style={{ width: '26px', height: '26px', borderRadius: '50%', overflow: 'hidden', border: '1px solid #00f0ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <img src="/mai-coin.jpg" alt="Coin" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            {/* Changed Header Mini Logo */}
+            <div style={{ width: '26px', height: '26px', borderRadius: '50%', overflow: 'hidden', border: '1px solid #ffaa00', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <img src="/1000043312.png" alt="Coin" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             </div>
             <span style={{ fontWeight: 'bold', color: '#00f0ff', fontSize: '15px' }}>{balance.toFixed(4)}</span>
           </div>
@@ -605,12 +603,11 @@ useEffect(() => {
               ⬅ Back to Home
             </button>
 
-            {/* Prominent MAI Logo Top Center */}
+            {/* Changed Boost Page Logo */}
             <div style={{ textAlign: 'center', marginBottom: '15px' }}>
-              <img src="/mai-coin.jpg" alt="MAI Logo" style={{ width: '80px', height: '80px', borderRadius: '50%', border: '3px solid #00f0ff', boxShadow: '0 0 30px rgba(0,240,255,0.9)' }} />
+              <img src="/1000043312.png" alt="MAI Logo" style={{ width: '80px', height: '80px', borderRadius: '50%', border: '3px solid #ffaa00', boxShadow: '0 0 30px rgba(255, 170, 0, 0.8)' }} />
             </div>
 
-            {/* Information Box */}
             <div style={{ 
               color: '#ffffff', fontSize: '13px', textAlign: 'center', fontWeight: '800', lineHeight: '1.6', 
               marginBottom: '20px', backgroundColor: 'rgba(10, 20, 50, 0.8)', backdropFilter: 'blur(10px)', 
@@ -620,7 +617,6 @@ useEffect(() => {
               <span style={{color: '#ff4444'}}>If you sell MAI, your level is DOWN.</span>
             </div>
 
-            {/* 500 Levels Grid (Scrollable) */}
             <div className="premium-scroll" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', overflowY: 'auto', paddingRight: '5px', paddingBottom: '20px', flex: 1 }}>
               {levelList.map((item) => {
                 const isUnlocked = balance >= item.needHolding;
@@ -656,21 +652,21 @@ useEffect(() => {
                   24H SPEED: {getTotalSpeed(balance).toFixed(4)} MAI
                 </div>
                 
-                {/* Clickable 3D Logo */}
+                {/* Changed Main Clickable 3D Logo to match Gold Theme */}
                 <div 
                   onClick={handleLogoTouch}
                   className={isLogoClicked ? "anim-click" : ""}
                   style={{ 
                     width: '240px', height: '240px', borderRadius: '50%', margin: '15px auto 20px auto', 
-                    padding: '6px', background: 'linear-gradient(145deg, #00f0ff, #e000ff)', 
-                    boxShadow: '0 0 60px rgba(0, 240, 255, 0.8)', display: 'flex', alignItems: 'center', 
+                    padding: '6px', background: 'linear-gradient(145deg, #ffd700, #ffaa00)', 
+                    boxShadow: '0 0 60px rgba(255, 170, 0, 0.6)', display: 'flex', alignItems: 'center', 
                     justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s',
                     WebkitTapHighlightColor: 'transparent', 
                     outline: 'none', 
                     userSelect: 'none' 
                   }}>
-                  <div style={{ width: '100%', height: '100%', borderRadius: '50%', overflow: 'hidden', border: '3px solid #00f0ff' }}>
-                    <img src="/mai-coin.jpg" alt="MAI Coin" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <div style={{ width: '100%', height: '100%', borderRadius: '50%', overflow: 'hidden', border: '3px solid #ffaa00' }}>
+                    <img src="/1000043312.png" alt="MAI Coin" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   </div>
                 </div>
 
@@ -698,9 +694,9 @@ useEffect(() => {
             )}
 
             {activeTab === 'task' && (
-  <Tasks />
-)}
-            {/* Friends Tab - Safely restored fallback wrapper */}
+              <Tasks />
+            )}
+            
             {activeTab === 'friends' && (
               <div style={{ padding: '25px 20px', textAlign: 'center', maxWidth: '400px', margin: '0 auto' }}>
                 <h2 style={{ color: '#00f0ff', marginTop: 0 }}>Invite Friends</h2>
@@ -738,7 +734,6 @@ useEffect(() => {
         )}
       </div>
 
-      {/* --- LEVEL DETAILS MODAL (Pop-up Page) --- */}
       {selectedLevel && (() => {
         const shortfall = selectedLevel.needHolding - balance;
         const isUnlocked = shortfall <= 0;
