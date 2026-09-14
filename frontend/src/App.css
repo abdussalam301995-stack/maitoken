@@ -1377,8 +1377,8 @@ a {
 
   place-items: center;
 
-  width: 188px;
-  height: 188px;
+  width: 250px;
+  height: 250px;
 
   padding: 0;
 
@@ -1518,8 +1518,8 @@ a {
 
 
 .mainCoinLogo {
-  width: 100px !important;
-  height: 100px !important;
+  width: 145px !important;
+  height: 145px !important;
 
   filter:
     drop-shadow(
@@ -2020,14 +2020,14 @@ a {
 
 
   .mainCoin {
-    width: 174px;
-    height: 174px;
+    width: 250px;
+    height: 250px;
   }
 
 
   .mainCoinLogo {
-    width: 91px !important;
-    height: 91px !important;
+    width: 145px !important;
+    height: 145px !important;
   }
 
 
