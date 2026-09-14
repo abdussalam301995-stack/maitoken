@@ -1228,3 +1228,14 @@
     animation-iteration-count: 1 !important;
   }
 }
+
+/* TEMP TEST - FORCE MOBILE COIN SIZE */
+.hero-coin-button {
+    width: 300px !important;
+    height: 300px !important;
+}
+
+.coin-body img {
+    width: 95% !important;
+    height: 95% !important;
+}
