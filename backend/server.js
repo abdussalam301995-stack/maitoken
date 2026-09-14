@@ -2637,7 +2637,13 @@ async function initDb() {
     ALTER TABLE transactions
       ALTER COLUMN user_id DROP NOT NULL;
   `);
+await pool.query(`
+  ALTER TABLE transactions
+  ADD COLUMN IF NOT EXISTS transaction_type TEXT;
 
+  ALTER TABLE transactions
+  ALTER COLUMN transaction_type DROP NOT NULL;
+`);
 
 /* =========================================================
    DAILY TASK PROGRESS
