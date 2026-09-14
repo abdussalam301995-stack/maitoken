@@ -234,7 +234,10 @@ a {
       34px +
       env(safe-area-inset-bottom)
     );
-
+    background-image: url('/mai-cosmic-background.jpg');
+     background-size: cover;
+     background-position: center center;
+   background-repeat: no-repeat;
   overflow: hidden;
 }
 
