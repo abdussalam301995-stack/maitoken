@@ -2325,9 +2325,515 @@ function playRewardSound(
    ICON
    ========================================================= */
 
-function Icon({
-  name
-}) {
+function Icon({ name }) {
+  const icons = {
+    home: (
+      <>
+        <path
+          d="M3.5 11.2 12 4l8.5 7.2"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M5.5 10.2V20h13v-9.8M9.5 20v-5.5h5V20"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </>
+    ),
+
+    task: (
+      <>
+        <rect
+          x="5"
+          y="4"
+          width="14"
+          height="16"
+          rx="2.5"
+          stroke="currentColor"
+          strokeWidth="1.6"
+        />
+        <path
+          d="M8.5 9.5 10 11l2.5-3M8.5 15h7"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </>
+    ),
+
+    friends: (
+      <>
+        <circle
+          cx="9"
+          cy="9"
+          r="3"
+          stroke="currentColor"
+          strokeWidth="1.6"
+        />
+        <path
+          d="M3.8 19c.5-3.2 2.4-5 5.2-5s4.7 1.8 5.2 5"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+        />
+        <circle
+          cx="16.5"
+          cy="9.5"
+          r="2.2"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          opacity="0.7"
+        />
+        <path
+          d="M15.5 14.3c2.7-.2 4.3 1.3 4.7 3.8"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          opacity="0.7"
+        />
+      </>
+    ),
+
+    profile: (
+      <>
+        <circle
+          cx="12"
+          cy="8"
+          r="3.5"
+          stroke="currentColor"
+          strokeWidth="1.7"
+        />
+        <path
+          d="M5.5 20c.5-4 2.8-6.2 6.5-6.2s6 2.2 6.5 6.2"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+        />
+      </>
+    ),
+
+    gift: (
+      <>
+        <rect
+          x="4"
+          y="9"
+          width="16"
+          height="11"
+          rx="2"
+          stroke="currentColor"
+          strokeWidth="1.6"
+        />
+        <path
+          d="M3.5 9h17V6.5h-17V9ZM12 6.5V20"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M12 6.5c-1.2-3.5-5.2-4.1-5.2-1.3 0 1.5 1.6 1.8 5.2 1.3ZM12 6.5c1.2-3.5 5.2-4.1 5.2-1.3 0 1.5-1.6 1.8-5.2 1.3Z"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+        />
+      </>
+    ),
+
+    rocket: (
+      <>
+        <path
+          d="M14.2 4.3c2.1-1.2 4.1-1.3 5.5-1.1.2 1.5.1 3.5-1.1 5.6l-6.3 6.3-3.4-3.4 5.3-7.4Z"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle
+          cx="15.8"
+          cy="7.2"
+          r="1.5"
+          stroke="currentColor"
+          strokeWidth="1.4"
+        />
+        <path
+          d="m9.2 10.7-3.8.8-2.2 2.2 5.1.5M13 14.3l-.7 4-2.2 2.2-.6-5.2M6 18l-2 2"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </>
+    ),
+
+    wallet: (
+      <>
+        <rect
+          x="3.5"
+          y="6"
+          width="17"
+          height="13"
+          rx="3"
+          stroke="currentColor"
+          strokeWidth="1.7"
+        />
+        <path
+          d="M4.5 8.5h12"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+        <path
+          d="M15 11.5h5.5v4H15a2 2 0 0 1 0-4Z"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+        />
+        <circle cx="16.5" cy="13.5" r=".7" fill="currentColor" />
+      </>
+    ),
+
+    bolt: (
+      <>
+        <path
+          d="M13.2 2.5L5.8 13h5.1l-.7 8.5L18.3 10h-5.2l.1-7.5Z"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M16.8 4.8l1.2-1.2M19.2 7.2h1.7M5.2 17.3 4 18.5"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+          opacity="0.65"
+        />
+      </>
+    ),
+
+    clock: (
+      <>
+        <circle
+          cx="12"
+          cy="12"
+          r="8.5"
+          stroke="currentColor"
+          strokeWidth="1.7"
+        />
+        <path
+          d="M12 7.5V12L15.2 14"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M8 2.8H16"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          opacity="0.65"
+        />
+      </>
+    ),
+
+    shield: (
+      <>
+        <path
+          d="M12 2.8L19 5.6V10.8C19 15.4 16.2 19.1 12 21.2C7.8 19.1 5 15.4 5 10.8V5.6L12 2.8Z"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M8.8 11.8L11 14L15.6 9.4"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </>
+    ),
+
+    globe: (
+      <>
+        <circle
+          cx="12"
+          cy="12"
+          r="8.5"
+          stroke="currentColor"
+          strokeWidth="1.6"
+        />
+        <path
+          d="M3.8 12H20.2"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+        />
+        <path
+          d="M12 3.5c2.3 2.3 3.5 5.1 3.5 8.5s-1.2 6.2-3.5 8.5M12 3.5C9.7 5.8 8.5 8.6 8.5 12s1.2 6.2 3.5 8.5"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+        />
+      </>
+    ),
+
+    bell: (
+      <>
+        <path
+          d="M6.5 9.5C6.5 6.4 8.8 4 12 4s5.5 2.4 5.5 5.5v3.7L19 16H5l1.5-2.8V9.5Z"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M9.5 18c.5 1.2 1.3 1.8 2.5 1.8s2-.6 2.5-1.8M12 2.5V4"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </>
+    ),
+
+    sound: (
+      <>
+        <path
+          d="M5 10v4h3l4 3V7l-4 3H5Z"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M15 9c1 .8 1.5 1.8 1.5 3s-.5 2.2-1.5 3M17.5 6.8C19.1 8.2 20 10 20 12s-.9 3.8-2.5 5.2"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </>
+    ),
+
+    support: (
+      <>
+        <circle
+          cx="12"
+          cy="12"
+          r="8.5"
+          stroke="currentColor"
+          strokeWidth="1.6"
+        />
+        <path
+          d="M8.5 9.5a3.5 3.5 0 0 1 7 0c0 2.5-3.5 2.5-3.5 5"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+        />
+        <circle cx="12" cy="17.5" r=".8" fill="currentColor" />
+      </>
+    ),
+
+    terms: (
+      <>
+        <rect
+          x="5"
+          y="3.5"
+          width="14"
+          height="17"
+          rx="2"
+          stroke="currentColor"
+          strokeWidth="1.6"
+        />
+        <path
+          d="M8 8h8M8 12h8M8 16h5"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </>
+    ),
+
+    people: (
+      <>
+        <circle
+          cx="9"
+          cy="8.5"
+          r="2.8"
+          stroke="currentColor"
+          strokeWidth="1.6"
+        />
+        <circle
+          cx="16.5"
+          cy="9.5"
+          r="2.2"
+          stroke="currentColor"
+          strokeWidth="1.4"
+        />
+        <path
+          d="M3.8 19c.4-3.3 2.3-5.1 5.2-5.1s4.8 1.8 5.2 5.1M14.5 14.5c3-.3 5 1.3 5.5 4"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </>
+    ),
+
+    crown: (
+      <>
+        <path
+          d="m4 7 4 4 4-6 4 6 4-4-1.5 11h-13L4 7Z"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M6 18h12"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+        />
+      </>
+    ),
+
+    check: (
+      <>
+        <circle
+          cx="12"
+          cy="12"
+          r="8.5"
+          stroke="currentColor"
+          strokeWidth="1.6"
+        />
+        <path
+          d="m8 12.2 2.6 2.6 5.7-6"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </>
+    ),
+
+    star: (
+      <path
+        d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+
+    ad: (
+      <>
+        <rect
+          x="3.5"
+          y="5"
+          width="17"
+          height="14"
+          rx="3"
+          stroke="currentColor"
+          strokeWidth="1.6"
+        />
+        <path
+          d="m10 9 5 3-5 3V9Z"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+        />
+      </>
+    ),
+
+    link: (
+      <>
+        <path
+          d="m9.5 14.5-1.7 1.7a3.2 3.2 0 0 1-4.5-4.5l3.3-3.3a3.2 3.2 0 0 1 4.5 0"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+        />
+        <path
+          d="m14.5 9.5 1.7-1.7a3.2 3.2 0 0 1 4.5 4.5l-3.3 3.3a3.2 3.2 0 0 1-4.5 0"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+        />
+        <path
+          d="m8.8 15.2 6.4-6.4"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+        />
+      </>
+    ),
+
+    copy: (
+      <>
+        <rect
+          x="8"
+          y="8"
+          width="11"
+          height="11"
+          rx="2"
+          stroke="currentColor"
+          strokeWidth="1.6"
+        />
+        <path
+          d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+        />
+      </>
+    ),
+
+    lock: (
+      <>
+        <rect
+          x="5"
+          y="10"
+          width="14"
+          height="10"
+          rx="2.5"
+          stroke="currentColor"
+          strokeWidth="1.6"
+        />
+        <path
+          d="M8 10V7.5a4 4 0 0 1 8 0V10"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+        />
+        <circle cx="12" cy="15" r="1" fill="currentColor" />
+      </>
+    )
+  };
+
+  const icon = icons[name];
+
+  if (!icon) {
+    return null;
+  }
+
+  return (
+    <span className="ico premiumIcon" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        {icon}
+      </svg>
+    </span>
+  );
 
   const map = {
 
@@ -2344,16 +2850,16 @@ function Icon({
       '♙',
 
     gift:
-      '🎁',
+     '◆',
 
-    rocket:
-      '🚀',
+   rocket:
+    '▲',
 
     wallet:
       '◈',
 
-    bolt:
-      'ϟ',
+   bolt:
+    '✦',
 
     clock:
       '◷',
