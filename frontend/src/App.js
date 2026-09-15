@@ -2814,7 +2814,44 @@ function Icon({ name }) {
         />
         <circle cx="12" cy="15" r="1" fill="currentColor" />
       </>
-    )
+    ),
+      news: (
+    <>
+      <rect
+        x="4"
+        y="5"
+        width="16"
+        height="14"
+        rx="2"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <path
+        d="M8 9h8M8 13h8M8 17h5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </>
+  ),
+
+  wallet: (
+    <>
+      <path
+        d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M15 10h5v4h-5a2 2 0 0 1 0-4Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <circle cx="16" cy="12" r="0.8" fill="currentColor" />
+    </>
+  ),
   };
 
   const icon = icons[name];
@@ -8443,18 +8480,19 @@ function TasksPage({
                       }
                     >
 
-                      <div className="taskCardIcon">
-
-                        <Icon
-                          name={
-                            task.category ===
-                            'group'
-                              ? 'people'
-                              : 'link'
-                          }
-                        />
-
-                      </div>
+                    <div className="taskCardIcon">
+  <Icon
+    name={
+      task.title === 'MAI News'
+        ? 'news'
+        : task.title === 'MAI Pay Out'
+        ? 'wallet'
+        : task.title === 'MAI Chat Group'
+        ? 'people'
+        : 'link'
+    }
+  />
+</div>
 
 
                       <div className="taskCardBody">
