@@ -7703,4 +7703,18 @@ img {
   height: 25px;
   display: block;
 }
+/* FIX: TASK CARD SVG ICONS */
+.taskCardIcon > .ico.premiumIcon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: var(--gold);
+}
 
+.taskCardIcon > .ico.premiumIcon svg {
+  display: block;
+  width: 27px;
+  height: 27px;
+  overflow: visible;
+}
