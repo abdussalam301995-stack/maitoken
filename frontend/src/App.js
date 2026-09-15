@@ -7046,12 +7046,11 @@ function LevelDetail({
 
           const buyUrl = 'https://app.tonkeeper.com/dapp/https%3A%2F%2Fapp.ston.fi%2Fswap%3Fft%3DGRAM%26utm_source%3Dtonkeeper%26utm_medium%3Dorganic%26utm_campaign%3Ddefi%26utm_content%3DEQDCJL0iQHofcBBvFBHdVG233Ri2V4kCNFgfRT-gqAd3Oc86%26chartVisible%3Dfalse%26tt%3DEQD5pWilwl9ypQ1JFxoDktsQl_LAALALnqHjZoxhx_2nET-r';
 
-          try {
-            window.Telegram?.WebApp?.openLink?.(buyUrl);
-          } catch (_) {}
-
-          window.location.href = buyUrl;
-
+         if (window.Telegram?.WebApp?.openLink) {
+  window.Telegram.WebApp.openLink(buyUrl);
+} else {
+  window.open(buyUrl, '_blank', 'noopener,noreferrer');
+}
         }}
       >
 
