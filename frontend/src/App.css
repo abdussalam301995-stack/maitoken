@@ -3798,7 +3798,20 @@ font-size: 11px;
 .taskSectionIcon .ico {
   font-size: 23px;
 }
+.taskSectionIcon > .ico.premiumIcon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: var(--gold);
+}
 
+.taskSectionIcon > .ico.premiumIcon svg {
+  display: block;
+  width: 27px;
+  height: 27px;
+  overflow: visible;
+}
 
 .taskSectionIntro > div:last-child {
   min-width: 0;
