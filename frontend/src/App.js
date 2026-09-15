@@ -2835,23 +2835,7 @@ function Icon({ name }) {
     </>
   ),
 
-  wallet: (
-    <>
-      <path
-        d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M15 10h5v4h-5a2 2 0 0 1 0-4Z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-      <circle cx="16" cy="12" r="0.8" fill="currentColor" />
-    </>
-  ),
+  
   };
 
   const icon = icons[name];

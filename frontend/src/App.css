@@ -7718,3 +7718,23 @@ img {
   height: 27px;
   overflow: visible;
 }
+/* =========================================
+   FIX: PARTNER / PROMOTE ROCKET ICON
+   ========================================= */
+
+.partnerHeroIcon > .ico.premiumIcon,
+.promoteHeroIcon > .ico.premiumIcon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  color: var(--gold);
+}
+
+.partnerHeroIcon > .ico.premiumIcon svg,
+.promoteHeroIcon > .ico.premiumIcon svg {
+  display: block;
+  width: 32px;
+  height: 32px;
+  overflow: visible;
+}
