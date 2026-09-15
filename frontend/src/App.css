@@ -2019,9 +2019,14 @@ a {
   }
 
 
-  .mainCoin {
-  display: none; /* Hide outer circle */
+ .mainCoin {
+  width: 250px;
+  height: 250px;
+  background: transparent;
+  filter: none;
 }
+
+
 
 .mainCoinLogo {
   width: 250px !important;
@@ -2029,7 +2034,14 @@ a {
   filter: drop-shadow(0 0 20px rgba(255, 215, 0, 0.4));
 }
 
-
+.mainCoin .coinOuterRing,
+.mainCoin .coinMiddleRing,
+.mainCoin .coinInner {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
   .coinArea {
     min-height: 280px;
   }
