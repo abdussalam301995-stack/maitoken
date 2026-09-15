@@ -936,6 +936,7 @@ a {
 
   border-color:
     rgba(243, 201, 105, 0.13);
+    display: none !important;
 }
 
 
