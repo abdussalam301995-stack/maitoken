@@ -8244,7 +8244,20 @@ function TasksPage({
 
               <div className="taskCardIcon adIcon">
 
-                <Icon name="ad" />
+               <svg
+  viewBox="0 0 24 24"
+  width="27"
+  height="27"
+  fill="none"
+  stroke="currentColor"
+  strokeWidth="1.8"
+  strokeLinecap="round"
+  strokeLinejoin="round"
+>
+  <rect x="3" y="5" width="18" height="14" rx="3" />
+  <path d="M10 9l5 3-5 3V9z" />
+  <path d="M8 2h8" />
+</svg>
 
               </div>
 
