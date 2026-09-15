@@ -6471,7 +6471,20 @@ font-size: 11px;
     1px solid
     rgba(243, 201, 105, 0.1);
 }
+.settingIcon > .ico.premiumIcon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  color: var(--gold);
+}
 
+.settingIcon > .ico.premiumIcon svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+  overflow: visible;
+}
 
 .settingLeft > span:last-child {
   min-width: 0;
