@@ -2020,15 +2020,14 @@ a {
 
 
   .mainCoin {
-    width: 250px;
-    height: 250px;
-  }
+  display: none; /* Hide outer circle */
+}
 
-
-  .mainCoinLogo {
-    width: 250px !important;
-    height: 250px !important;
-  }
+.mainCoinLogo {
+  width: 250px !important;
+  height: 250px !important;
+  filter: drop-shadow(0 0 20px rgba(255, 215, 0, 0.4));
+}
 
 
   .coinArea {
