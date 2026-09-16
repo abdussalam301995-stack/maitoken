@@ -2985,6 +2985,12 @@ await pool.query(`
       ALTER TABLE campaigns
      ALTER COLUMN telegram_id DROP NOT NULL;
 
+     ALTER TABLE campaigns
+    ADD COLUMN IF NOT EXISTS category TEXT;
+
+     ALTER TABLE campaigns
+    ALTER COLUMN category DROP NOT NULL;
+
     ALTER TABLE campaigns
       ADD COLUMN IF NOT EXISTS title TEXT;
 
@@ -2996,7 +3002,7 @@ await pool.query(`
 
     ALTER TABLE campaigns
       ADD COLUMN IF NOT EXISTS target_count INTEGER;
-      
+
     ALTER TABLE campaigns
       ADD COLUMN IF NOT EXISTS quoted_gram NUMERIC(30,8);
 
