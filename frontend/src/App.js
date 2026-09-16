@@ -7007,16 +7007,13 @@ function LevelDetail({
               <span>
 
                 {
-                  Math.max(
-                    0,
-                    nextRequired -
-                    totalHolding
-                  )
-                }
-
-                {' '}
-
-                MAI
+            Math.max(0, nextRequired - totalHolding).toLocaleString(undefined, {
+             minimumFractionDigits: 2,
+           maximumFractionDigits: 2
+          })
+        }
+         {" "}
+           MAI
 
               </span>
 
