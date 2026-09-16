@@ -2975,7 +2975,8 @@ await pool.query(`
   await pool.query(`
         ALTER TABLE campaigns
       ADD COLUMN IF NOT EXISTS type TEXT;
-
+      ALTER TABLE campaigns
+      ADD COLUMN IF NOT EXISTS owner_id TEXT;
     ALTER TABLE campaigns
       ADD COLUMN IF NOT EXISTS title TEXT;
 
