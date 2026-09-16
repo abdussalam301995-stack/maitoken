@@ -6638,7 +6638,7 @@ function LevelDetail({
 
                 : `${fmtSmart(
                     remainingForThis,
-                    4
+                    2
                   )} MAI needed`
             }
 
