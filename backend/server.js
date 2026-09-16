@@ -2992,6 +2992,12 @@ await pool.query(`
     ALTER COLUMN category DROP NOT NULL;
 
     ALTER TABLE campaigns
+  ADD COLUMN IF NOT EXISTS completions INTEGER;
+
+ALTER TABLE campaigns
+  ALTER COLUMN completions DROP NOT NULL;
+
+    ALTER TABLE campaigns
       ADD COLUMN IF NOT EXISTS title TEXT;
 
     ALTER TABLE campaigns
