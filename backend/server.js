@@ -3016,6 +3016,28 @@ await pool.query(`
     ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ
     NOT NULL
     DEFAULT NOW();
+
+  ALTER TABLE campaigns
+    ADD COLUMN IF NOT EXISTS payment_nano NUMERIC(30,0);
+
+  ALTER TABLE campaigns
+    ADD COLUMN IF NOT EXISTS payment_tx_hash TEXT;
+
+  ALTER TABLE campaigns
+    ADD COLUMN IF NOT EXISTS payment_verified_at TIMESTAMPTZ;
+
+  ALTER TABLE campaigns
+    ADD COLUMN IF NOT EXISTS payment_last_checked_at TIMESTAMPTZ;
+
+  ALTER TABLE campaigns
+    ADD COLUMN IF NOT EXISTS payment_verification_attempts INTEGER
+    NOT NULL
+    DEFAULT 0;
+
+  CREATE UNIQUE INDEX IF NOT EXISTS
+    campaigns_payment_tx_hash_unique_idx
+    ON campaigns(payment_tx_hash)
+    WHERE payment_tx_hash IS NOT NULL;
   `);
 
 
@@ -9213,6 +9235,398 @@ app.post(
 
 
 /* =========================================================
+   SECURE GRAM PAYMENT HELPERS
+
+   GRAM is TON's native coin. Amounts on-chain are nanograms:
+   1 GRAM = 1,000,000,000 nanograms.
+
+   A tiny campaign-specific nano suffix is added so simultaneous
+   payments for the same package can be correlated safely.
+   ========================================================= */
+
+function gramToNano(
+  gram
+) {
+
+  const value =
+    Number(
+      gram
+    );
+
+
+  if (
+    !Number.isFinite(
+      value
+    ) ||
+    value <= 0
+  ) {
+
+    return 0n;
+
+  }
+
+
+  return BigInt(
+    Math.round(
+      value *
+      1_000_000_000
+    )
+  );
+
+}
+
+
+function campaignPaymentNano(
+  gram,
+  campaignId
+) {
+
+  const base =
+    gramToNano(
+      gram
+    );
+
+
+  const id =
+    BigInt(
+      Math.max(
+        1,
+        safeInteger(
+          campaignId,
+          1
+        )
+      )
+    );
+
+
+  /*
+    1..999,999 nanograms = at most 0.000999999 GRAM.
+    This suffix is not a fee; it is part of the received payment
+    and makes equal-priced campaigns distinguishable on-chain.
+  */
+
+  const suffix =
+    (
+      id %
+      999999n
+    ) +
+    1n;
+
+
+  return base +
+    suffix;
+
+}
+
+
+function tonApiHeaders() {
+
+  const headers = {
+    Accept:
+      'application/json'
+  };
+
+
+  if (
+    TONAPI_KEY
+  ) {
+
+    headers.Authorization =
+      `Bearer ${TONAPI_KEY}`;
+
+  }
+
+
+  return headers;
+
+}
+
+
+function transactionHashOf(
+  tx
+) {
+
+  return String(
+    tx?.hash ||
+    tx?.transaction_id?.hash ||
+    tx?.transactionId?.hash ||
+    ''
+  ).trim();
+
+}
+
+
+function transactionTimeOf(
+  tx
+) {
+
+  return safeInteger(
+    tx?.utime ??
+    tx?.now ??
+    tx?.timestamp ??
+    tx?.in_msg?.created_at ??
+    tx?.inMsg?.createdAt ??
+    0
+  );
+
+}
+
+
+function inboundValueOf(
+  tx
+) {
+
+  const message =
+    tx?.in_msg ||
+    tx?.inMsg ||
+    null;
+
+
+  if (!message) {
+
+    return null;
+
+  }
+
+
+  const raw =
+    message.value ??
+    message.amount ??
+    null;
+
+
+  if (
+    raw ===
+    null ||
+    raw ===
+    undefined
+  ) {
+
+    return null;
+
+  }
+
+
+  try {
+
+    return BigInt(
+      String(
+        raw
+      )
+    );
+
+  } catch {
+
+    return null;
+
+  }
+
+}
+
+
+function transactionSucceeded(
+  tx
+) {
+
+  if (
+    tx?.success ===
+    false
+  ) {
+
+    return false;
+
+  }
+
+
+  const message =
+    tx?.in_msg ||
+    tx?.inMsg ||
+    null;
+
+
+  if (
+    message?.bounced ===
+    true
+  ) {
+
+    return false;
+
+  }
+
+
+  return true;
+
+}
+
+
+async function findGramPaymentOnChain({
+  receiverWallet,
+  expectedNano,
+  createdAt
+}) {
+
+  if (
+    !receiverWallet ||
+    !expectedNano
+  ) {
+
+    return null;
+
+  }
+
+
+  const url =
+    `${TONAPI_BASE}/blockchain/accounts/` +
+    `${encodeURIComponent(receiverWallet)}/transactions?limit=100`;
+
+
+  const controller =
+    new AbortController();
+
+
+  const timeout =
+    setTimeout(
+      () =>
+        controller.abort(),
+      12000
+    );
+
+
+  try {
+
+    const response =
+      await fetch(
+        url,
+        {
+          headers:
+            tonApiHeaders(),
+
+          signal:
+            controller.signal
+        }
+      );
+
+
+    const data =
+      await response
+        .json()
+        .catch(
+          () => ({})
+        );
+
+
+    if (
+      !response.ok
+    ) {
+
+      const error =
+        new Error(
+          data?.error ||
+          data?.message ||
+          `TonAPI HTTP ${response.status}`
+        );
+
+
+      error.status =
+        response.status;
+
+
+      throw error;
+
+    }
+
+
+    const transactions =
+      Array.isArray(
+        data?.transactions
+      )
+        ? data.transactions
+        : [];
+
+
+    const minimumTime =
+      Math.floor(
+        new Date(
+          createdAt
+        ).getTime() /
+        1000
+      ) -
+      120;
+
+
+    const expected =
+      BigInt(
+        String(
+          expectedNano
+        )
+      );
+
+
+    for (
+      const tx of transactions
+    ) {
+
+      const hash =
+        transactionHashOf(
+          tx
+        );
+
+
+      const time =
+        transactionTimeOf(
+          tx
+        );
+
+
+      const value =
+        inboundValueOf(
+          tx
+        );
+
+
+      if (
+        !hash ||
+        value ===
+          null ||
+        value !==
+          expected ||
+        time <
+          minimumTime ||
+        !transactionSucceeded(
+          tx
+        )
+      ) {
+
+        continue;
+
+      }
+
+
+      return {
+        hash,
+        time,
+        value:
+          value.toString()
+      };
+
+    }
+
+
+    return null;
+
+
+  } finally {
+
+    clearTimeout(
+      timeout
+    );
+
+  }
+
+}
+
+
+/* =========================================================
    CREATE PROMOTION CAMPAIGN
    ========================================================= */
 
@@ -9379,6 +9793,27 @@ app.post(
           ? 'GRAM'
 
           : 'MAI';
+
+
+      if (
+        method ===
+          'GRAM' &&
+        !PROMOTE_RECEIVER_WALLET
+      ) {
+
+        return res
+          .status(503)
+          .json({
+
+            success:
+              false,
+
+            message:
+              'GRAM promotion payments are temporarily unavailable'
+
+          });
+
+      }
 
 
       const quotedGram =
@@ -9576,8 +10011,44 @@ app.post(
           );
 
 
-        const campaign =
+        let campaign =
           inserted.rows[0];
+
+
+        if (
+          method ===
+          'GRAM'
+        ) {
+
+          const paymentNano =
+            campaignPaymentNano(
+              quotedGram,
+              campaign.id
+            ).toString();
+
+
+          const updated =
+            await client.query(
+              `
+              UPDATE campaigns
+
+              SET payment_nano=$2
+
+              WHERE id=$1
+
+              RETURNING *
+              `,
+              [
+                campaign.id,
+                paymentNano
+              ]
+            );
+
+
+          campaign =
+            updated.rows[0];
+
+        }
 
 
         if (
@@ -9657,6 +10128,10 @@ app.post(
 
             amount:
               paymentAmount,
+
+            amountNano:
+              campaign.payment_nano ||
+              null,
 
             gramEquivalent:
               quotedGram,
@@ -11831,14 +12306,583 @@ app.get(
 
 
 /* =========================================================
+   VERIFY GRAM PROMOTION PAYMENT
+
+   The client cannot mark a payment as paid. This endpoint scans
+   low-level finalized account transactions from TonAPI and only
+   activates the campaign after an exact, unused on-chain payment
+   is found at the server-configured receiver wallet.
+   ========================================================= */
+
+app.post(
+
+  '/api/campaigns/:id/verify-payment',
+
+  authenticate,
+
+  rateLimit(
+    12,
+    60000
+  ),
+
+  async (
+    req,
+    res,
+    next
+  ) => {
+
+    const campaignId =
+      safeInteger(
+        req.params.id,
+        0
+      );
+
+
+    if (
+      campaignId <= 0
+    ) {
+
+      return res
+        .status(400)
+        .json({
+
+          success:
+            false,
+
+          message:
+            'Invalid campaign id'
+
+        });
+
+    }
+
+
+    try {
+
+      const snapshot =
+        await pool.query(
+          `
+          SELECT *
+
+          FROM campaigns
+
+          WHERE
+            id=$1
+            AND owner_id=$2
+
+          LIMIT 1
+          `,
+          [
+            campaignId,
+            req.auth.id
+          ]
+        );
+
+
+      const campaign =
+        snapshot.rows[0];
+
+
+      if (!campaign) {
+
+        return res
+          .status(404)
+          .json({
+
+            success:
+              false,
+
+            message:
+              'Campaign not found'
+
+          });
+
+      }
+
+
+      if (
+        campaign.payment_method !==
+        'GRAM'
+      ) {
+
+        return res
+          .status(400)
+          .json({
+
+            success:
+              false,
+
+            message:
+              'This campaign does not use GRAM payment'
+
+          });
+
+      }
+
+
+      if (
+        campaign.payment_status ===
+        'paid'
+      ) {
+
+        return res.json({
+
+          success:
+            true,
+
+          verified:
+            true,
+
+          campaign
+
+        });
+
+      }
+
+
+      if (
+        !PROMOTE_RECEIVER_WALLET ||
+        campaign.payment_wallet !==
+          PROMOTE_RECEIVER_WALLET
+      ) {
+
+        return res
+          .status(503)
+          .json({
+
+            success:
+              false,
+
+            message:
+              'Promotion receiver wallet configuration mismatch'
+
+          });
+
+      }
+
+
+      const expectedNano =
+        String(
+          campaign.payment_nano ||
+          ''
+        );
+
+
+      if (
+        !/^\d+$/.test(
+          expectedNano
+        )
+      ) {
+
+        return res
+          .status(409)
+          .json({
+
+            success:
+              false,
+
+            message:
+              'Campaign payment amount is not initialized'
+
+          });
+
+      }
+
+
+      await pool.query(
+        `
+        UPDATE campaigns
+
+        SET
+          payment_verification_attempts=
+            payment_verification_attempts + 1,
+          payment_last_checked_at=NOW()
+
+        WHERE id=$1
+        `,
+        [
+          campaignId
+        ]
+      );
+
+
+      let onChain;
+
+
+      try {
+
+        onChain =
+          await findGramPaymentOnChain({
+
+            receiverWallet:
+              PROMOTE_RECEIVER_WALLET,
+
+            expectedNano,
+
+            createdAt:
+              campaign.created_at
+
+          });
+
+
+      } catch (
+        error
+      ) {
+
+        console.warn(
+          '[GRAM PAYMENT VERIFY]',
+          error.message
+        );
+
+
+        return res
+          .status(503)
+          .json({
+
+            success:
+              false,
+
+            verified:
+              false,
+
+            retryable:
+              true,
+
+            message:
+              'Blockchain verification is temporarily unavailable. Please try again.'
+
+          });
+
+      }
+
+
+      if (!onChain) {
+
+        return res
+          .status(409)
+          .json({
+
+            success:
+              false,
+
+            verified:
+              false,
+
+            retryable:
+              true,
+
+            message:
+              'Payment is not finalized yet. Please wait a few seconds and try again.'
+
+          });
+
+      }
+
+
+      const client =
+        await pool.connect();
+
+
+      try {
+
+        await client.query(
+          'BEGIN'
+        );
+
+
+        const locked =
+          await client.query(
+            `
+            SELECT *
+
+            FROM campaigns
+
+            WHERE
+              id=$1
+              AND owner_id=$2
+
+            FOR UPDATE
+            `,
+            [
+              campaignId,
+              req.auth.id
+            ]
+          );
+
+
+        const current =
+          locked.rows[0];
+
+
+        if (!current) {
+
+          await client.query(
+            'ROLLBACK'
+          );
+
+
+          return res
+            .status(404)
+            .json({
+
+              success:
+                false,
+
+              message:
+                'Campaign not found'
+
+            });
+
+        }
+
+
+        if (
+          current.payment_status ===
+          'paid'
+        ) {
+
+          await client.query(
+            'COMMIT'
+          );
+
+
+          return res.json({
+
+            success:
+              true,
+
+            verified:
+              true,
+
+            campaign:
+              current
+
+          });
+
+        }
+
+
+        const used =
+          await client.query(
+            `
+            SELECT id
+
+            FROM campaigns
+
+            WHERE
+              payment_tx_hash=$1
+              AND id<>$2
+
+            LIMIT 1
+            `,
+            [
+              onChain.hash,
+              campaignId
+            ]
+          );
+
+
+        if (
+          used.rowCount
+        ) {
+
+          await client.query(
+            'ROLLBACK'
+          );
+
+
+          return res
+            .status(409)
+            .json({
+
+              success:
+                false,
+
+              verified:
+                false,
+
+              message:
+                'This blockchain payment has already been used'
+
+            });
+
+        }
+
+
+        const verified =
+          await client.query(
+            `
+            UPDATE campaigns
+
+            SET
+              payment_status='paid',
+              status='approved',
+              payment_tx_hash=$2,
+              payment_verified_at=NOW(),
+              approved_at=COALESCE(approved_at,NOW())
+
+            WHERE
+              id=$1
+              AND payment_status='pending'
+
+            RETURNING *
+            `,
+            [
+              campaignId,
+              onChain.hash
+            ]
+          );
+
+
+        if (
+          !verified.rowCount
+        ) {
+
+          await client.query(
+            'ROLLBACK'
+          );
+
+
+          return res
+            .status(409)
+            .json({
+
+              success:
+                false,
+
+              verified:
+                false,
+
+              message:
+                'Campaign payment state changed. Refresh and try again.'
+
+            });
+
+        }
+
+
+        await client.query(
+          `
+          INSERT INTO transactions(
+            telegram_id,
+            type,
+            amount,
+            reference,
+            metadata
+          )
+
+          VALUES(
+            $1,
+            'promotion_payment_gram',
+            $2,
+            $3,
+            $4
+          )
+          `,
+          [
+            req.auth.id,
+            -safeNumber(
+              current.quoted_gram
+            ),
+            String(
+              campaignId
+            ),
+            {
+              txHash:
+                onChain.hash,
+              amountNano:
+                expectedNano,
+              receiverWallet:
+                PROMOTE_RECEIVER_WALLET
+            }
+          ]
+        );
+
+
+        await client.query(
+          'COMMIT'
+        );
+
+
+        return res.json({
+
+          success:
+            true,
+
+          verified:
+            true,
+
+          campaign:
+            verified.rows[0]
+
+        });
+
+
+      } catch (
+        error
+      ) {
+
+        try {
+          await client.query(
+            'ROLLBACK'
+          );
+        } catch {}
+
+
+        if (
+          error?.code ===
+          '23505'
+        ) {
+
+          return res
+            .status(409)
+            .json({
+
+              success:
+                false,
+
+              verified:
+                false,
+
+              message:
+                'This blockchain payment has already been used'
+
+            });
+
+        }
+
+
+        throw error;
+
+
+      } finally {
+
+        client.release();
+
+      }
+
+
+    } catch (
+      error
+    ) {
+
+      next(
+        error
+      );
+
+    }
+
+  }
+
+);
+
+
+/* =========================================================
    ADMIN CAMPAIGN APPROVE
 
-   For GRAM campaigns:
-   pass
-   {
-     "paymentStatus": "paid"
-   }
-   after payment is verified.
+   GRAM payment state is NEVER accepted from the admin request.
+   GRAM campaigns can be approved only after the on-chain
+   verifier has already marked payment_status='paid'.
    ========================================================= */
 
 app.post(
@@ -11855,82 +12899,54 @@ app.post(
 
     try {
 
-      const paymentStatus =
-        req.body?.paymentStatus;
-
-
-      if (
-        paymentStatus &&
-        ![
-          'pending',
-          'paid',
-          'failed'
-        ].includes(
-          paymentStatus
-        )
-      ) {
-
-        return res
-          .status(400)
-          .json({
-
-            success:
-              false,
-
-            message:
-              'Invalid payment status'
-
-          });
-
-      }
-
-
       const result =
         await pool.query(
           `
           UPDATE campaigns
 
           SET
-
             status='approved',
-
-            payment_status=
-
-              CASE
-
-                WHEN
-                  payment_method='GRAM'
-
-                THEN
-                  COALESCE(
-                    $2,
-                    payment_status
-                  )
-
-                ELSE
-                  payment_status
-
-              END,
-
             approved_at=
-              NOW()
+              COALESCE(
+                approved_at,
+                NOW()
+              )
 
-          WHERE id=$1
+          WHERE
+            id=$1
+            AND payment_status='paid'
 
           RETURNING *
           `,
           [
-            req.params.id,
-            paymentStatus ||
-            null
+            req.params.id
           ]
         );
+
+
+      if (
+        !result.rowCount
+      ) {
+
+        return res
+          .status(409)
+          .json({
+
+            success:
+              false,
+
+            message:
+              'Campaign cannot be approved until payment is verified as paid'
+
+          });
+
+      }
 
 
       res.json({
 
         success:
-          !!result.rowCount,
+          true,
 
         item:
           result.rows[0]

@@ -8,7 +8,8 @@ import React, {
 
 import {
   TonConnectButton,
-  useTonAddress
+  useTonAddress,
+  useTonConnectUI
 } from '@tonconnect/ui-react';
 
 import './App.css';
@@ -9036,6 +9037,16 @@ function PromotePage({
   playClick
 }) {
 
+  const address =
+    useTonAddress();
+
+
+  const [
+    tonConnectUI
+  ] =
+    useTonConnectUI();
+
+
   const [
     type,
     setType
@@ -9268,6 +9279,17 @@ function PromotePage({
      SUBMIT
      ======================================================= */
 
+  const wait =
+    milliseconds =>
+      new Promise(
+        resolve =>
+          setTimeout(
+            resolve,
+            milliseconds
+          )
+      );
+
+
   const submit =
     async () => {
 
@@ -9318,6 +9340,30 @@ function PromotePage({
       }
 
 
+      if (
+        paymentMethod ===
+          'GRAM' &&
+        !address
+      ) {
+
+        toast(
+          'Connect your TON wallet before paying with GRAM.'
+        );
+
+
+        try {
+
+          await tonConnectUI
+            .openModal();
+
+        } catch {}
+
+
+        return;
+
+      }
+
+
       playClick();
 
 
@@ -9327,6 +9373,13 @@ function PromotePage({
 
 
       try {
+
+        /*
+          Step 1:
+          Server creates the campaign and calculates the payment.
+          The frontend never decides the trusted GRAM amount or
+          receiver wallet.
+        */
 
         const data =
           await api(
@@ -9356,30 +9409,186 @@ function PromotePage({
                 paymentMethod,
 
                 verificationType:
-                  (
-                    type ===
-                      'Channel' ||
-                    type ===
-                      'Group'
-                  )
-                    ? 'manual'
-                    : 'manual'
+                  'manual'
               }
             }
           );
 
 
+        if (
+          paymentMethod ===
+          'MAI'
+        ) {
+
+          toast(
+            `${t(
+              'campaignPending'
+            )} #${data.campaign.id}`
+          );
+
+
+          await refresh();
+
+          back();
+
+          return;
+
+        }
+
+
+        const receiverWallet =
+          String(
+            data?.payment
+              ?.receiverWallet ||
+            ''
+          ).trim();
+
+
+        const amountNano =
+          String(
+            data?.payment
+              ?.amountNano ||
+            ''
+          ).trim();
+
+
+        if (
+          !receiverWallet ||
+          !/^\d+$/.test(
+            amountNano
+          )
+        ) {
+
+          throw new Error(
+            'Secure GRAM payment information is unavailable.'
+          );
+
+        }
+
+
+        /*
+          Step 2:
+          TON Connect asks the wallet to send the exact server-issued
+          nanogram amount to the server-issued receiver wallet.
+        */
+
+        await tonConnectUI
+          .sendTransaction({
+
+            validUntil:
+              Math.floor(
+                Date.now() /
+                1000
+              ) +
+              300,
+
+            network:
+              '-239',
+
+            messages: [
+              {
+                address:
+                  receiverWallet,
+
+                amount:
+                  amountNano
+              }
+            ]
+
+          });
+
+
         toast(
+          'Payment sent. Waiting for blockchain confirmation...'
+        );
 
-          `${t(
-            'campaignPending'
-          )} #${data.campaign.id}`
 
+        /*
+          Step 3:
+          TON Connect success means the wallet accepted/broadcast the
+          transaction. It does NOT mark the campaign paid. The backend
+          independently verifies the finalized incoming transaction.
+        */
+
+        let verified =
+          false;
+
+
+        let lastError =
+          null;
+
+
+        for (
+          let attempt = 0;
+          attempt < 10;
+          attempt += 1
+        ) {
+
+          if (
+            attempt > 0
+          ) {
+
+            await wait(
+              3000
+            );
+
+          }
+
+
+          try {
+
+            const verification =
+              await api(
+                `/api/campaigns/${data.campaign.id}/verify-payment`,
+                {
+                  method:
+                    'POST'
+                }
+              );
+
+
+            if (
+              verification?.verified
+            ) {
+
+              verified =
+                true;
+
+              break;
+
+            }
+
+
+          } catch (
+            error
+          ) {
+
+            lastError =
+              error;
+
+          }
+
+        }
+
+
+        if (
+          !verified
+        ) {
+
+          throw new Error(
+            lastError?.message ||
+            'Payment was sent but is not finalized yet. Please try verification again shortly.'
+          );
+
+        }
+
+
+        toast(
+          `Payment verified — campaign #${data.campaign.id} activated.`
         );
 
 
         await refresh();
-
 
         back();
 
