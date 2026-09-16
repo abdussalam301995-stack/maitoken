@@ -7292,6 +7292,47 @@ function TasksPage({
 
 
   const [
+    campaignTimers,
+    setCampaignTimers
+  ] =
+    useState(
+      {}
+    );
+
+
+  const [
+    campaignNow,
+    setCampaignNow
+  ] =
+    useState(
+      Date.now()
+    );
+
+
+  useEffect(
+    () => {
+
+      const timer =
+        setInterval(
+          () =>
+            setCampaignNow(
+              Date.now()
+            ),
+          250
+        );
+
+
+      return () =>
+        clearInterval(
+          timer
+        );
+
+    },
+    []
+  );
+
+
+  const [
     cooldown,
     setCooldown
   ] =
@@ -8004,7 +8045,7 @@ function TasksPage({
      COMPLETE EXCLUSIVE
      ======================================================= */
 
-  const completeCampaign =
+  const openCampaign =
     campaign => {
 
       action(
@@ -8013,23 +8054,79 @@ function TasksPage({
           playClick();
 
 
+          const data =
+            await api(
+              `/api/campaigns/${campaign.id}/open`,
+              {
+                method:
+                  'POST'
+              }
+            );
+
+
+          const waitSeconds =
+            Math.max(
+              1,
+              Number(
+                data.waitSeconds ||
+                8
+              )
+            );
+
+
+          setCampaignTimers(
+            old => ({
+              ...old,
+              [campaign.id]:
+                Date.now() +
+                waitSeconds *
+                1000
+            })
+          );
+
+
           openLink(
+            data.targetUrl ||
             campaign.target_url
           );
 
 
-          /*
-            A short delay gives the user
-            time to see Telegram/browser.
-          */
-
-          await new Promise(
-            resolve =>
-              setTimeout(
-                resolve,
-                900
-              )
+          toast(
+            `Return to MAI after ${waitSeconds} seconds to claim your reward.`
           );
+
+        }
+      );
+
+  };
+
+
+  const claimCampaign =
+    campaign => {
+
+      const readyAt =
+        Number(
+          campaignTimers[
+            campaign.id
+          ] ||
+          0
+        );
+
+
+      if (
+        !readyAt ||
+        Date.now() < readyAt
+      ) {
+
+        return;
+
+      }
+
+
+      action(
+        async () => {
+
+          playClick();
 
 
           if (
@@ -8054,14 +8151,11 @@ function TasksPage({
 
           const data =
             await api(
-
               `/api/campaigns/${campaign.id}/complete`,
-
               {
                 method:
                   'POST'
               }
-
             );
 
 
@@ -8071,36 +8165,49 @@ function TasksPage({
 
             setBoot(
               old => ({
-
                 ...old,
-
                 user:
                   data.user
-
               })
             );
 
           }
 
 
+          setCampaignTimers(
+            old => {
+
+              const next = {
+                ...old
+              };
+
+
+              delete next[
+                campaign.id
+              ];
+
+
+              return next;
+
+            }
+          );
+
+
           if (
             Number(
               data.reward ||
               0
-            ) >
-            0
+            ) > 0
           ) {
 
             playReward();
 
 
             toast(
-
               `+${fmtSmart(
                 data.reward,
                 4
               )} MAI`
-
             );
 
 
@@ -8977,19 +9084,77 @@ function TasksPage({
                         </div>
 
 
-                        <button
-                          className="taskActionBtn"
+                        {(() => {
 
-                          onClick={() =>
-                            completeCampaign(
-                              campaign
-                            )
-                          }
-                        >
+                          const readyAt =
+                            Number(
+                              campaignTimers[
+                                campaign.id
+                              ] ||
+                              0
+                            );
 
-                          {t('open')}
 
-                        </button>
+                          const remaining =
+                            readyAt
+                              ? Math.max(
+                                  0,
+                                  Math.ceil(
+                                    (
+                                      readyAt -
+                                      campaignNow
+                                    ) /
+                                    1000
+                                  )
+                                )
+                              : 0;
+
+
+                          const canClaim =
+                            readyAt > 0 &&
+                            remaining === 0;
+
+
+                          return (
+
+                            <button
+                              className={`taskActionBtn campaignActionBtn ${
+                                canClaim
+                                  ? 'claimReady'
+                                  : readyAt
+                                    ? 'counting'
+                                    : ''
+                              }`}
+
+                              disabled={
+                                readyAt > 0 &&
+                                !canClaim
+                              }
+
+                              onClick={() =>
+                                canClaim
+                                  ? claimCampaign(
+                                      campaign
+                                    )
+                                  : openCampaign(
+                                      campaign
+                                    )
+                              }
+                            >
+
+                              {
+                                canClaim
+                                  ? 'CLAIM'
+                                  : readyAt
+                                    ? `${remaining}s`
+                                    : t('open')
+                              }
+
+                            </button>
+
+                          );
+
+                        })()}
 
                       </div>
 
@@ -9450,7 +9615,7 @@ function PromotePage({
               ?.amountNano ||
             ''
           ).trim();
-       alert("RECEIVER: " + receiverWallet + "\nAMOUNT NANO: " + amountNano);
+      
 
         if (
           !receiverWallet ||

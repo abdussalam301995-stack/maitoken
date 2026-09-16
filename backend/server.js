@@ -3108,6 +3108,33 @@ ALTER TABLE campaigns
 
 
 /* =========================================================
+   CAMPAIGN OPEN / 8-SECOND CLAIM GATE
+   Server-side timing prevents a client from claiming instantly.
+   ========================================================= */
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS campaign_engagements(
+
+      campaign_id BIGINT
+        NOT NULL,
+
+      telegram_id BIGINT
+        NOT NULL,
+
+      opened_at TIMESTAMPTZ
+        NOT NULL
+        DEFAULT NOW(),
+
+      PRIMARY KEY(
+        campaign_id,
+        telegram_id
+      )
+
+    );
+  `);
+
+
+/* =========================================================
    WITHDRAWALS
    ========================================================= */
 
@@ -10226,6 +10253,154 @@ app.post(
 
 
 /* =========================================================
+   OPEN EXCLUSIVE CAMPAIGN
+   Starts the server-side 8-second eligibility timer.
+   ========================================================= */
+
+app.post(
+
+  '/api/campaigns/:id/open',
+
+  authenticate,
+
+  async (
+    req,
+    res,
+    next
+  ) => {
+
+    try {
+
+      const result =
+        await pool.query(
+          `
+          SELECT *
+          FROM campaigns
+          WHERE id=$1
+          `,
+          [
+            req.params.id
+          ]
+        );
+
+
+      const campaign =
+        result.rows[0];
+
+
+      if (
+        !campaign ||
+        campaign.status !== 'approved' ||
+        campaign.payment_status !== 'paid' ||
+        campaign.completed_count >= campaign.target_count
+      ) {
+
+        return res
+          .status(409)
+          .json({
+            success: false,
+            message: 'Campaign unavailable'
+          });
+
+      }
+
+
+      if (
+        String(campaign.owner_id) ===
+        String(req.auth.id)
+      ) {
+
+        return res
+          .status(409)
+          .json({
+            success: false,
+            message: 'Campaign owner cannot complete their own campaign'
+          });
+
+      }
+
+
+      const alreadyCompleted =
+        await pool.query(
+          `
+          SELECT 1
+          FROM campaign_completions
+          WHERE campaign_id=$1
+            AND telegram_id=$2
+          LIMIT 1
+          `,
+          [
+            campaign.id,
+            req.auth.id
+          ]
+        );
+
+
+      if (
+        alreadyCompleted.rowCount
+      ) {
+
+        return res
+          .status(409)
+          .json({
+            success: false,
+            message: 'Already completed'
+          });
+
+      }
+
+
+      const engagement =
+        await pool.query(
+          `
+          INSERT INTO campaign_engagements(
+            campaign_id,
+            telegram_id,
+            opened_at
+          )
+          VALUES($1,$2,NOW())
+          ON CONFLICT(
+            campaign_id,
+            telegram_id
+          )
+          DO UPDATE SET
+            opened_at=NOW()
+          RETURNING opened_at
+          `,
+          [
+            campaign.id,
+            req.auth.id
+          ]
+        );
+
+
+      res.json({
+        success: true,
+        waitSeconds: 8,
+        openedAt:
+          engagement.rows[0]
+            .opened_at,
+        targetUrl:
+          campaign.target_url
+      });
+
+
+    } catch (
+      error
+    ) {
+
+      next(
+        error
+      );
+
+    }
+
+  }
+
+);
+
+
+/* =========================================================
    COMPLETE EXCLUSIVE CAMPAIGN
    ========================================================= */
 
@@ -10330,6 +10505,79 @@ app.post(
             message:
               'Campaign owner cannot complete their own campaign'
 
+          });
+
+      }
+
+
+      const engagementResult =
+        await client.query(
+          `
+          SELECT opened_at
+          FROM campaign_engagements
+          WHERE campaign_id=$1
+            AND telegram_id=$2
+          FOR UPDATE
+          `,
+          [
+            campaign.id,
+            req.auth.id
+          ]
+        );
+
+
+      const engagement =
+        engagementResult.rows[0];
+
+
+      if (
+        !engagement
+      ) {
+
+        await client.query(
+          'ROLLBACK'
+        );
+
+
+        return res
+          .status(409)
+          .json({
+            success: false,
+            message: 'Open the campaign first'
+          });
+
+      }
+
+
+      const elapsedMs =
+        Date.now() -
+        new Date(
+          engagement.opened_at
+        ).getTime();
+
+
+      if (
+        elapsedMs < 8000
+      ) {
+
+        await client.query(
+          'ROLLBACK'
+        );
+
+
+        return res
+          .status(429)
+          .json({
+            success: false,
+            message: 'Please wait before claiming',
+            waitSeconds:
+              Math.max(
+                1,
+                Math.ceil(
+                  (8000 - elapsedMs) /
+                  1000
+                )
+              )
           });
 
       }
