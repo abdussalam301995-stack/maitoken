@@ -11406,10 +11406,10 @@ function ProfilePage({
                     'maxLevel'
                   )
 
-                : `${fmtSmart(
-                    remaining,
-                    0
-                  )} MAI`
+              :  `${Number(remaining).toLocaleString(undefined, {
+                 minimumFractionDigits: 2,
+             maximumFractionDigits: 2
+           })} MAI`
             }
 
           </span>
