@@ -9450,7 +9450,9 @@ function PromotePage({
               ?.amountNano ||
             ''
           ).trim();
-
+        alert(`RECEIVER: $
+        {receiverWallet}\nAMOUNT
+      NANO: ${amountNano}`);
 
         if (
           !receiverWallet ||
