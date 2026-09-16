@@ -2973,6 +2973,20 @@ await pool.query(`
    ========================================================= */
 
   await pool.query(`
+        ALTER TABLE campaigns
+      ADD COLUMN IF NOT EXISTS type TEXT;
+
+    ALTER TABLE campaigns
+      ADD COLUMN IF NOT EXISTS title TEXT;
+
+    ALTER TABLE campaigns
+      ADD COLUMN IF NOT EXISTS target_url TEXT;
+
+    ALTER TABLE campaigns
+      ADD COLUMN IF NOT EXISTS description TEXT;
+
+    ALTER TABLE campaigns
+      ADD COLUMN IF NOT EXISTS target_count INTEGER;
     ALTER TABLE campaigns
       ADD COLUMN IF NOT EXISTS quoted_gram NUMERIC(30,8);
 
