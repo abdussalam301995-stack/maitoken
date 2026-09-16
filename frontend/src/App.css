@@ -3508,14 +3508,23 @@ font-size: 11px;
 
 
 .lockedLevelBtn {
-  color: #f0c57b;
+  color: #ffe7a3;
 
   background:
-    rgba(212, 154, 75, 0.08);
+    linear-gradient(
+      135deg,
+      rgba(48, 35, 12, 0.96),
+      rgba(17, 14, 10, 0.96)
+    );
 
-  border:
-    1px solid
-    rgba(212, 154, 75, 0.17);
+  border: 1px solid rgba(243, 201, 105, 0.65);
+
+  box-shadow:
+    0 0 18px rgba(243, 201, 105, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+
+  text-shadow:
+    0 0 10px rgba(243, 201, 105, 0.35);
 }
 
 

@@ -7055,13 +7055,30 @@ function LevelDetail({
       >
 
         {
-          unlocked
-            ? `✓ ${t(
-                'unlocked'
-              )}`
+          
+  unlocked
+    ? `✓ ${t(
+        'unlocked'
+      )}`
+    : (
+        <span className="buyMaiContent">
+          <span className="buyMaiPremiumIcon">
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                d="M12 2.5L15 8.6L21.7 9.6L16.85 14.3L18 21L12 17.85L6 21L7.15 14.3L2.3 9.6L9 8.6L12 2.5Z"
+                fill="currentColor"
+              />
+            </svg>
+          </span>
 
-            : '🪙 BUY MAI'
-        }
+          <span>BUY MAI</span>
+        </span>
+      )
+}
+        
 
       </button>
 
