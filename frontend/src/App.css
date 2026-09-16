@@ -7747,7 +7747,7 @@ img {
   height: 32px;
   overflow: visible;
 }
-/* ===== BUY MAI PREMIUM BUTTON ===== */
+/* ===== BUY MAI PREMIUM GOLD BUTTON ===== */
 
 .lockedLevelBtn {
   width: 100%;
@@ -7759,31 +7759,33 @@ img {
   align-items: center;
   justify-content: center;
 
-  /* darker premium background */
+  /* Premium visible gold background */
   background: linear-gradient(
     135deg,
-    rgba(255, 190, 70, 0.10),
-    rgba(255, 145, 20, 0.04)
+    rgba(255, 196, 70, 0.82) 0%,
+    rgba(218, 133, 22, 0.72) 48%,
+    rgba(255, 174, 45, 0.78) 100%
   );
 
-  border: 1px solid rgba(255, 196, 80, 0.65);
+  border: 1px solid rgba(255, 215, 110, 0.95);
   border-radius: 15px;
 
-  color: #ffd36a;
+  color: #fff1b8;
   font-size: 15px;
   font-weight: 900;
   letter-spacing: 0.4px;
 
   box-shadow:
-    0 0 8px rgba(255, 174, 45, 0.16),
-    inset 0 0 10px rgba(255, 190, 70, 0.04);
+    0 0 10px rgba(255, 174, 45, 0.40),
+    0 0 22px rgba(255, 150, 20, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -8px 18px rgba(110, 55, 0, 0.15);
 
   overflow: hidden;
   cursor: pointer;
 
   transition:
     transform 0.2s ease,
-    border-color 0.2s ease,
     box-shadow 0.2s ease;
 }
 
