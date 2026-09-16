@@ -2975,8 +2975,16 @@ await pool.query(`
   await pool.query(`
         ALTER TABLE campaigns
       ADD COLUMN IF NOT EXISTS type TEXT;
+
+     ALTER TABLE campaigns
+      ADD COLUMN IF NOT EXISTS owner_id BIGINT;
+
       ALTER TABLE campaigns
-      ADD COLUMN IF NOT EXISTS owner_id TEXT;
+     ADD COLUMN IF NOT EXISTS telegram_id BIGINT;
+
+      ALTER TABLE campaigns
+     ALTER COLUMN telegram_id DROP NOT NULL;
+
     ALTER TABLE campaigns
       ADD COLUMN IF NOT EXISTS title TEXT;
 
@@ -2988,6 +2996,7 @@ await pool.query(`
 
     ALTER TABLE campaigns
       ADD COLUMN IF NOT EXISTS target_count INTEGER;
+      
     ALTER TABLE campaigns
       ADD COLUMN IF NOT EXISTS quoted_gram NUMERIC(30,8);
 
