@@ -7866,3 +7866,33 @@ img {
 .campaignActionBtn.claimReady:active {
   transform: scale(0.96);
 }
+
+
+/* =========================================================
+   EXCLUSIVE FINAL FIX
+   ========================================================= */
+
+.exclusiveIcon > .ico.premiumIcon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--gold);
+}
+
+.exclusiveIcon > .ico.premiumIcon svg {
+  display: block;
+  width: 28px;
+  height: 28px;
+}
+
+.campaignActionBtn.complete,
+.campaignActionBtn.complete:disabled {
+  min-width: 96px;
+  color: var(--green);
+  opacity: 1;
+  cursor: default;
+  font-weight: 900;
+  border-color: rgba(103, 230, 163, 0.24);
+  background: rgba(103, 230, 163, 0.08);
+}

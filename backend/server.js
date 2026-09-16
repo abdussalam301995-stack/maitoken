@@ -376,6 +376,13 @@ const cfg = {
     ),
 
 
+  exclusiveReward:
+    num(
+      'EXCLUSIVE_REWARD',
+      12
+    ),
+
+
   /* -------------------------------------------------------
      REFERRAL
      ------------------------------------------------------- */
@@ -3055,6 +3062,15 @@ ALTER TABLE campaigns
 
   ALTER TABLE campaigns
     ADD COLUMN IF NOT EXISTS payment_nano NUMERIC(30,0);
+
+  ALTER TABLE campaigns
+    ADD COLUMN IF NOT EXISTS payment_atomic NUMERIC(40,0);
+
+  ALTER TABLE campaigns
+    ADD COLUMN IF NOT EXISTS payer_wallet TEXT;
+
+  ALTER TABLE campaigns
+    ADD COLUMN IF NOT EXISTS payer_jetton_wallet TEXT;
 
   ALTER TABLE campaigns
     ADD COLUMN IF NOT EXISTS payment_tx_hash TEXT;
@@ -9152,36 +9168,54 @@ app.get(
           `
           SELECT
 
-            id,
+            c.id,
 
-            type,
+            c.type,
 
-            title,
+            c.title,
 
-            target_url,
+            c.target_url,
 
-            description,
+            c.description,
 
-            target_count,
+            c.target_count,
 
-            completed_count,
+            c.completed_count,
 
-            reward_per_user,
+            CASE
+              WHEN COALESCE(c.reward_per_user, 0) > 0
+                THEN c.reward_per_user
+              ELSE $2
+            END AS reward_per_user,
 
-            verification_type,
+            c.verification_type,
 
-            chat_id
+            c.chat_id,
 
-          FROM campaigns
+            EXISTS(
+              SELECT 1
+              FROM campaign_completions cc
+              WHERE cc.campaign_id=c.id
+                AND cc.telegram_id=$1
+            ) AS completed_by_user
+
+          FROM campaigns c
 
           WHERE
 
-            status='approved'
+            c.status='approved'
 
-            AND payment_status='paid'
+            AND c.payment_status='paid'
 
-            AND completed_count <
-              target_count
+            AND (
+              c.completed_count < c.target_count
+              OR EXISTS(
+                SELECT 1
+                FROM campaign_completions cc2
+                WHERE cc2.campaign_id=c.id
+                  AND cc2.telegram_id=$1
+              )
+            )
 
           ORDER BY
 
@@ -9190,7 +9224,11 @@ app.get(
             id DESC
 
           LIMIT 100
-          `
+          `,
+          [
+            req.auth.id,
+            cfg.exclusiveReward
+          ]
         );
 
 
@@ -9690,6 +9728,439 @@ async function findGramPaymentOnChain({
 
 
 /* =========================================================
+   REAL MAI WALLET PROMOTION PAYMENT
+   ========================================================= */
+
+function tokenToAtomic(
+  amount,
+  decimals = MAI_DECIMALS
+) {
+
+  const places =
+    Math.max(
+      0,
+      safeInteger(
+        decimals,
+        9
+      )
+    );
+
+
+  const text =
+    Number(
+      amount || 0
+    ).toFixed(
+      places
+    );
+
+
+  const parts =
+    text.split('.');
+
+
+  const whole =
+    parts[0] || '0';
+
+
+  const fraction =
+    String(
+      parts[1] || ''
+    )
+      .padEnd(
+        places,
+        '0'
+      )
+      .slice(
+        0,
+        places
+      );
+
+
+  return BigInt(
+    `${whole}${fraction}` ||
+    '0'
+  );
+
+}
+
+
+function campaignMaiPaymentAtomic(
+  amount,
+  campaignId
+) {
+
+  const base =
+    tokenToAtomic(
+      amount,
+      MAI_DECIMALS
+    );
+
+
+  const suffix =
+    (
+      BigInt(
+        Math.max(
+          1,
+          safeInteger(
+            campaignId,
+            1
+          )
+        )
+      ) %
+      9999n
+    ) +
+    1n;
+
+
+  return base +
+    suffix;
+
+}
+
+
+async function fetchMaiJettonWalletAddress(
+  ownerAddress
+) {
+
+  const owner =
+    String(
+      ownerAddress || ''
+    ).trim();
+
+
+  if (!owner) {
+
+    return null;
+
+  }
+
+
+  const controller =
+    new AbortController();
+
+
+  const timeout =
+    setTimeout(
+      () =>
+        controller.abort(),
+      12000
+    );
+
+
+  try {
+
+    const response =
+      await fetch(
+        `${TONAPI_BASE}/accounts/${encodeURIComponent(owner)}/jettons/${encodeURIComponent(MAI_JETTON_MASTER)}`,
+        {
+          headers:
+            tonApiHeaders(),
+
+          signal:
+            controller.signal
+        }
+      );
+
+
+    const data =
+      await response
+        .json()
+        .catch(
+          () => ({})
+        );
+
+
+    if (!response.ok) {
+
+      const error =
+        new Error(
+          data?.error ||
+          data?.message ||
+          `TonAPI HTTP ${response.status}`
+        );
+
+
+      error.status =
+        response.status;
+
+
+      throw error;
+
+    }
+
+
+    return String(
+      data?.wallet_address?.address ||
+      data?.wallet_address ||
+      data?.walletAddress?.address ||
+      data?.walletAddress ||
+      ''
+    ).trim() ||
+      null;
+
+
+  } finally {
+
+    clearTimeout(
+      timeout
+    );
+
+  }
+
+}
+
+
+function normalizedTonAddress(
+  value
+) {
+
+  return String(
+    value || ''
+  ).trim();
+
+}
+
+
+async function findMaiPaymentOnChain({
+  receiverWallet,
+  payerWallet,
+  expectedAtomic,
+  createdAt
+}) {
+
+  if (
+    !receiverWallet ||
+    !payerWallet ||
+    !expectedAtomic
+  ) {
+
+    return null;
+
+  }
+
+
+  const controller =
+    new AbortController();
+
+
+  const timeout =
+    setTimeout(
+      () =>
+        controller.abort(),
+      12000
+    );
+
+
+  try {
+
+    const response =
+      await fetch(
+        `${TONAPI_BASE}/accounts/${encodeURIComponent(receiverWallet)}/events?limit=100&subject_only=false`,
+        {
+          headers:
+            tonApiHeaders(),
+
+          signal:
+            controller.signal
+        }
+      );
+
+
+    const data =
+      await response
+        .json()
+        .catch(
+          () => ({})
+        );
+
+
+    if (!response.ok) {
+
+      const error =
+        new Error(
+          data?.error ||
+          data?.message ||
+          `TonAPI HTTP ${response.status}`
+        );
+
+
+      error.status =
+        response.status;
+
+
+      throw error;
+
+    }
+
+
+    const events =
+      Array.isArray(
+        data?.events
+      )
+        ? data.events
+        : [];
+
+
+    const minimumTime =
+      Math.floor(
+        new Date(
+          createdAt
+        ).getTime() /
+        1000
+      ) -
+      120;
+
+
+    const expected =
+      String(
+        expectedAtomic
+      );
+
+
+    for (
+      const event of events
+    ) {
+
+      const eventTime =
+        safeInteger(
+          event?.timestamp ??
+          event?.utime ??
+          event?.time ??
+          0
+        );
+
+
+      if (
+        eventTime <
+        minimumTime
+      ) {
+
+        continue;
+
+      }
+
+
+      const actions =
+        Array.isArray(
+          event?.actions
+        )
+          ? event.actions
+          : [];
+
+
+      for (
+        const action of actions
+      ) {
+
+        if (
+          String(
+            action?.type || ''
+          ) !==
+          'JettonTransfer'
+        ) {
+
+          continue;
+
+        }
+
+
+        const transfer =
+          action?.JettonTransfer ||
+          action?.jettonTransfer ||
+          action?.jetton_transfer ||
+          {};
+
+
+        const sender =
+          normalizedTonAddress(
+            transfer?.sender?.address ||
+            transfer?.sender
+          );
+
+
+        const recipient =
+          normalizedTonAddress(
+            transfer?.recipient?.address ||
+            transfer?.recipient
+          );
+
+
+        const jetton =
+          normalizedTonAddress(
+            transfer?.jetton?.address ||
+            transfer?.jetton
+          );
+
+
+        const amount =
+          String(
+            transfer?.amount ??
+            ''
+          ).trim();
+
+
+        if (
+          sender !==
+            normalizedTonAddress(
+              payerWallet
+            ) ||
+          recipient !==
+            normalizedTonAddress(
+              receiverWallet
+            ) ||
+          jetton !==
+            normalizedTonAddress(
+              MAI_JETTON_MASTER
+            ) ||
+          amount !==
+            expected
+        ) {
+
+          continue;
+
+        }
+
+
+        const hash =
+          String(
+            event?.event_id ||
+            event?.eventId ||
+            event?.id ||
+            ''
+          ).trim();
+
+
+        if (hash) {
+
+          return {
+            hash,
+            time:
+              eventTime,
+            amount
+          };
+
+        }
+
+      }
+
+    }
+
+
+    return null;
+
+
+  } finally {
+
+    clearTimeout(
+      timeout
+    );
+
+  }
+
+}
+
+
+/* =========================================================
    CREATE PROMOTION CAMPAIGN
    ========================================================= */
 
@@ -9911,51 +10382,42 @@ app.post(
         );
 
 
-        /* ---------------------------------------------------
-           MAI PAYMENT
-           Deducts from IN-GAME balance.
+        let payerWallet =
+          null;
 
-           GRAM payment stays pending until
-           payment verification/admin approval.
-           --------------------------------------------------- */
+
+        let payerJettonWallet =
+          null;
+
 
         if (
           method ===
           'MAI'
         ) {
 
-          const deducted =
+          const walletResult =
             await client.query(
               `
-              UPDATE users
-
-              SET
-
-                balance=
-                  balance - $2,
-
-                updated_at=
-                  NOW()
-
-              WHERE
-
-                telegram_id=$1
-
-                AND balance >= $2
-
-              RETURNING
-                balance
+              SELECT wallet_address
+              FROM users
+              WHERE telegram_id=$1
+              LIMIT 1
               `,
               [
-                req.auth.id,
-                paymentAmount
+                req.auth.id
               ]
             );
 
 
-          if (
-            !deducted.rowCount
-          ) {
+          payerWallet =
+            String(
+              walletResult.rows[0]
+                ?.wallet_address ||
+              ''
+            ).trim();
+
+
+          if (!payerWallet) {
 
             await client.query(
               'ROLLBACK'
@@ -9970,7 +10432,35 @@ app.post(
                   false,
 
                 message:
-                  `Not enough in-game MAI. Required: ${paymentAmount} MAI`
+                  'Connect your TON wallet before paying with MAI.'
+
+              });
+
+          }
+
+
+          payerJettonWallet =
+            await fetchMaiJettonWalletAddress(
+              payerWallet
+            );
+
+
+          if (!payerJettonWallet) {
+
+            await client.query(
+              'ROLLBACK'
+            );
+
+
+            return res
+              .status(409)
+              .json({
+
+                success:
+                  false,
+
+                message:
+                  'MAI was not found in the connected wallet.'
 
               });
 
@@ -10048,7 +10538,14 @@ app.post(
                 safeNumber(
                   rewardPerUser
                 )
-              ),
+              ) > 0
+                ? Math.max(
+                    0,
+                    safeNumber(
+                      rewardPerUser
+                    )
+                  )
+                : cfg.exclusiveReward,
 
               method,
 
@@ -10061,10 +10558,7 @@ app.post(
               PROMOTE_RECEIVER_WALLET ||
               null,
 
-              method ===
-                'MAI'
-                ? 'paid'
-                : 'pending',
+              'pending',
 
               verificationType,
 
@@ -10076,6 +10570,47 @@ app.post(
 
         let campaign =
           inserted.rows[0];
+
+
+        if (
+          method ===
+          'MAI'
+        ) {
+
+          const paymentAtomic =
+            campaignMaiPaymentAtomic(
+              quotedMai,
+              campaign.id
+            ).toString();
+
+
+          const updated =
+            await client.query(
+              `
+              UPDATE campaigns
+
+              SET
+                payment_atomic=$2,
+                payer_wallet=$3,
+                payer_jetton_wallet=$4
+
+              WHERE id=$1
+
+              RETURNING *
+              `,
+              [
+                campaign.id,
+                paymentAtomic,
+                payerWallet,
+                payerJettonWallet
+              ]
+            );
+
+
+          campaign =
+            updated.rows[0];
+
+        }
 
 
         if (
@@ -10114,65 +10649,6 @@ app.post(
         }
 
 
-        if (
-          method ===
-          'MAI'
-        ) {
-
-          await client.query(
-            `
-            INSERT INTO transactions(
-
-              telegram_id,
-
-              type,
-
-              amount,
-
-              reference,
-
-              metadata
-
-            )
-
-            VALUES(
-              $1,
-              'promotion_payment',
-              $2,
-              $3,
-              $4
-            )
-            `,
-            [
-
-              req.auth.id,
-
-              -paymentAmount,
-
-              String(
-                campaign.id
-              ),
-
-              {
-
-                paymentMethod:
-                  method,
-
-                completions:
-                  count,
-
-                quotedGram,
-
-                quotedMai
-
-              }
-
-            ]
-          );
-
-        }
-
-
         await client.query(
           'COMMIT'
         );
@@ -10195,6 +10671,21 @@ app.post(
             amountNano:
               campaign.payment_nano ||
               null,
+
+            amountAtomic:
+              campaign.payment_atomic ||
+              null,
+
+            payerWallet:
+              campaign.payer_wallet ||
+              null,
+
+            payerJettonWallet:
+              campaign.payer_jetton_wallet ||
+              null,
+
+            jettonMaster:
+              MAI_JETTON_MASTER,
 
             gramEquivalent:
               quotedGram,
@@ -10753,10 +11244,16 @@ app.post(
       );
 
 
-      const reward =
+      const storedReward =
         safeNumber(
           campaign.reward_per_user
         );
+
+
+      const reward =
+        storedReward > 0
+          ? storedReward
+          : cfg.exclusiveReward;
 
 
       if (
@@ -12685,8 +13182,12 @@ app.post(
 
 
       if (
-        campaign.payment_method !==
-        'GRAM'
+        ![
+          'GRAM',
+          'MAI'
+        ].includes(
+          campaign.payment_method
+        )
       ) {
 
         return res
@@ -12697,7 +13198,7 @@ app.post(
               false,
 
             message:
-              'This campaign does not use GRAM payment'
+              'Unsupported campaign payment method'
 
           });
 
@@ -12752,10 +13253,28 @@ app.post(
         );
 
 
+      const expectedAtomic =
+        String(
+          campaign.payment_atomic ||
+          ''
+        );
+
+
+      const paymentInitialized =
+        campaign.payment_method ===
+          'MAI'
+
+          ? /^\d+$/.test(
+              expectedAtomic
+            )
+
+          : /^\d+$/.test(
+              expectedNano
+            );
+
+
       if (
-        !/^\d+$/.test(
-          expectedNano
-        )
+        !paymentInitialized
       ) {
 
         return res
@@ -12796,17 +13315,35 @@ app.post(
       try {
 
         onChain =
-          await findGramPaymentOnChain({
+          campaign.payment_method ===
+            'MAI'
 
-            receiverWallet:
-              PROMOTE_RECEIVER_WALLET,
+            ? await findMaiPaymentOnChain({
 
-            expectedNano,
+                receiverWallet:
+                  PROMOTE_RECEIVER_WALLET,
 
-            createdAt:
-              campaign.created_at
+                payerWallet:
+                  campaign.payer_wallet,
 
-          });
+                expectedAtomic,
+
+                createdAt:
+                  campaign.created_at
+
+              })
+
+            : await findGramPaymentOnChain({
+
+                receiverWallet:
+                  PROMOTE_RECEIVER_WALLET,
+
+                expectedNano,
+
+                createdAt:
+                  campaign.created_at
+
+              });
 
 
       } catch (
@@ -12814,7 +13351,7 @@ app.post(
       ) {
 
         console.warn(
-          '[GRAM PAYMENT VERIFY]',
+          '[PROMOTION PAYMENT VERIFY]',
           error.message
         );
 
@@ -13057,25 +13594,54 @@ app.post(
 
           VALUES(
             $1,
-            'promotion_payment_gram',
             $2,
+            $3,
             $3,
             $4
           )
           `,
           [
             req.auth.id,
+
+            current.payment_method ===
+              'MAI'
+              ? 'promotion_payment_mai_wallet'
+              : 'promotion_payment_gram',
+
             -safeNumber(
-              current.quoted_gram
+              current.payment_method ===
+                'MAI'
+                ? current.quoted_mai
+                : current.quoted_gram
             ),
+
             String(
               campaignId
             ),
+
             {
               txHash:
                 onChain.hash,
+
+              paymentMethod:
+                current.payment_method,
+
               amountNano:
-                expectedNano,
+                current.payment_method ===
+                  'GRAM'
+                  ? expectedNano
+                  : null,
+
+              amountAtomic:
+                current.payment_method ===
+                  'MAI'
+                  ? expectedAtomic
+                  : null,
+
+              payerWallet:
+                current.payer_wallet ||
+                null,
+
               receiverWallet:
                 PROMOTE_RECEIVER_WALLET
             }

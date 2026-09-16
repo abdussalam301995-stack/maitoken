@@ -12,6 +12,12 @@ import {
   useTonConnectUI
 } from '@tonconnect/ui-react';
 
+import {
+  Address,
+  beginCell,
+  toNano
+} from '@ton/core';
+
 import './App.css';
 
 
@@ -223,6 +229,39 @@ async function api(
 
 
   return data;
+
+}
+
+
+/* =========================================================
+   TON CELL BASE64
+   ========================================================= */
+
+function bytesToBase64(
+  bytes
+) {
+
+  let binary =
+    '';
+
+
+  for (
+    let i = 0;
+    i < bytes.length;
+    i += 1
+  ) {
+
+    binary +=
+      String.fromCharCode(
+        bytes[i]
+      );
+
+  }
+
+
+  return btoa(
+    binary
+  );
 
 }
 
@@ -785,7 +824,7 @@ const TEXT = {
       'Wallet & Blockchain',
 
     termsWallet:
-      'Connected wallets remain under the user’s control. Blockchain transactions can be irreversible and network fees may apply.',
+  "Connected wallets remain under the user's control. Blockchain transactions can be irreversible and network fees may apply.",
 
     termsDataTitle:
       'Privacy & Data',
@@ -9110,7 +9149,12 @@ function TasksPage({
                               : 0;
 
 
+                          const completed =
+                            campaign.completed_by_user === true;
+
+
                           const canClaim =
+                            !completed &&
                             readyAt > 0 &&
                             remaining === 0;
 
@@ -9119,35 +9163,53 @@ function TasksPage({
 
                             <button
                               className={`taskActionBtn campaignActionBtn ${
-                                canClaim
-                                  ? 'claimReady'
-                                  : readyAt
-                                    ? 'counting'
-                                    : ''
+                                completed
+                                  ? 'complete'
+                                  : canClaim
+                                    ? 'claimReady'
+                                    : readyAt
+                                      ? 'counting'
+                                      : ''
                               }`}
 
                               disabled={
-                                readyAt > 0 &&
-                                !canClaim
+                                completed ||
+                                (
+                                  readyAt > 0 &&
+                                  !canClaim
+                                )
                               }
 
-                              onClick={() =>
+                              onClick={() => {
+
+                                if (
+                                  completed
+                                ) {
+
+                                  return;
+
+                                }
+
+
                                 canClaim
                                   ? claimCampaign(
                                       campaign
                                     )
                                   : openCampaign(
                                       campaign
-                                    )
-                              }
+                                    );
+
+                              }}
                             >
 
                               {
-                                canClaim
-                                  ? 'CLAIM'
-                                  : readyAt
-                                    ? `${remaining}s`
-                                    : t('open')
+                                completed
+                                  ? '✓ COMPLETE'
+                                  : canClaim
+                                    ? 'CLAIM'
+                                    : readyAt
+                                      ? `${remaining}s`
+                                      : t('open')
                               }
 
                             </button>
@@ -9506,13 +9568,11 @@ function PromotePage({
 
 
       if (
-        paymentMethod ===
-          'GRAM' &&
         !address
       ) {
 
         toast(
-          'Connect your TON wallet before paying with GRAM.'
+          `Connect your TON wallet before paying with ${paymentMethod}.`
         );
 
 
@@ -9585,10 +9645,198 @@ function PromotePage({
           'MAI'
         ) {
 
+          const receiverWallet =
+            String(
+              data?.payment
+                ?.receiverWallet ||
+              ''
+            ).trim();
+
+
+          const payerJettonWallet =
+            String(
+              data?.payment
+                ?.payerJettonWallet ||
+              ''
+            ).trim();
+
+
+          const amountAtomic =
+            String(
+              data?.payment
+                ?.amountAtomic ||
+              ''
+            ).trim();
+
+
+          if (
+            !receiverWallet ||
+            !payerJettonWallet ||
+            !/^\d+$/.test(
+              amountAtomic
+            )
+          ) {
+
+            throw new Error(
+              'Secure MAI wallet payment information is unavailable.'
+            );
+
+          }
+
+
+          const transferBody =
+            beginCell()
+              .storeUint(
+                0x0f8a7ea5,
+                32
+              )
+              .storeUint(
+                BigInt(
+                  data.campaign.id
+                ),
+                64
+              )
+              .storeCoins(
+                BigInt(
+                  amountAtomic
+                )
+              )
+              .storeAddress(
+                Address.parse(
+                  receiverWallet
+                )
+              )
+              .storeAddress(
+                Address.parse(
+                  address
+                )
+              )
+              .storeBit(
+                0
+              )
+              .storeCoins(
+                1n
+              )
+              .storeBit(
+                0
+              )
+              .endCell();
+
+
+          await tonConnectUI
+            .sendTransaction({
+
+              validUntil:
+                Math.floor(
+                  Date.now() /
+                  1000
+                ) +
+                300,
+
+              network:
+                '-239',
+
+              messages: [
+                {
+                  address:
+                    payerJettonWallet,
+
+                  amount:
+                    toNano(
+                      '0.08'
+                    ).toString(),
+
+                  payload:
+                    bytesToBase64(
+                      transferBody
+                        .toBoc()
+                    )
+                }
+              ]
+
+            });
+
+
           toast(
-            `${t(
-              'campaignPending'
-            )} #${data.campaign.id}`
+            'MAI payment sent. Waiting for blockchain confirmation...'
+          );
+
+
+          let verified =
+            false;
+
+
+          let lastError =
+            null;
+
+
+          for (
+            let attempt = 0;
+            attempt < 12;
+            attempt += 1
+          ) {
+
+            if (
+              attempt > 0
+            ) {
+
+              await wait(
+                3000
+              );
+
+            }
+
+
+            try {
+
+              const verification =
+                await api(
+                  `/api/campaigns/${data.campaign.id}/verify-payment`,
+                  {
+                    method:
+                      'POST'
+                  }
+                );
+
+
+              if (
+                verification?.verified
+              ) {
+
+                verified =
+                  true;
+
+                break;
+
+              }
+
+
+            } catch (
+              error
+            ) {
+
+              lastError =
+                error;
+
+            }
+
+          }
+
+
+          if (
+            !verified
+          ) {
+
+            throw new Error(
+              lastError?.message ||
+              'MAI payment was sent but is not finalized yet. Please try verification again shortly.'
+            );
+
+          }
+
+
+          toast(
+            `MAI payment verified — campaign #${data.campaign.id} activated.`
           );
 
 
@@ -10403,9 +10651,12 @@ function PromotePage({
                 {
                   fmtSmart(
                     user
-                      ?.inGameBalance ??
+                      ?.walletBalance ??
                     user
-                      ?.balance,
+                      ?.walletMai ??
+                    user
+                      ?.holding?.wallet ??
+                    0,
                     4
                   )
                 }
