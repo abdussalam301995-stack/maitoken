@@ -4696,12 +4696,6 @@ function Home({
         </button>
       </section>
 
-      <section className="holdingStrip glass">
-        <div><span>IN-GAME</span><b>{fmtSmart(inGameBalance, 4)}</b><small>MAI</small></div>
-        <div><span>WALLET</span><b>{walletText}</b><small>{walletAddress ? 'VERIFIED HOLDING' : 'TON CONNECT'}</small></div>
-        <button disabled={!walletAddress || holdingLoading} onClick={() => refreshHolding(true)}>{holdingLoading ? '...' : '↻'}</button>
-      </section>
-
       <section className="coinArea v3CoinArea">
         <span className="coinAura coinAuraOne" />
         <span className="coinAura coinAuraTwo" />
@@ -4721,20 +4715,6 @@ function Home({
         <div className="coinTapHint"><span>{t('tapCoin')}</span><small>{t('tapHint')}</small></div>
       </section>
 
-      <section className="liveMiningPanel glass">
-        <div className="liveMiningHead">
-          <div><span className="liveDot" /> <b>CONTINUOUS MINING</b></div>
-          <span className="modePill">{miningMode}</span>
-        </div>
-        <div className="livePendingValue">+{fmtSmart(livePending, 8)} <small>MAI</small></div>
-        <div className="liveMiningMeta">
-          <span>{fmtSmart(miningTh, 2)} TH/s</span>
-          <span>{fmtSmart(effectiveDaily, 2)} MAI / Day</span>
-          <span>{Math.round(miningMultiplier * 100)}%</span>
-        </div>
-        <small className="phaseText">{miningPhase} · Server-authoritative reward</small>
-      </section>
-
       <section className="v3ActionRow">
         <button className="boostAction glass" onClick={() => setView('boost')}>
           <span className="actionIcon"><Icon name="rocket" /></span>
@@ -4751,13 +4731,6 @@ function Home({
           <em>›</em>
         </button>
       </section>
-
-      <button className="tasksShortcut glass" onClick={() => setTab('task')}>
-        <span><Icon name="task" /></span>
-        <div><b>{t('dailyTasks')}</b><small>{tasks?.hasIncomplete ? t('claimReward') : t('completedToday')}</small></div>
-        {tasks?.hasIncomplete && <i className="topNoticeDot" />}
-        <em>›</em>
-      </button>
 
       <div className="tagline v3Tagline">✦ MAI NETWORK ✦<small>{t('together')}</small></div>
     </div>
