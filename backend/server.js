@@ -96,6 +96,15 @@ const ADMIN_KEY =
   );
 
 
+// SECURITY: Telegram adds this value to every genuine webhook request.
+// Configure TELEGRAM_WEBHOOK_SECRET in Render with 32+ random characters.
+const TELEGRAM_WEBHOOK_SECRET =
+  String(
+    process.env.TELEGRAM_WEBHOOK_SECRET ||
+    ''
+  ).trim();
+
+
 /* =========================================================
    PUBLIC URL / MINI APP
    ========================================================= */
@@ -1328,6 +1337,19 @@ function rateLimit(
       Date.now();
 
 
+    // SECURITY: bound the in-memory limiter so random-IP/path abuse cannot
+    // grow this Map without limit. Reward integrity is still enforced by DB
+    // locks/unique constraints; this limiter is an additional abuse shield.
+    if (buckets.size > 50000) {
+      for (const [oldKey, oldBucket] of buckets.entries()) {
+        if (now - oldBucket.start > 5 * 60 * 1000) {
+          buckets.delete(oldKey);
+        }
+        if (buckets.size <= 40000) break;
+      }
+    }
+
+
     let bucket =
       buckets.get(
         key
@@ -1369,6 +1391,11 @@ function rateLimit(
       bucket.count >
       max
     ) {
+
+      res.set(
+        'Retry-After',
+        String(Math.max(1, Math.ceil((windowMs - (now - bucket.start)) / 1000)))
+      );
 
       return res
         .status(429)
@@ -4400,6 +4427,26 @@ app.post(
     res
   ) => {
 
+    // SECURITY: reject forged webhook POSTs. Telegram documents that
+    // secret_token is echoed in X-Telegram-Bot-Api-Secret-Token.
+    const suppliedSecret = String(
+      req.get('X-Telegram-Bot-Api-Secret-Token') || ''
+    );
+
+    const expectedSecret = TELEGRAM_WEBHOOK_SECRET;
+    const suppliedBuffer = Buffer.from(suppliedSecret);
+    const expectedBuffer = Buffer.from(expectedSecret);
+
+    const validWebhook =
+      expectedBuffer.length >= 32 &&
+      suppliedBuffer.length === expectedBuffer.length &&
+      crypto.timingSafeEqual(suppliedBuffer, expectedBuffer);
+
+    if (!validWebhook) {
+      console.warn('[TELEGRAM WEBHOOK BLOCKED] invalid secret');
+      return res.sendStatus(401);
+    }
+
     res.sendStatus(
       200
     );
@@ -4474,12 +4521,13 @@ async function registerTelegramWebhook() {
 
   if (
     !BOT_TOKEN ||
-    !PUBLIC_BASE_URL
+    !PUBLIC_BASE_URL ||
+    TELEGRAM_WEBHOOK_SECRET.length < 32
   ) {
 
     console.warn(
 
-      'Telegram webhook not registered: BOT_TOKEN or PUBLIC_BASE_URL missing'
+      'Telegram webhook not registered: BOT_TOKEN, PUBLIC_BASE_URL, or 32+ char TELEGRAM_WEBHOOK_SECRET missing'
 
     );
 
@@ -4500,6 +4548,9 @@ async function registerTelegramWebhook() {
 
         url:
           webhookUrl,
+
+        secret_token:
+          TELEGRAM_WEBHOOK_SECRET,
 
         allowed_updates: [
           'message'
@@ -6316,6 +6367,13 @@ app.post(
           'ROLLBACK'
         );
 
+        await logSecurity(
+          req,
+          'reward_replay_blocked',
+          'warn',
+          { rewardType: 'daily_bonus', day }
+        );
+
 
         return res
           .status(409)
@@ -6373,6 +6431,13 @@ app.post(
 
       await client.query(
         'COMMIT'
+      );
+
+      await logSecurity(
+        req,
+        'reward_granted',
+        'info',
+        { rewardType: 'daily_bonus', day, amount: cfg.dailyBonus }
       );
 
 
@@ -7315,6 +7380,13 @@ app.post(
           'ROLLBACK'
         );
 
+        await logSecurity(
+          req,
+          'reward_replay_blocked',
+          'warn',
+          { rewardType: 'daily_task', taskKey: task.key, day }
+        );
+
 
         return res.json({
 
@@ -7559,6 +7631,13 @@ app.post(
 
       await client.query(
         'COMMIT'
+      );
+
+      await logSecurity(
+        req,
+        'reward_granted',
+        'info',
+        { rewardType: 'daily_task', taskKey: task.key, day, amount: reward }
       );
 
 
@@ -8526,6 +8605,15 @@ app.post(
           'ROLLBACK'
         );
 
+        if (ad?.claimed_at) {
+          await logSecurity(
+            req,
+            'reward_replay_blocked',
+            'warn',
+            { rewardType: 'ad', sessionId: req.params.id }
+          );
+        }
+
 
         return res
           .status(409)
@@ -8669,6 +8757,13 @@ app.post(
 
       await client.query(
         'COMMIT'
+      );
+
+      await logSecurity(
+        req,
+        'reward_granted',
+        'info',
+        { rewardType: 'ad', sessionId: ad.id, amount: cfg.adReward }
       );
 
 
@@ -13947,9 +14042,23 @@ app.use(
 
       '[SERVER ERROR]',
 
-      error
+      {
+        method: req.method,
+        path: req.path,
+        telegramId: req.auth?.id || null,
+        name: error?.name || 'Error',
+        message: error?.message || 'Unknown error'
+      }
 
     );
+
+    // Do not await here: the error response must not be delayed by logging.
+    logSecurity(
+      req,
+      'server_error',
+      'error',
+      { method: req.method, path: req.path, errorName: error?.name || 'Error' }
+    ).catch(() => {});
 
 
     if (
