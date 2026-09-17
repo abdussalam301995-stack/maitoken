@@ -4643,18 +4643,40 @@ function Home({
       const x = event.clientX ? event.clientX - rect.left : rect.width / 2;
       const y = event.clientY ? event.clientY - rect.top : rect.height / 2;
 
-      for (let i = 0; i < 9; i += 1) {
+      // Stronger, clearly visible gold burst around the tapped point.
+      // Decorative only — mining rewards remain fully server-authoritative.
+      const particleCount = 22;
+
+      for (let i = 0; i < particleCount; i += 1) {
         const particle = document.createElement('span');
-        const angle = (Math.PI * 2 * i) / 9 + (Math.random() - 0.5) * 0.35;
-        const distance = 38 + Math.random() * 58;
+        const angle =
+          (Math.PI * 2 * i) / particleCount +
+          (Math.random() - 0.5) * 0.42;
+        const distance = 54 + Math.random() * 92;
+        const size = 0.8 + Math.random() * 0.9;
+
         particle.className = 'maiTapParticle';
         particle.style.left = `${x}px`;
         particle.style.top = `${y}px`;
-        particle.style.setProperty('--tx', `${Math.cos(angle) * distance}px`);
-        particle.style.setProperty('--ty', `${Math.sin(angle) * distance - 18}px`);
-        particle.style.setProperty('--delay', `${Math.random() * 70}ms`);
+        particle.style.setProperty(
+          '--tx',
+          `${Math.cos(angle) * distance}px`
+        );
+        particle.style.setProperty(
+          '--ty',
+          `${Math.sin(angle) * distance - 22}px`
+        );
+        particle.style.setProperty(
+          '--delay',
+          `${Math.random() * 65}ms`
+        );
+        particle.style.setProperty(
+          '--particle-scale',
+          size.toFixed(2)
+        );
+
         layer.appendChild(particle);
-        window.setTimeout(() => particle.remove(), 1050);
+        window.setTimeout(() => particle.remove(), 1250);
       }
     }
 

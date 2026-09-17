@@ -8229,3 +8229,117 @@ img {
     height: min(66vw, 264px) !important;
   }
 }
+
+
+
+/* =========================================================
+   MAI HOME — stronger gold tap particles + clearer Claim Now
+   Visual-only overrides. No mining/payment/task logic here.
+   ========================================================= */
+
+.maiTapParticle {
+  width: 9px !important;
+  height: 9px !important;
+  border-radius: 50% !important;
+  pointer-events: none !important;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(var(--particle-scale, 1));
+  background:
+    radial-gradient(
+      circle,
+      #fffbd2 0%,
+      #fff19a 20%,
+      #ffd84d 43%,
+      #ffb300 68%,
+      rgba(255, 142, 0, 0.2) 100%
+    ) !important;
+  box-shadow:
+    0 0 5px #fff7a8,
+    0 0 11px #ffd84d,
+    0 0 20px rgba(255, 179, 0, 0.92),
+    0 0 30px rgba(255, 128, 0, 0.5) !important;
+  animation: maiGoldParticleBurst 1.12s cubic-bezier(.15,.72,.25,1) var(--delay, 0ms) forwards !important;
+  will-change: transform, opacity;
+}
+
+.maiTapParticle:nth-child(3n) {
+  width: 6px !important;
+  height: 6px !important;
+}
+
+.maiTapParticle:nth-child(4n) {
+  width: 12px !important;
+  height: 12px !important;
+}
+
+@keyframes maiGoldParticleBurst {
+  0% {
+    opacity: 0;
+    transform:
+      translate(-50%, -50%)
+      scale(calc(var(--particle-scale, 1) * 0.25));
+  }
+
+  12% {
+    opacity: 1;
+  }
+
+  58% {
+    opacity: 0.95;
+  }
+
+  100% {
+    opacity: 0;
+    transform:
+      translate(
+        calc(-50% + var(--tx, 0px)),
+        calc(-50% + var(--ty, -70px))
+      )
+      scale(calc(var(--particle-scale, 1) * 0.65));
+  }
+}
+
+/* Keep the Claim card simple: icon on the left, large readable label. */
+.claimActionFull {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 18px !important;
+  padding-left: 24px !important;
+  padding-right: 24px !important;
+  text-align: left !important;
+}
+
+.claimActionFull > div:first-child {
+  flex: 0 0 auto !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+.claimActionFull > div:not(:first-child) {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  text-align: left !important;
+}
+
+.claimActionFull b {
+  display: block !important;
+  margin: 0 !important;
+  font-size: clamp(22px, 6vw, 30px) !important;
+  line-height: 1.05 !important;
+  font-weight: 950 !important;
+  letter-spacing: 0.7px !important;
+  white-space: nowrap !important;
+}
+
+@media (max-width: 480px) {
+  .claimActionFull {
+    gap: 15px !important;
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
+
+  .claimActionFull b {
+    font-size: clamp(21px, 6.4vw, 28px) !important;
+  }
+}
