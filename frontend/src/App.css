@@ -8343,3 +8343,163 @@ img {
     font-size: clamp(21px, 6.4vw, 28px) !important;
   }
 }
+
+/* =========================================================
+   MAI SAFE BOOST REFINEMENT — 2026-09
+   Visual-only overrides for existing Home / Boost markup.
+   ========================================================= */
+
+/* HOME: make CLAIM NOW fit the full action card */
+.claimActionFull.claimActionSimple {
+  position: relative !important;
+  min-height: 78px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 10px 20px 10px 72px !important;
+}
+
+.claimActionSimple .actionIcon {
+  position: absolute !important;
+  left: 20px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  margin: 0 !important;
+}
+
+.claimActionSimple .claimOnlyLabel {
+  width: 100% !important;
+  text-align: center !important;
+  font-size: clamp(23px, 6.3vw, 29px) !important;
+  line-height: 1 !important;
+  font-weight: 950 !important;
+  letter-spacing: 1px !important;
+  white-space: nowrap !important;
+}
+
+/* BOOST: premium MAI black/gold treatment without changing navigation logic */
+.boostBalance {
+  border-color: rgba(244, 201, 92, .18) !important;
+  background:
+    radial-gradient(circle at 88% 12%, rgba(244, 188, 55, .13), transparent 34%),
+    linear-gradient(145deg, rgba(20, 23, 31, .96), rgba(7, 9, 14, .97)) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 18px 42px rgba(0,0,0,.24) !important;
+}
+
+.boostIntro {
+  border: 1px solid rgba(244, 201, 92, .14) !important;
+  border-radius: 22px !important;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(243, 194, 63, .09), transparent 45%),
+    rgba(12, 15, 21, .78) !important;
+}
+
+.boostIntro h3 {
+  font-size: clamp(25px, 6vw, 33px) !important;
+  letter-spacing: -.5px !important;
+}
+
+.boostIntro small {
+  color: rgba(243, 201, 105, .78) !important;
+  font-weight: 800 !important;
+  letter-spacing: .35px !important;
+}
+
+.levelCard {
+  min-height: 160px !important;
+  border-radius: 20px !important;
+  border-color: rgba(255,255,255,.075) !important;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(244, 188, 55, .10), transparent 38%),
+    linear-gradient(145deg, rgba(21,24,32,.96), rgba(8,10,15,.97)) !important;
+  box-shadow: 0 15px 34px rgba(0,0,0,.22) !important;
+}
+
+.levelCard.current {
+  border-color: rgba(244, 201, 92, .62) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255,220,115,.10),
+    0 0 26px rgba(244, 181, 39, .10) !important;
+}
+
+.levelCardText strong {
+  font-size: 20px !important;
+  letter-spacing: -.2px !important;
+}
+
+.levelCardText > small {
+  color: #f5d46d !important;
+  font-weight: 850 !important;
+}
+
+.levelCardApprovedStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.levelCardApprovedStats span {
+  padding: 5px 7px;
+  border: 1px solid rgba(243, 201, 105, .12);
+  border-radius: 999px;
+  color: rgba(245, 231, 186, .82);
+  background: rgba(243, 201, 105, .055);
+  font-size: 9px;
+  font-weight: 850;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.levelDetailHero {
+  border-color: rgba(244, 201, 92, .18) !important;
+  background:
+    radial-gradient(circle at 16% 35%, rgba(244, 188, 55, .12), transparent 33%),
+    linear-gradient(145deg, rgba(20,23,31,.96), rgba(7,9,14,.97)) !important;
+}
+
+.levelProgressCard,
+.levelMetric,
+.nextLevelCard {
+  border-color: rgba(244, 201, 92, .12) !important;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(244, 188, 55, .07), transparent 35%),
+    rgba(12,15,21,.88) !important;
+}
+
+.levelMetric b,
+.levelProgressTop b,
+.nextLevelCard .sectionHead > b {
+  color: #f5d46d !important;
+}
+
+.levelProgressBar i,
+.nextLevelCard .progress i {
+  background: linear-gradient(90deg, #c78d1f, #f3c969, #ffe69a) !important;
+  box-shadow: 0 0 14px rgba(243, 201, 105, .24) !important;
+}
+
+@media (max-width: 480px) {
+  .claimActionFull.claimActionSimple {
+    min-height: 76px !important;
+    padding-left: 68px !important;
+    padding-right: 17px !important;
+  }
+
+  .claimActionSimple .actionIcon {
+    left: 17px !important;
+  }
+
+  .claimActionSimple .claimOnlyLabel {
+    font-size: clamp(22px, 6.5vw, 27px) !important;
+  }
+
+  .levelCardApprovedStats {
+    gap: 5px;
+  }
+
+  .levelCardApprovedStats span {
+    font-size: 8px;
+    padding: 5px 6px;
+  }
+}
