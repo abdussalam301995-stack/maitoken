@@ -4529,8 +4529,7 @@ function Home({
   playClick,
   playReward
 }) {
-  const [sparks, setSparks] = useState([]);
-  const [coinPressed, setCoinPressed] = useState(false);
+  const lastTapHapticRef = useRef(0);
   const [holdingLoading, setHoldingLoading] = useState(false);
   const [walletHolding, setWalletHolding] = useState(Number(user?.walletHolding || 0));
   const [inGameBalance, setInGameBalance] = useState(Number(user?.inGameBalance ?? user?.balance ?? 0));
@@ -4604,28 +4603,31 @@ function Home({
   }, [walletAddress, refreshHolding]);
 
   const tapCoin = event => {
-    if (coinPressed) return;
-    playClick();
-    setCoinPressed(true);
-    try { tg()?.HapticFeedback?.impactOccurred('light'); } catch {}
-    const rect = event.currentTarget.getBoundingClientRect();
-    const centerX = rect.width / 2;
-    const centerY = rect.height / 2;
-    const newSparks = Array.from({ length: 16 }, (_, index) => {
-      const angle = (Math.PI * 2 * index) / 16;
-      const distance = 62 + Math.random() * 58;
-      return {
-        id: `${Date.now()}_${index}`,
-        x: centerX, y: centerY,
-        dx: Math.cos(angle) * distance,
-        dy: Math.sin(angle) * distance,
-        size: 4 + Math.random() * 5,
-        delay: Math.random() * 50
-      };
-    });
-    setSparks(newSparks);
-    setTimeout(() => setCoinPressed(false), 430);
-    setTimeout(() => setSparks([]), 850);
+    const coin = event.currentTarget;
+
+    // Visual-only tap feedback. Mining rewards remain server-authoritative.
+    // No React state lock means rapid taps are accepted immediately.
+    if (typeof coin.animate === 'function') {
+      coin.animate(
+        [
+          { transform: 'scale(1)' },
+          { transform: 'scale(0.965)' },
+          { transform: 'scale(1.012)' },
+          { transform: 'scale(1)' }
+        ],
+        {
+          duration: 150,
+          easing: 'cubic-bezier(.2,.8,.2,1)'
+        }
+      );
+    }
+
+    // Haptics are lightly throttled so very fast tapping stays responsive.
+    const now = Date.now();
+    if (now - lastTapHapticRef.current >= 80) {
+      lastTapHapticRef.current = now;
+      try { tg()?.HapticFeedback?.impactOccurred('light'); } catch {}
+    }
   };
 
   const handleFarm = () => {
@@ -4696,32 +4698,32 @@ function Home({
         </button>
       </section>
 
+      <section className="unclaimedRewardCard glass" aria-live="polite">
+        <span className="unclaimedRewardLabel">UNCLAIMED MINING REWARD</span>
+        <div className="unclaimedRewardValue">
+          {fmtSmart(livePending, 8)}
+          <small>MAI</small>
+        </div>
+        <div className="unclaimedRewardPower">
+          <Icon name="bolt" />
+          <span>Speed: <b>{fmtSmart(miningTh, 2)} TH/s</b></span>
+        </div>
+      </section>
+
       <section className="coinArea v3CoinArea">
         <span className="coinAura coinAuraOne" />
         <span className="coinAura coinAuraTwo" />
         <span className="coinAura coinAuraThree" />
-        <button className={coinPressed ? 'mainCoin coinPressed' : 'mainCoin'} onClick={tapCoin} aria-label="MAI">
+        <button className="mainCoin smoothTapCoin" onClick={tapCoin} aria-label="MAI">
           <span className="coinOuterRing"><span className="coinMiddleRing"><span className="coinInner"><MaiLogo className="mainCoinLogo" /></span></span></span>
           <span className="coinShine" />
           <span className="coinShineSecond" />
-          {sparks.map(spark => (
-            <span key={spark.id} className="goldSpark" style={{
-              left: `${spark.x}px`, top: `${spark.y}px`, width: `${spark.size}px`, height: `${spark.size}px`,
-              animationDelay: `${spark.delay}ms`, '--spark-x': `${spark.dx}px`, '--spark-y': `${spark.dy}px`,
-              '--spark-rotate': `${Math.random() * 360}deg`
-            }} />
-          ))}
         </button>
         <div className="coinTapHint"><span>{t('tapCoin')}</span><small>{t('tapHint')}</small></div>
       </section>
 
-      <section className="v3ActionRow">
-        <button className="boostAction glass" onClick={() => setView('boost')}>
-          <span className="actionIcon"><Icon name="rocket" /></span>
-          <div><span>MINING LEVEL</span><b>LVL {displayLevel}</b><small>Highest LVL {highestLevel}</small></div>
-          <em>›</em>
-        </button>
-        <button className="claimAction" disabled={busy || (user?.farm?.active && claimRemain > 0)} onClick={handleFarm}>
+      <section className="v3ActionRow v3ClaimOnlyRow">
+        <button className="claimAction claimActionFull" disabled={busy || (user?.farm?.active && claimRemain > 0)} onClick={handleFarm}>
           <span className="actionIcon"><Icon name="gift" /></span>
           <div>
             <span>{user?.farm?.active ? 'CLAIM NOW' : 'START MINING'}</span>
