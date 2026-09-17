@@ -890,7 +890,7 @@ const TEXT = {
       'Wallet holding updated',
 
     farmStarted:
-      '24h farming started',
+      'Continuous mining started',
 
     availableIn:
       'Available in',
@@ -1384,7 +1384,7 @@ const TEXT = {
       'تم تحديث رصيد المحفظة',
 
     farmStarted:
-      'بدأ التعدين لمدة 24 ساعة',
+      'بدأ التعدين المستمر',
 
     availableIn:
       'متاح خلال',
@@ -1878,7 +1878,7 @@ const TEXT = {
       'Баланс кошелька обновлён',
 
     farmStarted:
-      'Майнинг на 24 часа запущен',
+      'Непрерывный майнинг запущен',
 
     availableIn:
       'Доступно через',
@@ -4529,1374 +4529,239 @@ function Home({
   playClick,
   playReward
 }) {
+  const [sparks, setSparks] = useState([]);
+  const [coinPressed, setCoinPressed] = useState(false);
+  const [holdingLoading, setHoldingLoading] = useState(false);
+  const [walletHolding, setWalletHolding] = useState(Number(user?.walletHolding || 0));
+  const [inGameBalance, setInGameBalance] = useState(Number(user?.inGameBalance ?? user?.balance ?? 0));
+  const [totalHolding, setTotalHolding] = useState(Number(user?.totalHolding || 0));
+  const [displayLevel, setDisplayLevel] = useState(Number(user?.farm?.level ?? user?.level ?? 1));
+  const [livePending, setLivePending] = useState(Number(user?.farm?.pending || 0));
+  const [claimRemain, setClaimRemain] = useState(Number(user?.farm?.remaining || 0));
 
-  const [
-    remain,
-    setRemain
-  ] =
-    useState(
-      user?.farm?.remaining ||
-      0
-    );
+  useEffect(() => {
+    setWalletHolding(Number(user?.walletHolding || 0));
+    setInGameBalance(Number(user?.inGameBalance ?? user?.balance ?? 0));
+    setTotalHolding(Number(user?.totalHolding || 0));
+    setDisplayLevel(Number(user?.farm?.level ?? user?.level ?? 1));
+    setLivePending(Number(user?.farm?.pending || 0));
+    setClaimRemain(Number(user?.farm?.remaining || 0));
+  }, [
+    user?.walletHolding, user?.inGameBalance, user?.balance, user?.totalHolding,
+    user?.level, user?.farm?.level, user?.farm?.pending, user?.farm?.remaining
+  ]);
 
+  const baseRateDaily = Number(user?.farm?.baseRateDaily ?? user?.miningSpeed ?? 0);
+  const effectiveDaily = Number(user?.farm?.rateDaily ?? (baseRateDaily * Number(user?.farm?.multiplier ?? 1)));
+  const farmRateSecond = Number(user?.farm?.rateSecond ?? (effectiveDaily / 86400));
+  const miningTh = Number(user?.farm?.miningTh ?? user?.miningTh ?? 0);
+  const highestLevel = Number(user?.farm?.highestLevel ?? user?.highestLevel ?? displayLevel);
+  const miningMultiplier = Number(user?.farm?.multiplier ?? 1);
+  const miningMode = String(user?.farm?.mode || 'test').toUpperCase();
+  const miningPhase = String(user?.farm?.phase || 'test').replaceAll('_', ' ').toUpperCase();
 
-  const [
-    sparks,
-    setSparks
-  ] =
-    useState(
-      []
-    );
+  // Display-only live counter. The backend remains authoritative for claims.
+  useEffect(() => {
+    if (!user?.farm?.active) return undefined;
+    const timer = setInterval(() => {
+      setLivePending(value => value + farmRateSecond);
+      setClaimRemain(value => Math.max(0, value - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [user?.farm?.active, farmRateSecond]);
 
-
-  const [
-    coinPressed,
-    setCoinPressed
-  ] =
-    useState(
-      false
-    );
-
-
-  const [
-    holdingLoading,
-    setHoldingLoading
-  ] =
-    useState(
-      false
-    );
-
-
-  const [
-    walletHolding,
-    setWalletHolding
-  ] =
-    useState(
-      Number(
-        user?.walletHolding ||
-        0
-      )
-    );
-
-
-  const [
-    inGameBalance,
-    setInGameBalance
-  ] =
-    useState(
-      Number(
-        user?.inGameBalance ??
-        user?.balance ??
-        0
-      )
-    );
-
-
-  const [
-    totalHolding,
-    setTotalHolding
-  ] =
-    useState(
-      Number(
-        user?.totalHolding ||
-        0
-      )
-    );
-
-
-  const [
-    displayLevel,
-    setDisplayLevel
-  ] =
-    useState(
-      Number(
-        user?.level ||
-        0
-      )
-    );
-
-
-  /* =======================================================
-     SYNC SERVER USER DATA
-     ======================================================= */
-
-  useEffect(
-    () => {
-
-      setRemain(
-        Number(
-          user?.farm?.remaining ||
-          0
-        )
+  const refreshHolding = useCallback(async (force = false) => {
+    if (!walletAddress) {
+      setWalletHolding(0);
+      return;
+    }
+    setHoldingLoading(true);
+    try {
+      const data = await api(
+        force ? '/api/wallet/mai-balance/refresh' : '/api/wallet/mai-balance',
+        force ? { method: 'POST' } : undefined
       );
-
-
-      setWalletHolding(
-        Number(
-          user?.walletHolding ||
-          0
-        )
-      );
-
-
-      setInGameBalance(
-        Number(
-          user?.inGameBalance ??
-          user?.balance ??
-          0
-        )
-      );
-
-
-      setTotalHolding(
-        Number(
-          user?.totalHolding ||
-          0
-        )
-      );
-
-
-      setDisplayLevel(
-        Number(
-          user?.level ||
-          0
-        )
-      );
-
-    },
-    [
-      user?.farm?.remaining,
-      user?.walletHolding,
-      user?.inGameBalance,
-      user?.balance,
-      user?.totalHolding,
-      user?.level
-    ]
-  );
-
-
-  /* =======================================================
-     FARM TIMER
-     ======================================================= */
-
-  useEffect(
-    () => {
-
-      const timer =
-        setInterval(
-          () => {
-
-            setRemain(
-              value =>
-                Math.max(
-                  0,
-                  value - 1
-                )
-            );
-
-          },
-          1000
-        );
-
-
-      return () =>
-        clearInterval(
-          timer
-        );
-
-    },
-    []
-  );
-
-
-  /* =======================================================
-     WALLET HOLDING REFRESH
-     ======================================================= */
-
-  const refreshHolding =
-    useCallback(
-      async (
-        force = false
-      ) => {
-
-        if (
-          !walletAddress
-        ) {
-
-          setWalletHolding(
-            0
-          );
-
-          return;
-
-        }
-
-
-        setHoldingLoading(
-          true
-        );
-
-
-        try {
-
-          const data =
-            await api(
-              force
-                ? '/api/wallet/mai-balance/refresh'
-                : '/api/wallet/mai-balance',
-              force
-                ? {
-                    method:
-                      'POST'
-                  }
-                : undefined
-            );
-
-
-          const wallet =
-            Number(
-              data.walletBalance ??
-              data.balance ??
-              0
-            );
-
-
-          const inGame =
-            Number(
-              data.inGameBalance ??
-              user?.balance ??
-              0
-            );
-
-
-          const total =
-            Number(
-              data.totalHolding ??
-              (
-                wallet +
-                inGame
-              )
-            );
-
-
-          setWalletHolding(
-            wallet
-          );
-
-
-          setInGameBalance(
-            inGame
-          );
-
-
-          setTotalHolding(
-            total
-          );
-
-
-          setDisplayLevel(
-            Number(
-              data.level ??
-              user?.level ??
-              0
-            )
-          );
-
-
-          if (
-            force
-          ) {
-
-            toast(
-              t(
-                'walletUpdated'
-              )
-            );
-
-          }
-
-
-        } catch (
-          error
-        ) {
-
-          console.warn(
-            'Wallet holding refresh failed:',
-            error
-          );
-
-
-          if (
-            force
-          ) {
-
-            toast(
-              error.message
-            );
-
-          }
-
-
-        } finally {
-
-          setHoldingLoading(
-            false
-          );
-
-        }
-
-      },
-      [
-        walletAddress,
-        user?.balance,
-        user?.level,
-        toast,
-        t
-      ]
-    );
-
-
-  useEffect(
-    () => {
-
-      if (
-        !walletAddress
-      ) {
-
-        return;
-
-      }
-
-
-      const timer =
-        setInterval(
-          () => {
-
-            refreshHolding(
-              false
-            );
-
-          },
-          30000
-        );
-
-
-      return () =>
-        clearInterval(
-          timer
-        );
-
-    },
-    [
-      walletAddress,
-      refreshHolding
-    ]
-  );
-
-
-  /* =======================================================
-     COIN TAP
-     ======================================================= */
-
-  const tapCoin =
-    event => {
-
-      if (
-        coinPressed
-      ) {
-
-        return;
-
-      }
-
-
+      const wallet = Number(data.walletBalance ?? data.balance ?? 0);
+      const inGame = Number(data.inGameBalance ?? user?.balance ?? 0);
+      const total = Number(data.totalHolding ?? (wallet + inGame));
+      setWalletHolding(wallet);
+      setInGameBalance(inGame);
+      setTotalHolding(total);
+      setDisplayLevel(Number(data.level ?? user?.farm?.level ?? user?.level ?? 1));
+      if (force) toast(t('walletUpdated'));
+    } catch (error) {
+      console.warn('Wallet holding refresh failed:', error);
+      if (force) toast(error.message);
+    } finally {
+      setHoldingLoading(false);
+    }
+  }, [walletAddress, user?.balance, user?.farm?.level, user?.level, toast, t]);
+
+  useEffect(() => {
+    if (!walletAddress) return undefined;
+    const timer = setInterval(() => refreshHolding(false), 30000);
+    return () => clearInterval(timer);
+  }, [walletAddress, refreshHolding]);
+
+  const tapCoin = event => {
+    if (coinPressed) return;
+    playClick();
+    setCoinPressed(true);
+    try { tg()?.HapticFeedback?.impactOccurred('light'); } catch {}
+    const rect = event.currentTarget.getBoundingClientRect();
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    const newSparks = Array.from({ length: 16 }, (_, index) => {
+      const angle = (Math.PI * 2 * index) / 16;
+      const distance = 62 + Math.random() * 58;
+      return {
+        id: `${Date.now()}_${index}`,
+        x: centerX, y: centerY,
+        dx: Math.cos(angle) * distance,
+        dy: Math.sin(angle) * distance,
+        size: 4 + Math.random() * 5,
+        delay: Math.random() * 50
+      };
+    });
+    setSparks(newSparks);
+    setTimeout(() => setCoinPressed(false), 430);
+    setTimeout(() => setSparks([]), 850);
+  };
+
+  const handleFarm = () => {
+    action(async () => {
       playClick();
-
-
-      setCoinPressed(
-        true
-      );
-
-
-      try {
-
-        tg()
-          ?.HapticFeedback
-          ?.impactOccurred(
-            'light'
-          );
-
-      } catch {}
-
-
-      const rect =
-        event.currentTarget
-          .getBoundingClientRect();
-
-
-      const centerX =
-        rect.width /
-        2;
-
-
-      const centerY =
-        rect.height /
-        2;
-
-
-      const newSparks =
-        Array.from(
-          {
-            length:
-              16
-          },
-          (
-            _,
-            index
-          ) => {
-
-            const angle =
-              (
-                Math.PI *
-                2 *
-                index
-              ) /
-              16;
-
-
-            const distance =
-              62 +
-              Math.random() *
-              58;
-
-
-            return {
-
-              id:
-                `${Date.now()}_${index}`,
-
-              x:
-                centerX,
-
-              y:
-                centerY,
-
-              dx:
-                Math.cos(
-                  angle
-                ) *
-                distance,
-
-              dy:
-                Math.sin(
-                  angle
-                ) *
-                distance,
-
-              size:
-                4 +
-                Math.random() *
-                5,
-
-              delay:
-                Math.random() *
-                50
-
-            };
-
-          }
-        );
-
-
-      setSparks(
-        newSparks
-      );
-
-
-      setTimeout(
-        () => {
-
-          setCoinPressed(
-            false
-          );
-
-        },
-        430
-      );
-
-
-      setTimeout(
-        () => {
-
-          setSparks(
-            []
-          );
-
-        },
-        850
-      );
-
+      if (!user?.farm?.active) {
+        await api('/api/farm/start', { method: 'POST' });
+        toast('Continuous mining started');
+        await refresh();
+        return;
+      }
+      if (claimRemain > 0) {
+        toast(`${t('availableIn')} ${hms(claimRemain)}`);
+        return;
+      }
+      const data = await api('/api/farm/claim', { method: 'POST' });
+      playReward();
+      toast(`+${fmtSmart(data.reward, 6)} MAI — ${t('rewardClaimed')}`);
+      setLivePending(0);
+      await refresh();
+    });
   };
 
-
-  /* =======================================================
-     FARM ACTION
-     ======================================================= */
-
-  const handleFarm =
-    () => {
-
-      action(
-        async () => {
-
-          playClick();
-
-
-          if (
-            !user?.farm?.active
-          ) {
-
-            await api(
-              '/api/farm/start',
-              {
-                method:
-                  'POST'
-              }
-            );
-
-
-            toast(
-              t(
-                'farmStarted'
-              )
-            );
-
-
-            await refresh();
-
-
-            return;
-
-          }
-
-
-          if (
-            user?.farm?.ready ||
-            remain <= 0
-          ) {
-
-            const data =
-              await api(
-                '/api/farm/claim',
-                {
-                  method:
-                    'POST'
-                }
-              );
-
-
-            playReward();
-
-
-            toast(
-              `+${fmtSmart(
-                data.reward,
-                4
-              )} MAI — ${t(
-                'rewardClaimed'
-              )}`
-            );
-
-
-            await refresh();
-
-
-            return;
-
-          }
-
-
-          toast(
-            `${t(
-              'availableIn'
-            )} ${hms(
-              remain
-            )}`
-          );
-
-        }
-      );
-
-  };
-
-
-  const farmPending =
-    Number(
-      user?.farm?.pending ||
-      0
-    );
-
-
-  const farmRate =
-    Number(
-      user?.farm?.rateDaily ||
-      user?.miningSpeed ||
-      0
-    );
-
-
-  const farmRateSecond =
-    Number(
-      user?.farm?.rateSecond ||
-      (
-        farmRate /
-        86400
-      )
-    );
-
-
-  const walletText =
-    !walletAddress
-      ? t(
-          'connectWallet'
-        )
-
-      : holdingLoading
-      ? '...'
-
-      : `${fmtSmart(
-          walletHolding,
-          4
-        )} MAI`;
-
-
-  /* =======================================================
-     HOME UI
-     ======================================================= */
+  const walletText = !walletAddress
+    ? t('connectWallet')
+    : holdingLoading ? '...' : `${fmtSmart(walletHolding, 4)} MAI`;
 
   return (
-
-    <div className="homePage">
-
-      {/* ===================================================
-          TOP GRID
-          =================================================== */}
-
-      <section className="topGrid">
-
-        <div className="brand glass">
-
+    <div className="homePage homeV3">
+      <section className="topGrid v3TopGrid">
+        <div className="brand glass v3Card">
           <MaiLogo />
-
-
           <div>
-
-            <strong>
-              {t('appName')}
-            </strong>
-
-
-            <span>
-
-              <i className="online" />
-
-              {' '}
-
-              {t('online')}
-
-            </span>
-
-
-            <small>
-              {t('slogan')}
-            </small>
-
+            <strong>{t('appName')}</strong>
+            <span><i className="online" /> {t('online')}</span>
+            <small>{t('slogan')}</small>
           </div>
-
         </div>
 
-
-        <button
-          className="balance glass"
-
-          onClick={() =>
-            setTab(
-              'profile'
-            )
-          }
-        >
-
-          <Icon name="wallet" />
-
-
+        <button className="balance glass v3Card" onClick={() => setTab('profile')}>
           <div>
-
-            <span className="balanceLabel">
-              {t('totalBalance')}
-            </span>
-
-
-            <b className="balanceValue">
-
-              {
-                fmtSmart(
-                  totalHolding,
-                  4
-                )
-              }
-
-            </b>
-
-
-            <small>
-              MAI
-            </small>
-
+            <span className="balanceLabel">{t('totalBalance')}</span>
+            <b className="balanceValue">{fmtSmart(totalHolding, 4)}</b>
+            <small>MAI</small>
           </div>
-
-
-          <em>
-            ›
-          </em>
-
+          <em>›</em>
         </button>
 
-
-        {/* =================================================
-            USER MINI CARD
-            ================================================= */}
-
-        <div className="profileMini glass">
-
+        <div className="profileMini glass v3Card">
           <div className="avatar">
-
-            {
-              user?.photoUrl
-                ? (
-
-                  <img
-                    src={
-                      user.photoUrl
-                    }
-
-                    alt=""
-                  />
-
-                )
-                : (
-
-                  <span>
-
-                    {
-                      user
-                        ?.firstName
-                        ?.[0] ||
-                      'M'
-                    }
-
-                  </span>
-
-                )
-            }
-
+            {user?.photoUrl ? <img src={user.photoUrl} alt="" /> : <span>{user?.firstName?.[0] || 'M'}</span>}
           </div>
-
-
           <div className="profileMiniText">
-
-            <span>
-              {t('profile')}
-            </span>
-
-
-            <b>
-
-              {
-                user?.firstName ||
-                'MAI User'
-              }
-
-            </b>
-
-
-            <small>
-
-              LVL {
-                displayLevel
-              }
-
-            </small>
-
+            <span>{t('profile')}</span>
+            <b>{user?.firstName || 'MAI User'}</b>
+            <small>ACTIVE LVL {displayLevel} · HIGHEST {highestLevel}</small>
           </div>
-
         </div>
 
-
-        {/* =================================================
-            TASK MINI CARD
-            ================================================= */}
-
-        <button
-          className="taskTopCard glass"
-
-          onClick={() =>
-            setTab(
-              'task'
-            )
-          }
-        >
-
-          <span className="taskTopIcon">
-
-            <Icon name="task" />
-
-          </span>
-
-
+        <button className="networkPowerCard glass v3Card" onClick={() => setView('boost')}>
+          <span className="networkPowerIcon"><Icon name="bolt" /></span>
           <div>
-
-            <span>
-              {t('tasks')}
-            </span>
-
-
-            <b>
-              {t('dailyTasks')}
-            </b>
-
-
-            <small>
-
-              {
-                tasks
-                  ?.hasIncomplete
-                  ? t(
-                      'claimReward'
-                    )
-                  : t(
-                      'completedToday'
-                    )
-              }
-
-            </small>
-
+            <span>NETWORK POWER</span>
+            <b>{fmtSmart(miningTh, 2)} TH/s</b>
+            <small>{fmtSmart(effectiveDaily, 2)} MAI / Day</small>
           </div>
-
-
-          {
-            tasks
-              ?.hasIncomplete && (
-
-              <i className="topNoticeDot" />
-
-            )
-          }
-
-
-          <em>
-            ›
-          </em>
-
+          <em>›</em>
         </button>
-
-
-        {/* =================================================
-            WALLET HOLDING CARD
-            ================================================= */}
-
-       
-
       </section>
 
-
-      {/* ===================================================
-          TOTAL BALANCE COMMAND CARD
-          =================================================== */}
-
-      <section className="miningSummary glass">
-
-        <div className="summaryMain">
-
-          <span>
-            {t('totalBalance')}
-          </span>
-
-
-          <strong>
-
-            {
-              fmtSmart(
-                totalHolding,
-                4
-              )
-            }
-
-          </strong>
-
-
-          <small>
-            MAI
-          </small>
-
-        </div>
-
-
-        <div className="summaryDivider" />
-
-
-        <div className="summaryStats">
-
-          <div>
-
-            <span>
-              {t('inGame')}
-            </span>
-
-
-            <b>
-
-              {
-                fmtSmart(
-                  inGameBalance,
-                  4
-                )
-              }
-
-            </b>
-
-          </div>
-
-
-          <div>
-
-            <span>
-              {t('wallet')}
-            </span>
-
-
-            <b>
-
-              {
-                fmtSmart(
-                  walletHolding,
-                  4
-                )
-              }
-
-            </b>
-
-          </div>
-
-
-          <div>
-
-            <span>
-              {t('level')}
-            </span>
-
-
-            <b>
-
-              LVL {
-                displayLevel
-              }
-
-            </b>
-
-          </div>
-
-        </div>
-
+      <section className="holdingStrip glass">
+        <div><span>IN-GAME</span><b>{fmtSmart(inGameBalance, 4)}</b><small>MAI</small></div>
+        <div><span>WALLET</span><b>{walletText}</b><small>{walletAddress ? 'VERIFIED HOLDING' : 'TON CONNECT'}</small></div>
+        <button disabled={!walletAddress || holdingLoading} onClick={() => refreshHolding(true)}>{holdingLoading ? '...' : '↻'}</button>
       </section>
 
-
-      {/* ===================================================
-          MAI COIN HERO
-          =================================================== */}
-
-      <section className="coinArea">
-
+      <section className="coinArea v3CoinArea">
         <span className="coinAura coinAuraOne" />
-
         <span className="coinAura coinAuraTwo" />
-
         <span className="coinAura coinAuraThree" />
-
-
-        <button
-          className={
-            coinPressed
-              ? 'mainCoin coinPressed'
-              : 'mainCoin'
-          }
-
-          onClick={
-            tapCoin
-          }
-
-          aria-label="MAI"
-        >
-
-          <span className="coinOuterRing">
-
-            <span className="coinMiddleRing">
-
-              <span className="coinInner">
-
-                <MaiLogo
-                  className="mainCoinLogo"
-                />
-
-              </span>
-
-            </span>
-
-          </span>
-
-
+        <button className={coinPressed ? 'mainCoin coinPressed' : 'mainCoin'} onClick={tapCoin} aria-label="MAI">
+          <span className="coinOuterRing"><span className="coinMiddleRing"><span className="coinInner"><MaiLogo className="mainCoinLogo" /></span></span></span>
           <span className="coinShine" />
-
           <span className="coinShineSecond" />
-
-
-          {
-            sparks.map(
-              spark => (
-
-                <span
-                  key={
-                    spark.id
-                  }
-
-                  className="goldSpark"
-
-                  style={{
-
-                    left:
-                      `${spark.x}px`,
-
-                    top:
-                      `${spark.y}px`,
-
-                    width:
-                      `${spark.size}px`,
-
-                    height:
-                      `${spark.size}px`,
-
-                    animationDelay:
-                      `${spark.delay}ms`,
-
-                    '--spark-x':
-                      `${spark.dx}px`,
-
-                    '--spark-y':
-                      `${spark.dy}px`,
-
-                    '--spark-rotate':
-                      `${Math.random() * 360}deg`
-
-                  }}
-                />
-
-              )
-            )
-          }
-
+          {sparks.map(spark => (
+            <span key={spark.id} className="goldSpark" style={{
+              left: `${spark.x}px`, top: `${spark.y}px`, width: `${spark.size}px`, height: `${spark.size}px`,
+              animationDelay: `${spark.delay}ms`, '--spark-x': `${spark.dx}px`, '--spark-y': `${spark.dy}px`,
+              '--spark-rotate': `${Math.random() * 360}deg`
+            }} />
+          ))}
         </button>
-
-
-        <div className="coinTapHint">
-
-          <span>
-            {t('tapCoin')}
-          </span>
-
-
-          <small>
-            {t('tapHint')}
-          </small>
-
-        </div>
-
+        <div className="coinTapHint"><span>{t('tapCoin')}</span><small>{t('tapHint')}</small></div>
       </section>
 
-
-      {/* ===================================================
-          MINING INFORMATION
-          =================================================== */}
-
-      <section className="homeCards">
-
-        <div className="infoCard glass">
-
-          <Icon name="bolt" />
-
-
-          <div>
-
-            <span>
-              {t('autoMining')}
-            </span>
-
-
-            <b>
-
-              +{
-                fmt(
-                  farmRateSecond,
-                  8
-                )
-              }
-
-              {' '}
-
-              {t('perSecond')}
-
-            </b>
-
-
-            <small>
-
-              {
-                fmtSmart(
-                  farmRate,
-                  4
-                )
-              }
-
-              {' '}
-
-              {t('perDay')}
-
-            </small>
-
-          </div>
-
+      <section className="liveMiningPanel glass">
+        <div className="liveMiningHead">
+          <div><span className="liveDot" /> <b>CONTINUOUS MINING</b></div>
+          <span className="modePill">{miningMode}</span>
         </div>
-
-
-        <div className="infoCard glass">
-
-          <Icon name="clock" />
-
-
-          <div>
-
-            <span>
-              {t('farmingTime')}
-            </span>
-
-
-            <b>
-
-              {
-                user
-                  ?.farm
-                  ?.ready ||
-                remain <= 0
-
-                  ? t('ready')
-
-                  : hms(
-                      remain
-                    )
-              }
-
-            </b>
-
-
-            <small>
-
-              {
-                user
-                  ?.farm
-                  ?.ready ||
-                remain <= 0
-
-                  ? t(
-                      'claimReward'
-                    )
-
-                  : t(
-                      'serverMining'
-                    )
-              }
-
-            </small>
-
-          </div>
-
+        <div className="livePendingValue">+{fmtSmart(livePending, 8)} <small>MAI</small></div>
+        <div className="liveMiningMeta">
+          <span>{fmtSmart(miningTh, 2)} TH/s</span>
+          <span>{fmtSmart(effectiveDaily, 2)} MAI / Day</span>
+          <span>{Math.round(miningMultiplier * 100)}%</span>
         </div>
-
-
-        <button
-          className="infoCard glass clickable"
-
-          onClick={() =>
-            setView(
-              'boost'
-            )
-          }
-        >
-
-          <Icon name="rocket" />
-
-
-          <div>
-
-            <span>
-              {t('boost')}
-            </span>
-
-
-            <b>
-
-              LVL {
-                displayLevel
-              }
-
-            </b>
-
-
-            <small>
-
-              {
-                fmtSmart(
-                  user?.miningSpeed,
-                  4
-                )
-              }
-
-              {' '}
-
-              {t('perDay')}
-
-            </small>
-
-          </div>
-
-
-          <em>
-            ›
-          </em>
-
-        </button>
-
-
-        <button
-          className="infoCard glass clickable farmCard"
-
-          disabled={
-            busy
-          }
-
-          onClick={
-            handleFarm
-          }
-        >
-
-          <Icon name="gift" />
-
-
-          <div>
-
-            <span>
-
-              {
-                !user
-                  ?.farm
-                  ?.active
-
-                  ? t(
-                      'startFarming'
-                    )
-
-                  : user
-                      ?.farm
-                      ?.ready ||
-                    remain <= 0
-
-                  ? t(
-                      'claim'
-                    )
-
-                  : t(
-                      'farmReward'
-                    )
-              }
-
-            </span>
-
-
-            <b>
-
-              {
-                user
-                  ?.farm
-                  ?.ready ||
-                remain <= 0
-
-                  ? `${fmtSmart(
-                      farmRate,
-                      4
-                    )} MAI`
-
-                  : `${fmtSmart(
-                      farmPending,
-                      4
-                    )} MAI`
-              }
-
-            </b>
-
-
-            <small>
-
-              {
-                user
-                  ?.farm
-                  ?.ready ||
-                remain <= 0
-
-                  ? t(
-                      'nextCycle'
-                    )
-
-                  : hms(
-                      remain
-                    )
-              }
-
-            </small>
-
-          </div>
-
-
-          <em>
-            ›
-          </em>
-
-        </button>
-
+        <small className="phaseText">{miningPhase} · Server-authoritative reward</small>
       </section>
 
+      <section className="v3ActionRow">
+        <button className="boostAction glass" onClick={() => setView('boost')}>
+          <span className="actionIcon"><Icon name="rocket" /></span>
+          <div><span>MINING LEVEL</span><b>LVL {displayLevel}</b><small>Highest LVL {highestLevel}</small></div>
+          <em>›</em>
+        </button>
+        <button className="claimAction" disabled={busy || (user?.farm?.active && claimRemain > 0)} onClick={handleFarm}>
+          <span className="actionIcon"><Icon name="gift" /></span>
+          <div>
+            <span>{user?.farm?.active ? 'CLAIM NOW' : 'START MINING'}</span>
+            <b>{user?.farm?.active ? `${fmtSmart(livePending, 6)} MAI` : `${fmtSmart(effectiveDaily, 2)} MAI / Day`}</b>
+            <small>{user?.farm?.active ? (claimRemain > 0 ? `Available in ${hms(claimRemain)}` : 'Ready to claim') : 'Continuous · Claim anytime'}</small>
+          </div>
+          <em>›</em>
+        </button>
+      </section>
 
-      <div className="tagline">
+      <button className="tasksShortcut glass" onClick={() => setTab('task')}>
+        <span><Icon name="task" /></span>
+        <div><b>{t('dailyTasks')}</b><small>{tasks?.hasIncomplete ? t('claimReward') : t('completedToday')}</small></div>
+        {tasks?.hasIncomplete && <i className="topNoticeDot" />}
+        <em>›</em>
+      </button>
 
-        ✦ MAI NETWORK ✦
-
-
-        <small>
-          {t('together')}
-        </small>
-
-      </div>
-
+      <div className="tagline v3Tagline">✦ MAI NETWORK ✦<small>{t('together')}</small></div>
     </div>
-
   );
-
 }
 
 

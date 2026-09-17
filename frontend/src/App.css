@@ -7896,3 +7896,110 @@ img {
   border-color: rgba(103, 230, 163, 0.24);
   background: rgba(103, 230, 163, 0.08);
 }
+
+
+/* =========================================================
+   MAI HOME V3 — TARGET DESIGN OVERRIDES
+   Keeps existing pages/functions; redesigns Home only.
+   ========================================================= */
+.homeV3 { padding-top: 2px; }
+.homeV3 .v3TopGrid { gap: 10px; }
+.homeV3 .v3Card {
+  background: linear-gradient(145deg, rgba(20,24,30,.88), rgba(7,9,13,.82));
+  border: 1px solid rgba(255,220,120,.22);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 12px 30px rgba(0,0,0,.28);
+}
+.homeV3 .brand, .homeV3 .balance { min-height: 84px; }
+.homeV3 .profileMini, .homeV3 .networkPowerCard { min-height: 100px; }
+.homeV3 .profileMiniText small { color: #ffd75f; font-size: 12px; font-weight: 850; }
+.homeV3 .profileMiniText .highestLevelText { color: #eef1f8; font-size: 10px; font-weight: 650; margin-top: 2px; }
+.networkPowerCard {
+  display: flex; align-items: center; gap: 10px; min-width: 0; padding: 12px;
+  text-align: left; border-radius: var(--radius-lg);
+}
+.networkPowerCard > div { min-width: 0; flex: 1; }
+.networkPowerCard > div > span { display:block; color:#d8def1; font-size:10px; font-weight:850; letter-spacing:.5px; }
+.networkPowerCard b { display:block; margin-top:3px; color:#ffe06f; font-size:21px; font-weight:950; white-space:nowrap; }
+.networkPowerCard small { display:block; margin-top:3px; color:#c2c8d6; font-size:10px; }
+.networkPowerCard em { color:#9da8c5; font-size:22px; font-style:normal; }
+.networkPowerIcon {
+  display:grid; place-items:center; width:43px; height:43px; flex:0 0 43px; border-radius:14px;
+  color:#ffd85e; background:linear-gradient(145deg,rgba(255,211,78,.2),rgba(104,71,12,.12));
+  border:1px solid rgba(255,217,94,.2);
+}
+.networkPowerIcon svg { width:24px; height:24px; }
+
+.homeV3 .v3CoinArea {
+  min-height: 470px; margin-top:-8px; padding:28px 0 20px;
+  justify-content:center;
+}
+.homeV3 .v3CoinArea::before {
+  content:""; position:absolute; inset:5% -20px 0; z-index:-2; pointer-events:none;
+  background:radial-gradient(circle at 50% 48%, rgba(255,183,35,.24), transparent 32%),
+             radial-gradient(circle at 50% 80%, rgba(255,155,0,.15), transparent 34%);
+}
+.homeV3 .mainCoin { width:330px; height:330px; }
+.homeV3 .mainCoinLogo { width:330px !important; height:330px !important; filter:drop-shadow(0 0 26px rgba(255,190,32,.42)); }
+.homeV3 .mainCoin .coinOuterRing,
+.homeV3 .mainCoin .coinMiddleRing,
+.homeV3 .mainCoin .coinInner { background:transparent !important; border:0 !important; box-shadow:none !important; padding:0 !important; }
+.homeV3 .coinTapHint { margin-top:-5px; }
+.homeV3 .coinTapHint > span { color:#fff6df; font-size:17px; font-weight:900; }
+.homeV3 .coinTapHint small { color:#c7cad4; font-size:12px; }
+
+.miningStatsBar {
+  display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0; margin-top:-5px; padding:13px 8px;
+  border-radius:22px; border-color:rgba(255,212,77,.18);
+  background:linear-gradient(145deg,rgba(11,12,14,.9),rgba(18,18,17,.78));
+}
+.miningStatsBar > div { display:flex; align-items:center; gap:7px; min-width:0; padding:0 7px; border-right:1px solid rgba(255,255,255,.11); }
+.miningStatsBar > div:last-child { border-right:0; }
+.miningStatsBar p { min-width:0; margin:0; }
+.miningStatsBar small,.miningStatsBar b,.miningStatsBar em { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.miningStatsBar small { color:#d6dced; font-size:8px; font-weight:850; }
+.miningStatsBar b { margin-top:3px; color:#fff; font-size:14px; font-weight:900; }
+.miningStatsBar em { margin-top:1px; color:#d7d9e0; font-size:9px; font-style:normal; }
+.statIcon { color:#ffd744; font-size:22px; flex:0 0 auto; text-shadow:0 0 12px rgba(255,205,54,.35); }
+
+.v3ActionRow { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px; }
+.boostAction,.claimAction {
+  display:flex; align-items:center; gap:10px; min-width:0; min-height:92px; padding:12px 13px;
+  border-radius:22px; text-align:left;
+}
+.boostAction { border:1px solid rgba(255,202,55,.5); background:linear-gradient(145deg,rgba(25,20,10,.9),rgba(12,13,16,.88)); }
+.claimAction {
+  color:#171006; border:1px solid #ffd85b;
+  background:linear-gradient(135deg,#ffe98a 0%,#ffc83f 52%,#f4a91f 100%);
+  box-shadow:0 12px 34px rgba(255,181,30,.22), inset 0 1px 0 rgba(255,255,255,.45);
+}
+.boostAction > div,.claimAction > div { min-width:0; flex:1; }
+.boostAction span:not(.actionIcon),.claimAction span:not(.actionIcon) { display:block; font-size:11px; font-weight:900; }
+.boostAction b,.claimAction b { display:block; margin-top:3px; font-size:17px; font-weight:950; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.boostAction small,.claimAction small { display:block; margin-top:3px; font-size:9px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.boostAction small { color:#c7c7c7; }.claimAction small { color:rgba(23,16,6,.72); }
+.boostAction em,.claimAction em { flex:0 0 auto; font-size:24px; font-style:normal; }
+.actionIcon { display:grid; place-items:center; width:46px; height:46px; flex:0 0 46px; border-radius:15px; }
+.boostAction .actionIcon { color:#ffe067; border:1px solid rgba(255,216,91,.35); background:rgba(255,196,39,.08); }
+.claimAction .actionIcon { color:#ffd348; background:#21190b; box-shadow:0 8px 18px rgba(0,0,0,.2); }
+.actionIcon svg { width:26px; height:26px; }
+.homeV3 .v3Tagline { margin-top:18px; }
+
+@media (max-width:480px) {
+  .homeV3 .v3CoinArea { min-height:420px; }
+  .homeV3 .mainCoin { width:min(78vw,315px); height:min(78vw,315px); }
+  .homeV3 .mainCoinLogo { width:min(78vw,315px) !important; height:min(78vw,315px) !important; }
+  .miningStatsBar { padding:11px 5px; }
+  .miningStatsBar > div { gap:4px; padding:0 4px; }
+  .statIcon { font-size:18px; }
+  .miningStatsBar small { font-size:7px; }
+  .miningStatsBar b { font-size:12px; }
+  .boostAction,.claimAction { padding:10px; }
+  .actionIcon { width:40px; height:40px; flex-basis:40px; }
+}
+
+@media (max-width:380px) {
+  .networkPowerCard b { font-size:17px; }
+  .miningStatsBar .statIcon { display:none; }
+  .miningStatsBar > div { justify-content:center; }
+  .boostAction b,.claimAction b { font-size:14px; }
+}
