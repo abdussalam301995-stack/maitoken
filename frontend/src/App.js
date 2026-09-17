@@ -4530,6 +4530,8 @@ function Home({
   playReward
 }) {
   const lastTapHapticRef = useRef(0);
+  const coinParticlesRef = useRef(null);
+  const tapAudioRef = useRef(null);
   const [holdingLoading, setHoldingLoading] = useState(false);
   const [walletHolding, setWalletHolding] = useState(Number(user?.walletHolding || 0));
   const [inGameBalance, setInGameBalance] = useState(Number(user?.inGameBalance ?? user?.balance ?? 0));
@@ -4559,14 +4561,25 @@ function Home({
   const miningMode = String(user?.farm?.mode || 'test').toUpperCase();
   const miningPhase = String(user?.farm?.phase || 'test').replaceAll('_', ' ').toUpperCase();
 
-  // Display-only live counter. The backend remains authoritative for claims.
+  // Display-only smooth live counter. The backend remains authoritative for claims.
+  // 50ms visual ticks make the unclaimed amount move like a running timer.
   useEffect(() => {
     if (!user?.farm?.active) return undefined;
+
+    const tickMs = 50;
+    const rewardPerTick = farmRateSecond * (tickMs / 1000);
     const timer = setInterval(() => {
-      setLivePending(value => value + farmRateSecond);
+      setLivePending(value => value + rewardPerTick);
+    }, tickMs);
+
+    const claimTimer = setInterval(() => {
       setClaimRemain(value => Math.max(0, value - 1));
     }, 1000);
-    return () => clearInterval(timer);
+
+    return () => {
+      clearInterval(timer);
+      clearInterval(claimTimer);
+    };
   }, [user?.farm?.active, farmRateSecond]);
 
   const refreshHolding = useCallback(async (force = false) => {
@@ -4606,27 +4619,72 @@ function Home({
     const coin = event.currentTarget;
 
     // Visual-only tap feedback. Mining rewards remain server-authoritative.
-    // No React state lock means rapid taps are accepted immediately.
+    // A soft spring motion keeps the coin feeling alive without a sharp snap.
     if (typeof coin.animate === 'function') {
       coin.animate(
         [
-          { transform: 'scale(1)' },
-          { transform: 'scale(0.965)' },
-          { transform: 'scale(1.012)' },
-          { transform: 'scale(1)' }
+          { transform: 'scale(1) translateY(0px)' },
+          { transform: 'scale(0.985) translateY(2px)', offset: 0.22 },
+          { transform: 'scale(1.018) translateY(-2px)', offset: 0.58 },
+          { transform: 'scale(0.997) translateY(0px)', offset: 0.82 },
+          { transform: 'scale(1) translateY(0px)' }
         ],
         {
-          duration: 150,
-          easing: 'cubic-bezier(.2,.8,.2,1)'
+          duration: 420,
+          easing: 'cubic-bezier(.22,.8,.28,1)'
         }
       );
     }
 
-    // Haptics are lightly throttled so very fast tapping stays responsive.
+    // Gentle gold particles around the tapped point. They are decorative only.
+    const layer = coinParticlesRef.current;
+    if (layer) {
+      const rect = coin.getBoundingClientRect();
+      const x = event.clientX ? event.clientX - rect.left : rect.width / 2;
+      const y = event.clientY ? event.clientY - rect.top : rect.height / 2;
+
+      for (let i = 0; i < 9; i += 1) {
+        const particle = document.createElement('span');
+        const angle = (Math.PI * 2 * i) / 9 + (Math.random() - 0.5) * 0.35;
+        const distance = 38 + Math.random() * 58;
+        particle.className = 'maiTapParticle';
+        particle.style.left = `${x}px`;
+        particle.style.top = `${y}px`;
+        particle.style.setProperty('--tx', `${Math.cos(angle) * distance}px`);
+        particle.style.setProperty('--ty', `${Math.sin(angle) * distance - 18}px`);
+        particle.style.setProperty('--delay', `${Math.random() * 70}ms`);
+        layer.appendChild(particle);
+        window.setTimeout(() => particle.remove(), 1050);
+      }
+    }
+
+    // Short, soft tap tone generated locally; no audio file or network request.
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = tapAudioRef.current || new AudioCtx();
+        tapAudioRef.current = ctx;
+        if (ctx.state === 'suspended') ctx.resume();
+
+        const oscillator = ctx.createOscillator();
+        const gain = ctx.createGain();
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(620, ctx.currentTime);
+        oscillator.frequency.exponentialRampToValueAtTime(820, ctx.currentTime + 0.08);
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.045, ctx.currentTime + 0.012);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.14);
+        oscillator.connect(gain);
+        gain.connect(ctx.destination);
+        oscillator.start();
+        oscillator.stop(ctx.currentTime + 0.15);
+      }
+    } catch {}
+
     const now = Date.now();
-    if (now - lastTapHapticRef.current >= 80) {
+    if (now - lastTapHapticRef.current >= 100) {
       lastTapHapticRef.current = now;
-      try { tg()?.HapticFeedback?.impactOccurred('light'); } catch {}
+      try { tg()?.HapticFeedback?.impactOccurred('soft'); } catch {}
     }
   };
 
@@ -4718,19 +4776,15 @@ function Home({
           <span className="coinOuterRing"><span className="coinMiddleRing"><span className="coinInner"><MaiLogo className="mainCoinLogo" /></span></span></span>
           <span className="coinShine" />
           <span className="coinShineSecond" />
+          <span ref={coinParticlesRef} className="maiTapParticleLayer" aria-hidden="true" />
         </button>
         <div className="coinTapHint"><span>{t('tapCoin')}</span><small>{t('tapHint')}</small></div>
       </section>
 
       <section className="v3ActionRow v3ClaimOnlyRow">
-        <button className="claimAction claimActionFull" disabled={busy || (user?.farm?.active && claimRemain > 0)} onClick={handleFarm}>
+        <button className="claimAction claimActionFull claimActionSimple" disabled={busy || (user?.farm?.active && claimRemain > 0)} onClick={handleFarm}>
           <span className="actionIcon"><Icon name="gift" /></span>
-          <div>
-            <span>{user?.farm?.active ? 'CLAIM NOW' : 'START MINING'}</span>
-            <b>{user?.farm?.active ? `${fmtSmart(livePending, 6)} MAI` : `${fmtSmart(effectiveDaily, 2)} MAI / Day`}</b>
-            <small>{user?.farm?.active ? (claimRemain > 0 ? `Available in ${hms(claimRemain)}` : 'Ready to claim') : 'Continuous · Claim anytime'}</small>
-          </div>
-          <em>›</em>
+          <span className="claimOnlyLabel">CLAIM NOW</span>
         </button>
       </section>
 

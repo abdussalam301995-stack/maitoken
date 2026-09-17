@@ -8125,3 +8125,107 @@ img {
     padding: 12px 15px;
   }
 }
+
+
+/* =========================================================
+   MAI HOME V3 — CENTERED SMALLER COIN + GOLD TAP PARTICLES
+   ========================================================= */
+
+.homeV3 .v3CoinArea {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 330px;
+  margin: 4px auto 0;
+  overflow: visible;
+}
+
+.homeV3 .mainCoin.smoothTapCoin {
+  position: relative;
+  width: min(68vw, 278px);
+  height: min(68vw, 278px);
+  margin-left: auto;
+  margin-right: auto;
+  transform-origin: 50% 50%;
+  transition: filter 260ms ease;
+  overflow: visible;
+}
+
+.homeV3 .mainCoin.smoothTapCoin:hover {
+  filter: brightness(1.025);
+}
+
+.homeV3 .mainCoin.smoothTapCoin:active {
+  transform: none;
+}
+
+.homeV3 .mainCoinLogo {
+  width: min(68vw, 278px) !important;
+  height: min(68vw, 278px) !important;
+  object-fit: contain;
+}
+
+.maiTapParticleLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+  overflow: visible;
+  border-radius: 50%;
+}
+
+.maiTapParticle {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(circle, #fff8bd 0 22%, #ffd64a 40%, #f5a400 72%, transparent 74%);
+  box-shadow: 0 0 7px rgba(255, 216, 76, .95), 0 0 15px rgba(255, 165, 0, .48);
+  animation: maiGoldParticle 920ms cubic-bezier(.18,.72,.25,1) var(--delay, 0ms) forwards;
+}
+
+@keyframes maiGoldParticle {
+  0% { opacity: 0; transform: translate(0, 0) scale(.35); }
+  15% { opacity: 1; }
+  62% { opacity: .78; }
+  100% { opacity: 0; transform: translate(var(--tx), var(--ty)) scale(.08); }
+}
+
+.unclaimedRewardValue {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+.claimActionFull.claimActionSimple {
+  min-height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.claimActionSimple .actionIcon {
+  flex: 0 0 auto;
+}
+
+.claimOnlyLabel {
+  color: #15120a;
+  font-size: 19px;
+  font-weight: 950;
+  letter-spacing: .7px;
+}
+
+@media (max-width: 480px) {
+  .homeV3 .v3CoinArea { min-height: 310px; }
+  .homeV3 .mainCoin.smoothTapCoin,
+  .homeV3 .mainCoinLogo {
+    width: min(66vw, 264px) !important;
+    height: min(66vw, 264px) !important;
+  }
+}
