@@ -71,12 +71,22 @@ const CLIENT_ORIGIN =
   );
 
 
+const IS_PRODUCTION =
+  String(process.env.NODE_ENV || 'production').toLowerCase() !== 'development';
+
+// SECURITY: development authentication can never be enabled in production.
 const ALLOW_DEV_AUTH =
+  !IS_PRODUCTION &&
   String(
     process.env.ALLOW_DEV_AUTH ||
     ''
   ).toLowerCase() ===
   'true';
+
+const TELEGRAM_AUTH_MAX_AGE = Math.max(
+  300,
+  Math.min(Number(process.env.TELEGRAM_AUTH_MAX_AGE || 3600), 86400)
+);
 
 
 const ADMIN_KEY =
@@ -1251,13 +1261,17 @@ function admin(
   next
 ) {
 
-  if (
-    !ADMIN_KEY ||
-    req.get(
-      'X-Admin-Key'
-    ) !==
-    ADMIN_KEY
-  ) {
+  const suppliedKey = String(req.get('X-Admin-Key') || '');
+  const expectedKey = String(ADMIN_KEY || '');
+  const suppliedBuffer = Buffer.from(suppliedKey);
+  const expectedBuffer = Buffer.from(expectedKey);
+
+  const validAdminKey =
+    expectedBuffer.length >= 32 &&
+    suppliedBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(suppliedBuffer, expectedBuffer);
+
+  if (!validAdminKey) {
 
     return res
       .status(401)
@@ -1298,9 +1312,14 @@ function rateLimit(
     next
   ) => {
 
-    const key =
+    // SECURITY: after authenticate() this also limits by Telegram account.
+    // Before authentication it safely falls back to IP + route.
+    const identity = req.auth?.id
+      ? `tg:${req.auth.id}:ip:${req.ip}`
+      : `ip:${req.ip}`;
 
-      `${req.ip}:` +
+    const key =
+      `${identity}:` +
       `${req.method}:` +
       `${req.path}`;
 
@@ -3496,7 +3515,7 @@ function parseInitData(
 
   if (
     age < -60 ||
-    age > 86400
+    age > TELEGRAM_AUTH_MAX_AGE
   ) {
 
     throw new Error(
@@ -3760,13 +3779,11 @@ async function authenticate(
     let auth;
 
 
+    // SECURITY: production accepts Telegram credentials from the dedicated
+    // header only. Body fallback remains available for local development.
     const initData =
-
-      req.get(
-        'X-Telegram-Init-Data'
-      ) ||
-
-      req.body?.initData;
+      req.get('X-Telegram-Init-Data') ||
+      (!IS_PRODUCTION ? req.body?.initData : '');
 
 
     if (
@@ -3860,11 +3877,9 @@ async function authenticate(
        DEVICE ID HASH
        ------------------------------------------------------- */
 
-    const rawDevice =
-      req.get(
-        'X-MAI-Device-ID'
-      ) ||
-      '';
+    const rawDevice = String(
+      req.get('X-MAI-Device-ID') || ''
+    ).slice(0, 256);
 
 
     req.deviceHash =
@@ -8370,6 +8385,7 @@ app.get(
   '/api/ads/status/:id',
 
   authenticate,
+  rateLimit(60, 60000),
 
   async (
     req,
@@ -8454,6 +8470,7 @@ app.post(
   '/api/ads/claim/:id',
 
   authenticate,
+  rateLimit(20, 60000),
 
   async (
     req,
@@ -11807,7 +11824,9 @@ app.post(
 
       if (
         !key ||
-        key.length < 8
+        key.length < 16 ||
+        key.length > 128 ||
+        !/^[A-Za-z0-9._:-]+$/.test(key)
       ) {
 
         return res
@@ -13952,8 +13971,9 @@ app.use(
           false,
 
         message:
-          error.message ||
-          'Server error'
+          IS_PRODUCTION
+            ? 'Server error'
+            : (error.message || 'Server error')
 
       });
 
