@@ -11476,43 +11476,7 @@ function ProfilePage({
 
   };
 
-        {isAdmin && (
-          <>
-            {/* =================================================
-                ADMIN CONTROL CENTER
-                ================================================= */}
-
-            <button
-              className="settingRow"
-              onClick={() => {
-                playClick();
-                openAdmin();
-              }}
-            >
-              <span className="settingLeft">
-
-                <i className="settingIcon">
-                  <Icon name="shield" />
-                </i>
-
-                <span>
-                  <b>
-                    Admin Control Center
-                  </b>
-
-                  <small>
-                    MAI Network administration
-                  </small>
-                </span>
-
-              </span>
-
-              <em>
-                ›
-              </em>
-            </button>
-          </>
-        )}
+       
   /* =======================================================
      SUPPORT
      ======================================================= */
@@ -12416,7 +12380,55 @@ function ProfilePage({
 
         </button>
 
+{/* =================================================
+    ADMIN CONTROL CENTER
+    ================================================= */}
 
+{isAdmin && (
+
+  <button
+    className="settingRow"
+
+    onClick={() => {
+
+      playClick();
+
+      openAdmin();
+
+    }}
+  >
+
+    <span className="settingLeft">
+
+      <i className="settingIcon">
+
+        <Icon name="shield" />
+
+      </i>
+
+
+      <span>
+
+        <b>
+          Admin Control Center
+        </b>
+
+        <small>
+          MAI Network administration
+        </small>
+
+      </span>
+
+    </span>
+
+
+        <em>
+          ›
+         </em>
+
+        </button>
+
+      )}
         {/* =================================================
             SUPPORT
             ================================================= */}
