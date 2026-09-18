@@ -131,31 +131,30 @@
         if (!silent) setLoading(true);
         setError('');
 
-        try {
-          const [
-            dashboardData,
-            usersData,
-            withdrawalsData,
-            campaignsData,
-            auditData,
-            securityData
-          ] = await Promise.all([
-            adminApi('/admin/dashboard'),
-            adminApi('/admin/users'),
-            adminApi('/admin/withdrawals'),
-            adminApi('/admin/campaigns'),
-            adminApi('/admin/audit-logs?limit=150'),
-            adminApi('/admin/security/config')
-          ]);
+        const requests = [
+          ['dashboard', adminApi('/admin/dashboard')],
+          ['users', adminApi('/admin/users')],
+          ['withdrawals', adminApi('/admin/withdrawals')],
+          ['campaigns', adminApi('/admin/campaigns')],
+          ['audit', adminApi('/admin/audit-logs?limit=150')],
+          ['security', adminApi('/admin/security/config')]
+        ];
 
-          setDashboard(dashboardData.dashboard || {});
-          setUsers(usersData.items || []);
-          setWithdrawals(withdrawalsData.items || []);
-          setCampaigns(campaignsData.items || []);
-          setAudit(auditData.items || []);
-          setSecurityConfig(securityData.config || {});
-        } catch (e) {
-          setError(e.message || 'Admin data could not be loaded.');
+        try {
+          const results = await Promise.allSettled(requests.map(([,promise]) => promise));
+          const failed = [];
+          results.forEach((result,index) => {
+            const key = requests[index][0];
+            if (result.status === 'rejected') { failed.push(`${key}: ${result.reason?.message || 'failed'}`); return; }
+            const data = result.value || {};
+            if (key === 'dashboard') setDashboard(data.dashboard || {});
+            if (key === 'users') setUsers(data.items || []);
+            if (key === 'withdrawals') setWithdrawals(data.items || []);
+            if (key === 'campaigns') setCampaigns(data.items || []);
+            if (key === 'audit') setAudit(data.items || []);
+            if (key === 'security') setSecurityConfig(data.config || {});
+          });
+          if (failed.length) setError(`Some admin data could not be loaded — ${failed.join(' | ')}`);
         } finally {
           setLoading(false);
         }
@@ -249,6 +248,12 @@
           `/admin/users/${user.telegram_id}/unban`,
           { reason }
         );
+      };
+
+      const messageUser = user => {
+        const message = String(window.prompt(`Send Telegram message to ${user.first_name || user.telegram_id}:`, '') || '').trim();
+        if (!message) return;
+        runAction(`message-${user.telegram_id}`, `/admin/users/${user.telegram_id}/message`, { message });
       };
 
       const filteredUsers = useMemo(() => {
@@ -418,6 +423,7 @@
                   <button onClick={() => openUser(user.telegram_id)}>
                     {busy === `user-${user.telegram_id}` ? 'Loading…' : 'Inspect'}
                   </button>
+                  <button className="adminMessageBtn" onClick={() => messageUser(user)}>Message</button>
 
                   {user.account_status === 'active' ? (
                     <>
@@ -804,33 +810,54 @@
                   <Loader />
                 ) : (
                   <>
-                    <div className="adminDataGrid">
+                    <div className="adminIdentityCard">
+                      <div><span>Telegram UID</span><b>{userDetail.user?.telegram_id || selectedUser}</b></div>
+                      <div><span>Username</span><b>@{userDetail.user?.username || 'no-username'}</b></div>
                       <div><span>Name</span><b>{userDetail.user?.first_name || '—'}</b></div>
-                      <div><span>Status</span><b>{userDetail.user?.account_status || '—'}</b></div>
+                      <div><span>Account Status</span><Status>{userDetail.user?.account_status}</Status></div>
+                      <div><span>Wallet</span><code>{userDetail.user?.wallet_address || 'Not connected'}</code></div>
                       <div><span>Balance</span><b>{fmt(userDetail.user?.balance)} MAI</b></div>
-                      <div><span>Level</span><b>{userDetail.user?.mining_level || 1}</b></div>
+                      <div><span>Mining Level</span><b>Level {userDetail.user?.mining_level || 1}</b></div>
+                      <div><span>Mining Rate</span><b>{fmt(userDetail.user?.mining_speed)} / day</b></div>
+                      <div><span>Joined</span><b>{when(userDetail.user?.created_at)}</b></div>
+                      <div><span>Last Updated</span><b>{when(userDetail.user?.updated_at)}</b></div>
                     </div>
 
-                    <h4>Linked Device Accounts</h4>
-                    <div className="adminCompactList">
-                      {(userDetail.security?.linkedDeviceAccounts || []).map((item, index) => (
-                        <div className="adminCompactRow" key={`${item.telegram_id}-${index}`}>
-                          <span>{item.first_name || item.telegram_id}</span>
-                          <b>UID {item.telegram_id}</b>
+                    <h4>Registered Devices</h4>
+                    <div className="adminDeviceList">
+                      {(userDetail.security?.devices || []).map(device => (
+                        <div className="adminDeviceCard" key={device.device_hash}>
+                          <div><span>Device</span><b>{device.device_label || 'Unknown device'}</b></div>
+                          <div><span>Device ID</span><code>{short(device.device_hash,12,10)}</code></div>
+                          <div><span>Accounts on device</span><b>{device.account_count || 1}</b></div>
+                          <div><span>First seen</span><small>{when(device.first_seen)}</small></div>
+                          <div><span>Last seen</span><small>{when(device.last_seen)}</small></div>
                         </div>
                       ))}
-                      {!(userDetail.security?.linkedDeviceAccounts || []).length && <Empty text="No linked-device accounts." />}
+                      {!(userDetail.security?.devices || []).length && <Empty text="No registered device records." />}
+                    </div>
+                    <p className="adminFootnote">Device names are best-effort labels from the Telegram WebView/browser. Device ID is a server-side hash, not a raw hardware identifier.</p>
+
+                    <h4>Linked Accounts · Same Device</h4>
+                    <div className="adminCompactList">
+                      {(userDetail.security?.linkedDeviceAccounts || []).map(item => (
+                        <div className="adminRelationRow" key={item.telegram_id}>
+                          <div><b>{item.first_name || 'MAI User'}</b><span>@{item.username || 'no-username'} · UID {item.telegram_id}</span></div>
+                          <div><strong>{item.shared_device_count || 1} shared device</strong><small>Last match {when(item.last_seen)}</small></div>
+                        </div>
+                      ))}
+                      {!(userDetail.security?.linkedDeviceAccounts || []).length && <Empty text="No other accounts share a registered device." />}
                     </div>
 
-                    <h4>Shared IP Accounts</h4>
+                    <h4>Linked Accounts · Shared IP</h4>
                     <div className="adminCompactList">
-                      {(userDetail.security?.sharedIpAccounts || []).map((item, index) => (
-                        <div className="adminCompactRow" key={`${item.telegram_id}-${index}`}>
-                          <span>{item.first_name || item.telegram_id}</span>
-                          <b>UID {item.telegram_id}</b>
+                      {(userDetail.security?.sharedIpAccounts || []).map(item => (
+                        <div className="adminRelationRow" key={item.telegram_id}>
+                          <div><b>{item.first_name || 'MAI User'}</b><span>@{item.username || 'no-username'} · UID {item.telegram_id}</span></div>
+                          <div><strong>{item.shared_ip_count || 1} shared IP signal</strong><small>Last match {when(item.last_seen)}</small></div>
                         </div>
                       ))}
-                      {!(userDetail.security?.sharedIpAccounts || []).length && <Empty text="No shared-IP accounts." />}
+                      {!(userDetail.security?.sharedIpAccounts || []).length && <Empty text="No other accounts share observed IP signals." />}
                     </div>
 
                     <h4>Recent Security Logs</h4>

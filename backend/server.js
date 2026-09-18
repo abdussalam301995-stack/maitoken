@@ -3400,6 +3400,11 @@ if (
       `);
 
 
+      await pool.query(`
+        ALTER TABLE device_accounts ADD COLUMN IF NOT EXISTS device_label TEXT;
+        ALTER TABLE device_accounts ADD COLUMN IF NOT EXISTS user_agent TEXT;
+      `);
+
     /* =========================================================
        SECURITY LOGS
        ========================================================= */
@@ -3879,6 +3884,19 @@ await pool.query(`
     }
 
 
+    function deviceLabelFromUserAgent(value) {
+      const ua=String(value || '').slice(0,500);
+      if (!ua) return 'Unknown device';
+      const android=ua.match(/Android\s+([^;)]*)(?:;\s*([^;)]+))?/i);
+      if (android) { const version=String(android[1] || '').trim(); const model=String(android[2] || '').replace(/\s+Build\/.*/i,'').trim(); return [model || 'Android device',version ? `Android ${version}` : ''].filter(Boolean).join(' · ').slice(0,120); }
+      const ios=ua.match(/(iPhone|iPad|iPod).*OS\s([0-9_]+)/i);
+      if (ios) return `${ios[1]} · iOS ${ios[2].replaceAll('_','.')}`.slice(0,120);
+      if (/Windows NT/i.test(ua)) return 'Windows device';
+      if (/Macintosh|Mac OS X/i.test(ua)) return 'Mac device';
+      if (/Linux/i.test(ua)) return 'Linux device';
+      return 'Unknown device';
+    }
+
     /* =========================================================
        SECURITY LOG
        ========================================================= */
@@ -4293,13 +4311,14 @@ await pool.query(`
             INSERT INTO device_accounts(
 
               device_hash,
-
-              telegram_id
+              telegram_id,
+              device_label,
+              user_agent
 
             )
 
             VALUES(
-              $1,$2
+              $1,$2,$3,$4
             )
 
             ON CONFLICT(
@@ -4309,14 +4328,16 @@ await pool.query(`
 
             DO UPDATE SET
 
-              last_seen=
-                NOW()
+              last_seen=NOW(),
+              device_label=EXCLUDED.device_label,
+              user_agent=EXCLUDED.user_agent
             `,
             [
 
               req.deviceHash,
-
-              auth.id
+              auth.id,
+              deviceLabelFromUserAgent(req.get('user-agent')),
+              String(req.get('user-agent') || '').slice(0,500)
 
             ]
           );
@@ -14348,8 +14369,10 @@ app.get(
           `
           SELECT
             device_hash,
+            device_label,
             first_seen,
-            last_seen
+            last_seen,
+            (SELECT COUNT(DISTINCT d2.telegram_id)::int FROM device_accounts d2 WHERE d2.device_hash=device_accounts.device_hash) AS account_count
 
           FROM device_accounts
 
@@ -14362,39 +14385,8 @@ app.get(
           ]
         );
 
-      const linkedAccounts =
-        await pool.query(
-          `
-          SELECT DISTINCT
-            u.telegram_id,
-            u.username,
-            u.first_name,
-            u.wallet_address,
-            da.device_hash,
-            da.first_seen,
-            da.last_seen
-
-          FROM device_accounts mine
-
-          JOIN device_accounts da
-            ON da.device_hash = mine.device_hash
-
-          JOIN users u
-            ON u.telegram_id = da.telegram_id
-
-          WHERE
-            mine.telegram_id=$1
-            AND da.telegram_id<>$1
-
-          ORDER BY
-            da.last_seen DESC
-
-          LIMIT 200
-          `,
-          [
-            telegramId
-          ]
-        );
+      const linkedAccounts = await pool.query(
+        `SELECT u.telegram_id,u.username,u.first_name,u.wallet_address,COUNT(DISTINCT da.device_hash)::int AS shared_device_count,MAX(da.last_seen) AS last_seen,ARRAY_AGG(DISTINCT da.device_hash) AS shared_device_hashes FROM device_accounts mine JOIN device_accounts da ON da.device_hash=mine.device_hash JOIN users u ON u.telegram_id=da.telegram_id WHERE mine.telegram_id=$1 AND da.telegram_id<>$1 GROUP BY u.telegram_id,u.username,u.first_name,u.wallet_address ORDER BY MAX(da.last_seen) DESC LIMIT 200`,[telegramId]);
 
       const securityLogs =
         await pool.query(
@@ -14421,38 +14413,8 @@ app.get(
           ]
         );
 
-      const sharedIpAccounts =
-        await pool.query(
-          `
-          SELECT DISTINCT
-            u.telegram_id,
-            u.username,
-            u.first_name,
-            sl.ip_hash
-
-          FROM security_logs mine
-
-          JOIN security_logs sl
-            ON sl.ip_hash = mine.ip_hash
-
-          JOIN users u
-            ON u.telegram_id = sl.telegram_id
-
-          WHERE
-            mine.telegram_id=$1
-            AND mine.ip_hash IS NOT NULL
-            AND sl.telegram_id IS NOT NULL
-            AND sl.telegram_id<>$1
-
-          ORDER BY
-            u.telegram_id
-
-          LIMIT 200
-          `,
-          [
-            telegramId
-          ]
-        );
+      const sharedIpAccounts = await pool.query(
+        `SELECT u.telegram_id,u.username,u.first_name,COUNT(DISTINCT sl.ip_hash)::int AS shared_ip_count,MAX(sl.created_at) AS last_seen FROM security_logs mine JOIN security_logs sl ON sl.ip_hash=mine.ip_hash JOIN users u ON u.telegram_id=sl.telegram_id WHERE mine.telegram_id=$1 AND mine.ip_hash IS NOT NULL AND sl.telegram_id IS NOT NULL AND sl.telegram_id<>$1 GROUP BY u.telegram_id,u.username,u.first_name ORDER BY MAX(sl.created_at) DESC LIMIT 200`,[telegramId]);
 
       res.json({
         success: true,
@@ -14480,6 +14442,12 @@ app.get(
     }
   }
 );
+    async function notifyAdminUser(telegramId,text) {
+      if (!BOT_TOKEN) return {sent:false,reason:'BOT_TOKEN missing'};
+      try { await telegram('sendMessage',{chat_id:String(telegramId),text:String(text).slice(0,3500),disable_web_page_preview:true}); return {sent:true}; }
+      catch(error) { console.warn('[ADMIN USER NOTIFY]',error.message); return {sent:false,reason:String(error.message || 'send_failed').slice(0,300)}; }
+    }
+
     /* =========================================================
        ADMIN USER ACCESS CONTROLS
        ========================================================= */
@@ -14510,7 +14478,8 @@ app.get(
              VALUES($1,$2,$3,$4,$5,$6,$7)`,
             [req.admin?.telegramId || null,'user_banned','user',telegramId,reason,{authType:req.admin?.type || 'unknown'},hash(req.ip).slice(0,32)]
           );
-          res.json({success:true,user:result.rows[0]});
+          const notification=await notifyAdminUser(telegramId,`🚫 MAI Network account notice\n\nYour account has been banned.\nReason: ${reason}`);
+          res.json({success:true,user:result.rows[0],notification});
         } catch (error) { next(error); }
       }
     );
@@ -14544,7 +14513,8 @@ app.get(
              VALUES($1,$2,$3,$4,$5,$6,$7)`,
             [req.admin?.telegramId || null,'user_suspended','user',telegramId,reason,{until:until.toISOString(),authType:req.admin?.type || 'unknown'},hash(req.ip).slice(0,32)]
           );
-          res.json({success:true,user:result.rows[0]});
+          const notification=await notifyAdminUser(telegramId,`⏳ MAI Network account notice\n\nYour account has been suspended until ${until.toISOString()}.\nReason: ${reason}`);
+          res.json({success:true,user:result.rows[0],notification});
         } catch (error) { next(error); }
       }
     );
@@ -14574,11 +14544,16 @@ app.get(
              VALUES($1,$2,$3,$4,$5,$6,$7)`,
             [req.admin?.telegramId || null,'user_access_restored','user',telegramId,reason,{authType:req.admin?.type || 'unknown'},hash(req.ip).slice(0,32)]
           );
-          res.json({success:true,user:result.rows[0]});
+          const notification=await notifyAdminUser(telegramId,`✅ MAI Network account notice\n\nYour account access has been restored.\nAdmin note: ${reason}`);
+          res.json({success:true,user:result.rows[0],notification});
         } catch (error) { next(error); }
       }
     );
 
+
+    app.post('/admin/users/:telegramId/message',authenticate,admin,async(req,res,next)=>{
+      try { const telegramId=String(req.params.telegramId || '').trim(); const message=String(req.body?.message || '').trim().slice(0,3500); if(!/^\d+$/.test(telegramId)) return res.status(400).json({success:false,message:'Invalid Telegram user id'}); if(!message) return res.status(400).json({success:false,message:'Message is required'}); const exists=await pool.query('SELECT telegram_id FROM users WHERE telegram_id=$1 LIMIT 1',[telegramId]); if(!exists.rowCount) return res.status(404).json({success:false,message:'User not found'}); const notification=await notifyAdminUser(telegramId,`📣 MAI Network\n\n${message}`); await pool.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,reason,metadata,ip_hash) VALUES($1,$2,$3,$4,$5,$6,$7)`,[req.admin?.telegramId || null,'user_message_sent','user',telegramId,null,{sent:notification.sent,reason:notification.reason || null},hash(req.ip).slice(0,32)]); if(!notification.sent) return res.status(502).json({success:false,message:'Telegram message could not be delivered',notification}); res.json({success:true,notification}); } catch(error){next(error);}
+    });
 
     /* =========================================================
        ADMIN CAMPAIGNS
