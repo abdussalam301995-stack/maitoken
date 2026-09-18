@@ -8946,6 +8946,24 @@ function PromotePage({
     );
 
 
+  const [
+    promoteWalletBalance,
+    setPromoteWalletBalance
+  ] =
+    useState(
+      0
+    );
+
+
+  const [
+    promoteBalanceLoading,
+    setPromoteBalanceLoading
+  ] =
+    useState(
+      false
+    );
+
+
   const packages =
     Array.isArray(
       config?.packages
@@ -9035,6 +9053,118 @@ function PromotePage({
     },
     [
       count
+    ]
+  );
+
+
+  /* =======================================================
+     LOAD CONNECTED WALLET MAI BALANCE
+     ======================================================= */
+
+  useEffect(
+    () => {
+
+      let cancelled =
+        false;
+
+
+      if (
+        paymentMethod !==
+          'MAI' ||
+        !address
+      ) {
+
+        setPromoteWalletBalance(
+          0
+        );
+
+        setPromoteBalanceLoading(
+          false
+        );
+
+        return undefined;
+
+      }
+
+
+      setPromoteBalanceLoading(
+        true
+      );
+
+
+      api(
+        '/api/wallet/mai-balance'
+      )
+        .then(
+          data => {
+
+            if (
+              cancelled
+            ) {
+
+              return;
+
+            }
+
+
+            setPromoteWalletBalance(
+              Number(
+                data?.walletBalance ??
+                data?.balance ??
+                0
+              )
+            );
+
+          }
+        )
+        .catch(
+          error => {
+
+            if (
+              !cancelled
+            ) {
+
+              console.warn(
+                'Promotion MAI balance:',
+                error
+              );
+
+              setPromoteWalletBalance(
+                0
+              );
+
+            }
+
+          }
+        )
+        .finally(
+          () => {
+
+            if (
+              !cancelled
+            ) {
+
+              setPromoteBalanceLoading(
+                false
+              );
+
+            }
+
+          }
+        );
+
+
+      return () => {
+
+        cancelled =
+          true;
+
+      };
+
+    },
+    [
+      paymentMethod,
+      address
     ]
   );
 
@@ -9242,6 +9372,33 @@ function PromotePage({
             ).trim();
 
 
+          const requiredMai =
+            Number(
+              data?.payment
+                ?.amount ??
+              data?.campaign
+                ?.payment_amount ??
+              quote.MAI ??
+              0
+            );
+
+
+          if (
+            Number.isFinite(
+              requiredMai
+            ) &&
+            requiredMai > 0 &&
+            promoteWalletBalance <
+              requiredMai
+          ) {
+
+            throw new Error(
+              `Insufficient MAI balance. Required ${fmtSmart(requiredMai, 4)} MAI.`
+            );
+
+          }
+
+
           if (
             !receiverWallet ||
             !payerJettonWallet ||
@@ -9252,6 +9409,37 @@ function PromotePage({
 
             throw new Error(
               'Secure MAI wallet payment information is unavailable.'
+            );
+
+          }
+
+
+          let canonicalReceiverWallet;
+          let canonicalPayerJettonWallet;
+          let canonicalSenderWallet;
+
+
+          try {
+
+            canonicalReceiverWallet =
+              Address.parse(
+                receiverWallet
+              ).toRawString();
+
+            canonicalPayerJettonWallet =
+              Address.parse(
+                payerJettonWallet
+              ).toRawString();
+
+            canonicalSenderWallet =
+              Address.parse(
+                address
+              ).toRawString();
+
+          } catch {
+
+            throw new Error(
+              'Invalid TON address returned for MAI payment. Please refresh and try again.'
             );
 
           }
@@ -9276,12 +9464,12 @@ function PromotePage({
               )
               .storeAddress(
                 Address.parse(
-                  receiverWallet
+                  canonicalReceiverWallet
                 )
               )
               .storeAddress(
                 Address.parse(
-                  address
+                  canonicalSenderWallet
                 )
               )
               .storeBit(
@@ -9312,7 +9500,7 @@ function PromotePage({
               messages: [
                 {
                   address:
-                    payerJettonWallet,
+                    canonicalPayerJettonWallet,
 
                   amount:
                     toNano(
@@ -10222,16 +10410,12 @@ function PromotePage({
               <b>
 
                 {
-                  fmtSmart(
-                    user
-                      ?.walletBalance ??
-                    user
-                      ?.walletMai ??
-                    user
-                      ?.holding?.wallet ??
-                    0,
-                    4
-                  )
+                  promoteBalanceLoading
+                    ? '...'
+                    : fmtSmart(
+                        promoteWalletBalance,
+                        4
+                      )
                 }
 
                 {' '}

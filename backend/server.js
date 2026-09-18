@@ -10713,14 +10713,50 @@
         }
 
 
-        return String(
-          data?.wallet_address?.address ||
-          data?.wallet_address ||
-          data?.walletAddress?.address ||
-          data?.walletAddress ||
-          ''
-        ).trim() ||
-          null;
+        const candidates = [
+          data?.wallet_address?.address,
+          data?.wallet_address?.raw,
+          data?.wallet_address?.raw_form,
+          data?.walletAddress?.address,
+          data?.walletAddress?.raw,
+          data?.walletAddress?.rawForm,
+          typeof data?.wallet_address === 'string'
+            ? data.wallet_address
+            : '',
+          typeof data?.walletAddress === 'string'
+            ? data.walletAddress
+            : ''
+        ];
+
+
+        for (
+          const candidate of
+            candidates
+        ) {
+
+          const value =
+            String(
+              candidate || ''
+            ).trim();
+
+
+          if (
+            /^-?\d+:[0-9a-fA-F]{64}$/.test(
+              value
+            ) ||
+            /^[A-Za-z0-9_-]{48}$/.test(
+              value
+            )
+          ) {
+
+            return value;
+
+          }
+
+        }
+
+
+        return null;
 
 
       } finally {
