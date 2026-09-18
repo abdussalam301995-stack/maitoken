@@ -101,6 +101,15 @@
         ''
       );
 
+      const ADMIN_TELEGRAM_IDS =
+  new Set(
+    String(
+      process.env.ADMIN_TELEGRAM_IDS || ''
+    )
+      .split(',')
+      .map(id => id.trim())
+      .filter(id => /^\d+$/.test(id))
+  );
 
     // SECURITY: Telegram adds this value to every genuine webhook request.
     // Configure TELEGRAM_WEBHOOK_SECRET in Render with 32+ random characters.
@@ -1261,42 +1270,73 @@
        ========================================================= */
 
     function admin(
-      req,
-      res,
-      next
-    ) {
+  req,
+  res,
+  next
+) {
 
-      const suppliedKey = String(req.get('X-Admin-Key') || '');
-      const expectedKey = String(ADMIN_KEY || '');
-      const suppliedBuffer = Buffer.from(suppliedKey);
-      const expectedBuffer = Buffer.from(expectedKey);
+  const telegramId =
+    String(req.auth?.id || '').trim();
 
-      const validAdminKey =
-        expectedBuffer.length >= 32 &&
-        suppliedBuffer.length === expectedBuffer.length &&
-        crypto.timingSafeEqual(suppliedBuffer, expectedBuffer);
-
-      if (!validAdminKey) {
-
-        return res
-          .status(401)
-          .json({
-
-            success:
-              false,
-
-            message:
-              'Admin authorization failed'
-
-          });
-
-      }
+  const isTelegramAdmin =
+    telegramId &&
+    ADMIN_TELEGRAM_IDS.has(telegramId);
 
 
-      next();
+  // Primary production admin authentication:
+  // Telegram initData must already be verified by authenticate().
+  if (isTelegramAdmin) {
 
-    }
+    req.admin = {
+      type: 'telegram',
+      telegramId
+    };
 
+    return next();
+  }
+
+
+  // Emergency/server-side fallback.
+  // Never expose ADMIN_KEY inside the frontend/browser.
+  const suppliedKey =
+    String(req.get('X-Admin-Key') || '');
+
+  const expectedKey =
+    String(ADMIN_KEY || '');
+
+  const suppliedBuffer =
+    Buffer.from(suppliedKey);
+
+  const expectedBuffer =
+    Buffer.from(expectedKey);
+
+  const validAdminKey =
+    expectedBuffer.length >= 32 &&
+    suppliedBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(
+      suppliedBuffer,
+      expectedBuffer
+    );
+
+
+  if (validAdminKey) {
+
+    req.admin = {
+      type: 'admin_key',
+      telegramId: null
+    };
+
+    return next();
+  }
+
+
+  return res
+    .status(403)
+    .json({
+      success: false,
+      message: 'Admin authorization failed'
+    });
+}
 
     /* =========================================================
        SIMPLE SERVER RATE LIMIT
@@ -3370,7 +3410,62 @@
 
         );
       `);
+     /* =========================================================
+   ADMIN AUDIT LOGS
 
+   Permanent record of sensitive admin actions.
+   Do not store ADMIN_KEY or other secrets here.
+   ========================================================= */
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS admin_audit_logs(
+
+    id BIGSERIAL
+      PRIMARY KEY,
+
+    admin_id BIGINT,
+
+    action TEXT
+      NOT NULL,
+
+    target_type TEXT
+      NOT NULL,
+
+    target_id TEXT,
+
+    reason TEXT,
+
+    metadata JSONB
+      NOT NULL
+      DEFAULT '{}'::jsonb,
+
+    ip_hash TEXT,
+
+    created_at TIMESTAMPTZ
+      NOT NULL
+      DEFAULT NOW()
+
+  );
+`);
+
+await pool.query(`
+  CREATE INDEX IF NOT EXISTS
+  idx_admin_audit_created
+
+  ON admin_audit_logs(
+    created_at DESC
+  );
+`);
+
+await pool.query(`
+  CREATE INDEX IF NOT EXISTS
+  idx_admin_audit_target
+
+  ON admin_audit_logs(
+    target_type,
+    target_id
+  );
+`);
 
     /* =========================================================
        USER PREFERENCES
@@ -13887,8 +13982,374 @@
       }
 
     );
+      
+    /* =========================================================
+   ADMIN DASHBOARD SUMMARY
 
+   Read-only overview for MAI Admin Control Center.
+   ========================================================= */
 
+app.get(
+  '/admin/dashboard',
+  authenticate,
+  admin,
+
+  async (req, res, next) => {
+    try {
+      const result =
+        await pool.query(
+          `
+          SELECT
+
+            (SELECT COUNT(*)::int
+             FROM users)
+              AS total_users,
+
+            (SELECT COUNT(*)::int
+             FROM campaigns
+             WHERE payment_status='paid'
+               AND status='pending')
+              AS pending_campaigns,
+
+            (SELECT COUNT(*)::int
+             FROM campaigns
+             WHERE payment_status='paid'
+               AND status='approved')
+              AS active_campaigns,
+
+            (SELECT COUNT(*)::int
+             FROM withdrawals
+             WHERE status IN (
+               'pending',
+               'security_check'
+             ))
+              AS pending_withdrawals,
+
+            (SELECT COUNT(*)::int
+             FROM withdrawals
+             WHERE status='security_check')
+              AS risky_withdrawals,
+
+            (SELECT COUNT(*)::int
+             FROM security_logs
+             WHERE severity='warn'
+               AND created_at >=
+                   NOW() - INTERVAL '24 hours')
+              AS security_warnings_24h,
+
+            (SELECT COUNT(DISTINCT device_hash)::int
+             FROM device_accounts)
+              AS known_devices,
+
+            (SELECT COUNT(*)::int
+             FROM (
+               SELECT device_hash
+               FROM device_accounts
+               GROUP BY device_hash
+               HAVING COUNT(DISTINCT telegram_id) > 1
+             ) shared_devices)
+              AS shared_devices
+
+          `
+        );
+
+      res.json({
+        success: true,
+        dashboard: result.rows[0]
+      });
+
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+       /* =========================================================
+   ADMIN USERS
+
+   Read-only user overview for MAI Admin Control Center.
+   Security identifiers are hashed; raw IP addresses are
+   not exposed by this endpoint.
+   ========================================================= */
+
+app.get(
+  '/admin/users',
+  
+  authenticate,
+  admin,
+
+  async (req, res, next) => {
+    try {
+      const result =
+        await pool.query(
+          `
+          SELECT
+            u.telegram_id,
+            u.username,
+            u.first_name,
+            u.wallet_address,
+            u.balance,
+            u.locked_balance,
+            u.mining_level,
+            u.mining_speed,
+            u.referred_by,
+            u.created_at,
+            u.updated_at,
+
+            COALESCE(
+              (
+                SELECT COUNT(DISTINCT da.device_hash)::int
+                FROM device_accounts da
+                WHERE da.telegram_id = u.telegram_id
+              ),
+              0
+            ) AS device_count,
+
+            COALESCE(
+              (
+                SELECT COUNT(DISTINCT da2.telegram_id)::int
+                FROM device_accounts da2
+                WHERE da2.device_hash IN (
+                  SELECT da3.device_hash
+                  FROM device_accounts da3
+                  WHERE da3.telegram_id = u.telegram_id
+                )
+              ),
+              0
+            ) AS linked_device_accounts,
+
+            COALESCE(
+              (
+                SELECT COUNT(*)::int
+                FROM security_logs sl
+                WHERE sl.telegram_id = u.telegram_id
+                  AND sl.severity = 'warn'
+              ),
+              0
+            ) AS warning_count
+
+          FROM users u
+
+          ORDER BY
+            u.created_at DESC
+
+          LIMIT 500
+          `
+        );
+
+      res.json({
+        success: true,
+        items: result.rows
+      });
+
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+    /* =========================================================
+   ADMIN USER DETAIL / LINKED ACCOUNTS
+
+   Read-only security view.
+   Raw IP addresses and raw device IDs are never exposed.
+   ========================================================= */
+
+app.get(
+  '/admin/users/:telegramId',
+
+  authenticate,
+  admin,
+
+  async (req, res, next) => {
+    try {
+      const telegramId =
+        String(
+          req.params.telegramId || ''
+        ).trim();
+
+      if (!/^\d+$/.test(telegramId)) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: 'Invalid Telegram user id'
+          });
+      }
+
+      const userResult =
+        await pool.query(
+          `
+          SELECT
+            telegram_id,
+            username,
+            first_name,
+            wallet_address,
+            balance,
+            locked_balance,
+            mining_level,
+            mining_speed,
+            referred_by,
+            referral_qualified,
+            created_at,
+            updated_at
+
+          FROM users
+
+          WHERE telegram_id=$1
+
+          LIMIT 1
+          `,
+          [
+            telegramId
+          ]
+        );
+
+      if (!userResult.rowCount) {
+        return res
+          .status(404)
+          .json({
+            success: false,
+            message: 'User not found'
+          });
+      }
+
+      const devices =
+        await pool.query(
+          `
+          SELECT
+            device_hash,
+            first_seen,
+            last_seen
+
+          FROM device_accounts
+
+          WHERE telegram_id=$1
+
+          ORDER BY last_seen DESC
+          `,
+          [
+            telegramId
+          ]
+        );
+
+      const linkedAccounts =
+        await pool.query(
+          `
+          SELECT DISTINCT
+            u.telegram_id,
+            u.username,
+            u.first_name,
+            u.wallet_address,
+            da.device_hash,
+            da.first_seen,
+            da.last_seen
+
+          FROM device_accounts mine
+
+          JOIN device_accounts da
+            ON da.device_hash = mine.device_hash
+
+          JOIN users u
+            ON u.telegram_id = da.telegram_id
+
+          WHERE
+            mine.telegram_id=$1
+            AND da.telegram_id<>$1
+
+          ORDER BY
+            da.last_seen DESC
+
+          LIMIT 200
+          `,
+          [
+            telegramId
+          ]
+        );
+
+      const securityLogs =
+        await pool.query(
+          `
+          SELECT
+            action,
+            severity,
+            ip_hash,
+            device_hash,
+            user_agent_hash,
+            metadata,
+            created_at
+
+          FROM security_logs
+
+          WHERE telegram_id=$1
+
+          ORDER BY created_at DESC
+
+          LIMIT 200
+          `,
+          [
+            telegramId
+          ]
+        );
+
+      const sharedIpAccounts =
+        await pool.query(
+          `
+          SELECT DISTINCT
+            u.telegram_id,
+            u.username,
+            u.first_name,
+            sl.ip_hash
+
+          FROM security_logs mine
+
+          JOIN security_logs sl
+            ON sl.ip_hash = mine.ip_hash
+
+          JOIN users u
+            ON u.telegram_id = sl.telegram_id
+
+          WHERE
+            mine.telegram_id=$1
+            AND mine.ip_hash IS NOT NULL
+            AND sl.telegram_id IS NOT NULL
+            AND sl.telegram_id<>$1
+
+          ORDER BY
+            u.telegram_id
+
+          LIMIT 200
+          `,
+          [
+            telegramId
+          ]
+        );
+
+      res.json({
+        success: true,
+
+        user:
+          userResult.rows[0],
+
+        security: {
+          devices:
+            devices.rows,
+
+          linkedDeviceAccounts:
+            linkedAccounts.rows,
+
+          sharedIpAccounts:
+            sharedIpAccounts.rows,
+
+          logs:
+            securityLogs.rows
+        }
+      });
+
+    } catch (error) {
+      next(error);
+    }
+  }
+);
     /* =========================================================
        ADMIN CAMPAIGNS
        ========================================================= */
@@ -13896,7 +14357,7 @@
     app.get(
 
       '/admin/campaigns',
-
+      authenticate,
       admin,
 
       async (
@@ -14398,12 +14859,11 @@
                 UPDATE campaigns
 
                 SET
-                  payment_status='paid',
-                  status='approved',
-                  payment_tx_hash=$2,
-                  payment_verified_at=NOW(),
-                  approved_at=COALESCE(approved_at,NOW())
-
+             payment_status='paid',
+             status='pending',
+             payment_tx_hash=$2,
+             payment_verified_at=NOW(),
+              approved_at=NULL
                 WHERE
                   id=$1
                   AND payment_status='pending'
@@ -14600,7 +15060,7 @@
     app.post(
 
       '/admin/campaigns/:id/approve',
-
+      authenticate,
       admin,
 
       async (
@@ -14654,7 +15114,50 @@
 
           }
 
+           await pool.query(
+  `
+  INSERT INTO admin_audit_logs(
+    action,
+    target_type,
+    target_id,
+    metadata,
+    ip_hash
+  )
 
+  VALUES(
+    $1,
+    $2,
+    $3,
+    $4,
+    $5
+  )
+  `,
+  [
+    'campaign_approved',
+
+    'campaign',
+
+    String(req.params.id),
+
+    {
+      paymentStatus:
+        result.rows[0].payment_status,
+
+      paymentMethod:
+        result.rows[0].payment_method,
+
+      ownerId:
+        result.rows[0].owner_id
+    },
+
+    hash(
+      req.ip
+    ).slice(
+      0,
+      32
+    )
+  ]
+);
           res.json({
 
             success:
@@ -14680,7 +15183,120 @@
 
     );
 
+    /* =========================================================
+   ADMIN CAMPAIGN REJECT
 
+   Paid campaigns are NOT deleted.
+   Rejection only prevents the campaign from being published.
+   Payment records and blockchain proof remain intact.
+   ========================================================= */
+
+app.post(
+  '/admin/campaigns/:id/reject',
+
+  authenticate,
+  admin,
+
+  async (req, res, next) => {
+    try {
+      const campaignId =
+        safeInteger(
+          req.params.id,
+          0
+        );
+
+      if (campaignId <= 0) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: 'Invalid campaign id'
+          });
+      }
+
+      const result =
+        await pool.query(
+          `
+          UPDATE campaigns
+
+          SET
+            status='rejected',
+            approved_at=NULL
+
+          WHERE
+            id=$1
+            AND status='pending'
+
+          RETURNING *
+          `,
+          [
+            campaignId
+          ]
+        );
+
+      if (!result.rowCount) {
+        return res
+          .status(409)
+          .json({
+            success: false,
+            message:
+              'Campaign cannot be rejected in its current state'
+          });
+      }
+       await pool.query(
+  `
+  INSERT INTO admin_audit_logs(
+    action,
+    target_type,
+    target_id,
+    metadata,
+    ip_hash
+  )
+
+  VALUES(
+    $1,
+    $2,
+    $3,
+    $4,
+    $5
+  )
+  `,
+  [
+    'campaign_rejected',
+
+    'campaign',
+
+    String(campaignId),
+
+    {
+      paymentStatus:
+        result.rows[0].payment_status,
+
+      paymentMethod:
+        result.rows[0].payment_method,
+
+      ownerId:
+        result.rows[0].owner_id
+    },
+
+    hash(
+      req.ip
+    ).slice(
+      0,
+      32
+    )
+  ]
+      );
+      res.json({
+        success: true,
+        item: result.rows[0]
+      });
+
+    } catch (error) {
+      next(error);
+    }
+  }
+    );
     /* =========================================================
        ADMIN SECURITY CONFIG
        ========================================================= */
