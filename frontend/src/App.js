@@ -4561,6 +4561,15 @@ function Home({
   const miningMode = String(user?.farm?.mode || 'test').toUpperCase();
   const miningPhase = String(user?.farm?.phase || 'test').replaceAll('_', ' ').toUpperCase();
 
+  // Re-sync from the server whenever Home is mounted again.
+  // This prevents the display-only counter from restarting from stale parent data
+  // after visiting Tasks / Friends / Profile. The backend remains authoritative.
+  useEffect(() => {
+    refresh().catch(error => {
+      console.warn('Home mining refresh failed:', error);
+    });
+  }, [refresh]);
+
   // Display-only smooth live counter. The backend remains authoritative for claims.
   // 50ms visual ticks make the unclaimed amount move like a running timer.
   useEffect(() => {
@@ -4621,6 +4630,13 @@ function Home({
     // Visual-only tap feedback. Mining rewards remain server-authoritative.
     // A soft spring motion keeps the coin feeling alive without a sharp snap.
     if (typeof coin.animate === 'function') {
+      // Rapid taps used to stack many transform animations at once. On some
+      // Telegram Android WebViews that can force neighbouring GPU layers to
+      // flicker. Keep only the newest coin animation.
+      if (typeof coin.getAnimations === 'function') {
+        coin.getAnimations().forEach(animation => animation.cancel());
+      }
+
       coin.animate(
         [
           { transform: 'scale(1) translateY(0px)' },
@@ -4645,7 +4661,14 @@ function Home({
 
       // Stronger, clearly visible gold burst around the tapped point.
       // Decorative only — mining rewards remain fully server-authoritative.
-      const particleCount = 22;
+      const particleCount = 16;
+      const maxParticlesOnScreen = 48;
+
+      // Bound the decorative DOM work during very fast tapping. This keeps the
+      // gold burst visible without allowing hundreds of live particle nodes.
+      while (layer.childElementCount > maxParticlesOnScreen - particleCount) {
+        layer.firstElementChild?.remove();
+      }
 
       for (let i = 0; i < particleCount; i += 1) {
         const particle = document.createElement('span');
