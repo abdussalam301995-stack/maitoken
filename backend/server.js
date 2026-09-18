@@ -823,12 +823,18 @@
           callback
         ) {
 
-          if (
-            !origin ||
-            allowedOrigins.includes(
-              origin
-            )
-          ) {
+          const isMaiVercelOrigin =
+  /^https:\/\/maitoken-[a-z0-9-]+-hope-crypto\.vercel\.app$/i.test(
+    origin || ''
+  );
+
+if (
+  !origin ||
+  allowedOrigins.includes(
+    origin
+  ) ||
+  isMaiVercelOrigin
+) {
 
             return callback(
               null,
