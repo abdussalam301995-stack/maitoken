@@ -2620,6 +2620,14 @@
             NOT NULL
             DEFAULT FALSE,
 
+          account_status TEXT
+            NOT NULL
+            DEFAULT 'active',
+
+          suspended_until TIMESTAMPTZ,
+
+          admin_note TEXT,
+
           created_at TIMESTAMPTZ
             NOT NULL
             DEFAULT NOW(),
@@ -2707,6 +2715,17 @@
           ADD COLUMN IF NOT EXISTS referral_qualified BOOLEAN
           NOT NULL
           DEFAULT FALSE;
+
+        ALTER TABLE users
+          ADD COLUMN IF NOT EXISTS account_status TEXT
+          NOT NULL
+          DEFAULT 'active';
+
+        ALTER TABLE users
+          ADD COLUMN IF NOT EXISTS suspended_until TIMESTAMPTZ;
+
+        ALTER TABLE users
+          ADD COLUMN IF NOT EXISTS admin_note TEXT;
 
         ALTER TABLE users
           ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ
@@ -4157,6 +4176,53 @@ await pool.query(`
 
           ]
         );
+
+
+        /* -------------------------------------------------------
+           ACCOUNT ACCESS STATE
+
+           Ban/suspension is enforced server-side here.
+           ------------------------------------------------------- */
+
+        const accessResult = await pool.query(
+          `
+          SELECT account_status, suspended_until
+          FROM users
+          WHERE telegram_id=$1
+          LIMIT 1
+          `,
+          [auth.id]
+        );
+
+        const access = accessResult.rows[0];
+
+        if (access?.account_status === 'banned') {
+          return res.status(403).json({
+            success:false,
+            code:'ACCOUNT_BANNED',
+            message:'This MAI Network account has been banned'
+          });
+        }
+
+        if (access?.account_status === 'suspended') {
+          const until = access.suspended_until ? new Date(access.suspended_until) : null;
+
+          if (!until || until.getTime() > Date.now()) {
+            return res.status(403).json({
+              success:false,
+              code:'ACCOUNT_SUSPENDED',
+              suspendedUntil: until ? until.toISOString() : null,
+              message:'This MAI Network account is temporarily suspended'
+            });
+          }
+
+          await pool.query(
+            `UPDATE users
+             SET account_status='active', suspended_until=NULL, updated_at=NOW()
+             WHERE telegram_id=$1 AND account_status='suspended'`,
+            [auth.id]
+          );
+        }
 
 
         /* -------------------------------------------------------
@@ -13986,6 +14052,47 @@ await pool.query(`
     );
       
     /* =========================================================
+   ADMIN IDENTITY / AUDIT VIEW
+   ========================================================= */
+
+app.get(
+  '/admin/me',
+  authenticate,
+  admin,
+  (req, res) => {
+    res.json({
+      success:true,
+      admin:{
+        telegramId:req.admin?.telegramId || null,
+        authType:req.admin?.type || 'unknown'
+      }
+    });
+  }
+);
+
+app.get(
+  '/admin/audit-logs',
+  authenticate,
+  admin,
+  async (req, res, next) => {
+    try {
+      const limit = clamp(safeInteger(req.query?.limit, 100), 1, 500);
+      const result = await pool.query(
+        `SELECT id, admin_id, action, target_type, target_id, reason, metadata, ip_hash, created_at
+         FROM admin_audit_logs
+         ORDER BY created_at DESC
+         LIMIT $1`,
+        [limit]
+      );
+      res.json({success:true, items:result.rows});
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+
+   /* =========================================================
    ADMIN DASHBOARD SUMMARY
 
    Read-only overview for MAI Admin Control Center.
@@ -14006,6 +14113,15 @@ app.get(
             (SELECT COUNT(*)::int
              FROM users)
               AS total_users,
+
+            (SELECT COUNT(*)::int FROM users WHERE account_status='banned')
+              AS banned_users,
+
+            (SELECT COUNT(*)::int
+             FROM users
+             WHERE account_status='suspended'
+               AND (suspended_until IS NULL OR suspended_until > NOW()))
+              AS suspended_users,
 
             (SELECT COUNT(*)::int
              FROM campaigns
@@ -14094,6 +14210,9 @@ app.get(
             u.mining_level,
             u.mining_speed,
             u.referred_by,
+            u.account_status,
+            u.suspended_until,
+            u.admin_note,
             u.created_at,
             u.updated_at,
 
@@ -14192,6 +14311,9 @@ app.get(
             mining_speed,
             referred_by,
             referral_qualified,
+            account_status,
+            suspended_until,
+            admin_note,
             created_at,
             updated_at
 
@@ -14352,6 +14474,106 @@ app.get(
     }
   }
 );
+    /* =========================================================
+       ADMIN USER ACCESS CONTROLS
+       ========================================================= */
+
+    app.post(
+      '/admin/users/:telegramId/ban',
+      authenticate,
+      admin,
+      async (req, res, next) => {
+        try {
+          const telegramId = String(req.params.telegramId || '').trim();
+          const reason = String(req.body?.reason || '').trim().slice(0,1000);
+          if (!/^\d+$/.test(telegramId)) return res.status(400).json({success:false,message:'Invalid Telegram user id'});
+          if (!reason) return res.status(400).json({success:false,message:'Reason is required'});
+          if (telegramId === String(req.auth.id)) return res.status(409).json({success:false,message:'You cannot ban your own admin account'});
+
+          const result = await pool.query(
+            `UPDATE users
+             SET account_status='banned', suspended_until=NULL, admin_note=$2, updated_at=NOW()
+             WHERE telegram_id=$1
+             RETURNING telegram_id,username,first_name,account_status,suspended_until,admin_note`,
+            [telegramId,reason]
+          );
+          if (!result.rowCount) return res.status(404).json({success:false,message:'User not found'});
+
+          await pool.query(
+            `INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,reason,metadata,ip_hash)
+             VALUES($1,$2,$3,$4,$5,$6,$7)`,
+            [req.admin?.telegramId || null,'user_banned','user',telegramId,reason,{authType:req.admin?.type || 'unknown'},hash(req.ip).slice(0,32)]
+          );
+          res.json({success:true,user:result.rows[0]});
+        } catch (error) { next(error); }
+      }
+    );
+
+    app.post(
+      '/admin/users/:telegramId/suspend',
+      authenticate,
+      admin,
+      async (req, res, next) => {
+        try {
+          const telegramId = String(req.params.telegramId || '').trim();
+          const reason = String(req.body?.reason || '').trim().slice(0,1000);
+          const untilRaw = String(req.body?.until || '').trim();
+          const until = new Date(untilRaw);
+          if (!/^\d+$/.test(telegramId)) return res.status(400).json({success:false,message:'Invalid Telegram user id'});
+          if (!reason) return res.status(400).json({success:false,message:'Reason is required'});
+          if (!untilRaw || Number.isNaN(until.getTime()) || until.getTime() <= Date.now()) return res.status(400).json({success:false,message:'A valid future suspension time is required'});
+          if (telegramId === String(req.auth.id)) return res.status(409).json({success:false,message:'You cannot suspend your own admin account'});
+
+          const result = await pool.query(
+            `UPDATE users
+             SET account_status='suspended', suspended_until=$2, admin_note=$3, updated_at=NOW()
+             WHERE telegram_id=$1
+             RETURNING telegram_id,username,first_name,account_status,suspended_until,admin_note`,
+            [telegramId,until.toISOString(),reason]
+          );
+          if (!result.rowCount) return res.status(404).json({success:false,message:'User not found'});
+
+          await pool.query(
+            `INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,reason,metadata,ip_hash)
+             VALUES($1,$2,$3,$4,$5,$6,$7)`,
+            [req.admin?.telegramId || null,'user_suspended','user',telegramId,reason,{until:until.toISOString(),authType:req.admin?.type || 'unknown'},hash(req.ip).slice(0,32)]
+          );
+          res.json({success:true,user:result.rows[0]});
+        } catch (error) { next(error); }
+      }
+    );
+
+    app.post(
+      '/admin/users/:telegramId/unban',
+      authenticate,
+      admin,
+      async (req, res, next) => {
+        try {
+          const telegramId = String(req.params.telegramId || '').trim();
+          const reason = String(req.body?.reason || '').trim().slice(0,1000);
+          if (!/^\d+$/.test(telegramId)) return res.status(400).json({success:false,message:'Invalid Telegram user id'});
+          if (!reason) return res.status(400).json({success:false,message:'Reason is required'});
+
+          const result = await pool.query(
+            `UPDATE users
+             SET account_status='active', suspended_until=NULL, admin_note=$2, updated_at=NOW()
+             WHERE telegram_id=$1
+             RETURNING telegram_id,username,first_name,account_status,suspended_until,admin_note`,
+            [telegramId,reason]
+          );
+          if (!result.rowCount) return res.status(404).json({success:false,message:'User not found'});
+
+          await pool.query(
+            `INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,reason,metadata,ip_hash)
+             VALUES($1,$2,$3,$4,$5,$6,$7)`,
+            [req.admin?.telegramId || null,'user_access_restored','user',telegramId,reason,{authType:req.admin?.type || 'unknown'},hash(req.ip).slice(0,32)]
+          );
+          res.json({success:true,user:result.rows[0]});
+        } catch (error) { next(error); }
+      }
+    );
+
+
     /* =========================================================
        ADMIN CAMPAIGNS
        ========================================================= */
@@ -14920,8 +15142,8 @@ app.get(
                 $1,
                 $2,
                 $3,
-                $3,
-                $4
+                $4,
+                $5
               )
               `,
               [
