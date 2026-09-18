@@ -9422,19 +9422,19 @@ function PromotePage({
           try {
 
             canonicalReceiverWallet =
-              Address.parse(
-                receiverWallet
-              ).toRawString();
+             Address.parse(
+           receiverWallet
+              ).toString();
 
             canonicalPayerJettonWallet =
-              Address.parse(
-                payerJettonWallet
-              ).toRawString();
+             Address.parse(
+           payerJettonWallet
+             ).toString();
 
-            canonicalSenderWallet =
-              Address.parse(
-                address
-              ).toRawString();
+           canonicalSenderWallet =
+             Address.parse(
+              address
+             ).toString();
 
           } catch {
 
