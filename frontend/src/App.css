@@ -8503,3 +8503,649 @@ img {
     padding: 5px 6px;
   }
 }
+
+    /* =========================================================
+       MAI NETWORK — ADMIN CONTROL CENTER
+       Append this entire block to the END of frontend/src/App.css
+       ========================================================= */
+
+    .adminPanel {
+      width: 100%;
+      min-height: 100vh;
+      color: var(--text);
+      animation: maiPageIn .25s ease both;
+    }
+
+    .adminHeader {
+      position: sticky;
+      top: 0;
+      z-index: 80;
+      display: grid;
+      grid-template-columns: 44px minmax(0,1fr) auto;
+      align-items: center;
+      gap: 10px;
+      margin: -14px -14px 10px;
+      padding: calc(12px + env(safe-area-inset-top)) 14px 12px;
+      border-bottom: 1px solid rgba(243,201,105,.12);
+      background: linear-gradient(180deg,rgba(5,8,16,.99),rgba(7,10,17,.94));
+      backdrop-filter: blur(22px);
+      -webkit-backdrop-filter: blur(22px);
+    }
+
+    .adminHeader > button {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      color: var(--gold-2);
+      font-size: 29px;
+      background: rgba(255,255,255,.045);
+      border: 1px solid rgba(255,255,255,.08);
+    }
+
+    .adminHeader > div { min-width: 0; }
+    .adminHeader small {
+      display: block;
+      color: var(--gold);
+      font-size: 9px;
+      font-weight: 900;
+      letter-spacing: 1.6px;
+    }
+    .adminHeader h1 {
+      margin: 2px 0 0;
+      overflow: hidden;
+      color: var(--text);
+      font-size: clamp(16px,4.7vw,20px);
+      font-weight: 950;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .adminLive {
+      padding: 6px 8px;
+      border-radius: 999px;
+      color: var(--green);
+      font-size: 9px;
+      font-weight: 950;
+      letter-spacing: 1px;
+      background: rgba(103,230,163,.08);
+      border: 1px solid rgba(103,230,163,.18);
+    }
+
+    .adminNav {
+      position: sticky;
+      top: calc(67px + env(safe-area-inset-top));
+      z-index: 70;
+      display: flex;
+      gap: 7px;
+      width: 100%;
+      margin-bottom: 12px;
+      padding: 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      border: 1px solid rgba(255,255,255,.07);
+      border-radius: 18px;
+      background: rgba(7,10,17,.9);
+      backdrop-filter: blur(18px);
+    }
+    .adminNav::-webkit-scrollbar { display: none; }
+
+    .adminNav button {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex: 0 0 auto;
+      min-height: 40px;
+      padding: 8px 11px;
+      border-radius: 12px;
+      color: var(--muted);
+      background: transparent;
+      border: 1px solid transparent;
+    }
+    .adminNav button i { font-style: normal; font-size: 15px; }
+    .adminNav button span { font-size: 10px; font-weight: 850; }
+    .adminNav button em {
+      display: grid;
+      place-items: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 999px;
+      color: #170f04;
+      font-size: 8px;
+      font-style: normal;
+      font-weight: 950;
+      background: var(--gold);
+    }
+    .adminNav button.active {
+      color: var(--gold-2);
+      border-color: rgba(243,201,105,.22);
+      background: rgba(243,201,105,.08);
+    }
+
+    .adminContent { display: grid; gap: 12px; width: 100%; }
+
+    .adminHero,
+    .adminSection,
+    .adminListCard,
+    .adminMetric,
+    .adminModal {
+      border: 1px solid rgba(255,255,255,.08);
+      background:
+        radial-gradient(circle at 90% 0%,rgba(243,201,105,.07),transparent 34%),
+        linear-gradient(145deg,rgba(18,24,35,.92),rgba(7,10,16,.94));
+      box-shadow: 0 16px 38px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.035);
+    }
+
+    .adminHero {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 17px;
+      border-radius: 24px;
+    }
+    .adminEyebrow,
+    .adminSectionHead > div > span,
+    .adminModalHead span {
+      display: block;
+      color: var(--gold);
+      font-size: 9px;
+      font-weight: 950;
+      letter-spacing: 1.3px;
+    }
+    .adminHero h2 {
+      margin: 4px 0 6px;
+      font-size: 24px;
+      font-weight: 950;
+    }
+    .adminHero p {
+      max-width: 360px;
+      margin: 0;
+      color: var(--text-soft);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+    .adminRefresh {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      flex: 0 0 40px;
+      border-radius: 14px;
+      color: var(--gold-2);
+      font-size: 23px;
+      background: rgba(243,201,105,.08);
+      border: 1px solid rgba(243,201,105,.15);
+    }
+
+    .adminMetricGrid {
+      display: grid;
+      grid-template-columns: repeat(2,minmax(0,1fr));
+      gap: 9px;
+    }
+    .adminMetric {
+      min-width: 0;
+      padding: 13px;
+      border-radius: 19px;
+    }
+    .adminMetricIcon {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      margin-bottom: 10px;
+      border-radius: 11px;
+      color: var(--gold-2);
+      background: rgba(243,201,105,.08);
+      border: 1px solid rgba(243,201,105,.14);
+    }
+    .adminMetric > span {
+      display: block;
+      color: var(--text-soft);
+      font-size: 10px;
+      font-weight: 750;
+    }
+    .adminMetric > strong {
+      display: block;
+      margin-top: 3px;
+      color: var(--gold-2);
+      font-size: clamp(21px,7vw,30px);
+      line-height: 1.05;
+      font-weight: 950;
+    }
+    .adminMetric > small {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 9px;
+      line-height: 1.35;
+    }
+
+    .adminSection {
+      padding: 15px;
+      border-radius: 22px;
+    }
+    .adminSectionHead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .adminSectionHead h3,
+    .adminModalHead h3 {
+      margin: 3px 0 0;
+      font-size: 17px;
+      font-weight: 950;
+    }
+    .adminSectionHead > button {
+      padding: 8px 10px;
+      border-radius: 10px;
+      color: var(--gold);
+      font-size: 10px;
+      font-weight: 850;
+      background: rgba(243,201,105,.07);
+      border: 1px solid rgba(243,201,105,.12);
+    }
+
+    .adminMiniStats,
+    .adminDataGrid {
+      display: grid;
+      grid-template-columns: repeat(2,minmax(0,1fr));
+      gap: 8px;
+    }
+    .adminMiniStats > div,
+    .adminDataGrid > div {
+      min-width: 0;
+      padding: 10px;
+      border-radius: 13px;
+      background: rgba(255,255,255,.032);
+      border: 1px solid rgba(255,255,255,.06);
+    }
+    .adminMiniStats span,
+    .adminDataGrid span {
+      display: block;
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 700;
+    }
+    .adminMiniStats b,
+    .adminDataGrid b {
+      display: block;
+      margin-top: 3px;
+      overflow: hidden;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 900;
+      text-overflow: ellipsis;
+    }
+    .adminFootnote {
+      margin: 11px 0 0;
+      color: var(--muted);
+      font-size: 9px;
+      line-height: 1.5;
+    }
+
+    .adminSearch {
+      width: 100%;
+      min-height: 44px;
+      padding: 0 13px;
+      border-radius: 13px;
+      outline: none;
+      color: var(--text);
+      background: rgba(0,0,0,.2);
+      border: 1px solid rgba(255,255,255,.09);
+    }
+    .adminSearch:focus { border-color: rgba(243,201,105,.35); }
+
+    .adminList { display: grid; gap: 10px; }
+    .adminListCard {
+      padding: 13px;
+      border-radius: 20px;
+    }
+    .adminListTop {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .adminGrow { min-width: 0; flex: 1; }
+    .adminGrow > b {
+      display: block;
+      overflow: hidden;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 900;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .adminGrow > span {
+      display: block;
+      margin-top: 2px;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 9px;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .adminAvatar,
+    .adminBadgeIcon {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      flex: 0 0 38px;
+      border-radius: 13px;
+      color: #181004;
+      font-size: 14px;
+      font-weight: 950;
+      background: linear-gradient(135deg,#ffe59a,#c9932e);
+    }
+    .adminBadgeIcon {
+      color: var(--gold-2);
+      background: rgba(243,201,105,.08);
+      border: 1px solid rgba(243,201,105,.15);
+    }
+
+    .adminStatus {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      max-width: 115px;
+      padding: 5px 7px;
+      overflow: hidden;
+      border-radius: 999px;
+      font-size: 8px;
+      font-weight: 900;
+      text-transform: uppercase;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.08);
+    }
+    .adminStatus.good { color: var(--green); border-color: rgba(103,230,163,.18); background: rgba(103,230,163,.07); }
+    .adminStatus.warn { color: #ffd17e; border-color: rgba(255,190,80,.18); background: rgba(255,190,80,.07); }
+    .adminStatus.bad { color: var(--red); border-color: rgba(255,123,138,.18); background: rgba(255,123,138,.07); }
+    .adminStatus.neutral { color: var(--text-soft); }
+
+    .adminListCard .adminDataGrid { margin-top: 11px; }
+
+    .adminWalletLine {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 9px;
+      padding: 9px 10px;
+      border-radius: 12px;
+      background: rgba(0,0,0,.16);
+    }
+    .adminWalletLine > span {
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 700;
+    }
+    .adminWalletLine code {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--gold-2);
+      font-size: 9px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .adminActions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 11px;
+    }
+    .adminActions button {
+      min-height: 36px;
+      padding: 8px 11px;
+      border-radius: 11px;
+      color: var(--text-soft);
+      font-size: 9px;
+      font-weight: 900;
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.08);
+    }
+    .adminActions button.good { color: var(--green); border-color: rgba(103,230,163,.2); background: rgba(103,230,163,.07); }
+    .adminActions button.warn { color: #ffd17e; border-color: rgba(255,190,80,.2); background: rgba(255,190,80,.07); }
+    .adminActions button.danger { color: var(--red); border-color: rgba(255,123,138,.2); background: rgba(255,123,138,.07); }
+
+    .adminRiskFlags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 9px;
+    }
+    .adminRiskFlags span {
+      padding: 5px 7px;
+      border-radius: 999px;
+      color: #ffd17e;
+      font-size: 8px;
+      font-weight: 850;
+      background: rgba(255,190,80,.07);
+      border: 1px solid rgba(255,190,80,.15);
+    }
+
+    .adminCompactList { display: grid; gap: 7px; }
+    .adminCompactList > button,
+    .adminCompactRow {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      width: 100%;
+      padding: 10px;
+      text-align: left;
+      border-radius: 13px;
+      color: var(--text);
+      background: rgba(255,255,255,.03);
+      border: 1px solid rgba(255,255,255,.06);
+    }
+    .adminCompactList > button > div { min-width: 0; }
+    .adminCompactList > button b,
+    .adminCompactRow b { display: block; font-size: 10px; font-weight: 900; }
+    .adminCompactList > button span,
+    .adminCompactList > button small,
+    .adminCompactRow span { display: block; margin-top: 2px; color: var(--muted); font-size: 8px; }
+    .adminCompactList > button > div:last-child { text-align: right; }
+    .adminCompactList > button strong { color: #ffd17e; font-size: 9px; }
+
+    .adminTimeline { display: grid; gap: 0; }
+    .adminTimeline > article {
+      position: relative;
+      display: grid;
+      grid-template-columns: 18px minmax(0,1fr);
+      gap: 9px;
+    }
+    .adminTimeline > article > i {
+      position: relative;
+      display: block;
+      width: 9px;
+      height: 9px;
+      margin: 17px auto 0;
+      border-radius: 50%;
+      background: var(--gold);
+      box-shadow: 0 0 10px rgba(243,201,105,.4);
+    }
+    .adminTimeline > article > i::after {
+      content: "";
+      position: absolute;
+      left: 4px;
+      top: 10px;
+      width: 1px;
+      height: calc(100% + 80px);
+      background: rgba(243,201,105,.12);
+    }
+    .adminTimeline > article:last-child > i::after { display: none; }
+    .adminTimeline > article > div {
+      margin-bottom: 8px;
+      padding: 11px;
+      border-radius: 15px;
+      background: rgba(255,255,255,.03);
+      border: 1px solid rgba(255,255,255,.06);
+    }
+    .adminTimeline p,
+    .adminTimeline small {
+      display: block;
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 8px;
+    }
+
+    .adminSettingRows { display: grid; gap: 7px; }
+    .adminSettingRows > div {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 42px;
+      padding: 9px 10px;
+      border-radius: 12px;
+      background: rgba(255,255,255,.03);
+      border: 1px solid rgba(255,255,255,.06);
+    }
+    .adminSettingRows span { color: var(--text-soft); font-size: 10px; }
+    .adminSettingRows b { color: var(--gold-2); font-size: 10px; text-align: right; }
+    .adminSafetyBox { border-color: rgba(243,201,105,.15); }
+    .adminSafetyBox h3 { margin: 4px 0 7px; font-size: 16px; }
+    .adminSafetyBox p { margin: 0; color: var(--text-soft); font-size: 10px; line-height: 1.55; }
+
+    .adminLoading,
+    .adminEmpty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      min-height: 88px;
+      padding: 15px;
+      color: var(--muted);
+      font-size: 10px;
+      text-align: center;
+    }
+    .adminLoading i {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2px solid rgba(243,201,105,.15);
+      border-top-color: var(--gold);
+      animation: adminSpin .75s linear infinite;
+    }
+    @keyframes adminSpin { to { transform: rotate(360deg); } }
+
+    .adminAlert {
+      display: grid;
+      gap: 3px;
+      padding: 11px 12px;
+      border-radius: 14px;
+      font-size: 9px;
+    }
+    .adminAlert.bad {
+      color: #ffd3d8;
+      background: rgba(255,123,138,.08);
+      border: 1px solid rgba(255,123,138,.18);
+    }
+    .adminAlert b { font-size: 10px; }
+
+    .adminToast {
+      position: fixed;
+      z-index: 300;
+      left: 50%;
+      bottom: calc(20px + env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      width: max-content;
+      max-width: calc(100vw - 34px);
+      padding: 10px 13px;
+      border-radius: 12px;
+      color: #07140d;
+      font-size: 10px;
+      font-weight: 900;
+      background: var(--green);
+      box-shadow: 0 12px 30px rgba(0,0,0,.35);
+    }
+
+    .adminModalBackdrop {
+      position: fixed;
+      z-index: 250;
+      inset: 0;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      padding: 12px;
+      background: rgba(0,0,0,.72);
+      backdrop-filter: blur(8px);
+    }
+    .adminModal {
+      width: min(520px,100%);
+      max-height: 88vh;
+      padding: 15px;
+      overflow-y: auto;
+      border-radius: 25px 25px 18px 18px;
+    }
+    .adminModalHead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 13px;
+    }
+    .adminModalHead > button {
+      display: grid;
+      place-items: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 12px;
+      color: var(--text-soft);
+      font-size: 22px;
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.08);
+    }
+    .adminModal h4 {
+      margin: 16px 0 8px;
+      color: var(--gold-2);
+      font-size: 11px;
+      font-weight: 900;
+    }
+    .adminLogBox { display: grid; gap: 6px; }
+    .adminLogBox > div {
+      display: grid;
+      grid-template-columns: auto minmax(0,1fr) auto;
+      align-items: center;
+      gap: 7px;
+      padding: 8px;
+      border-radius: 11px;
+      background: rgba(255,255,255,.025);
+      border: 1px solid rgba(255,255,255,.05);
+    }
+    .adminLogBox b {
+      overflow: hidden;
+      font-size: 9px;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .adminLogBox small { color: var(--muted); font-size: 7px; }
+
+    @media (max-width: 480px) {
+      .adminHeader {
+        margin-left: -10px;
+        margin-right: -10px;
+        padding-left: 10px;
+        padding-right: 10px;
+      }
+      .adminMetricGrid { gap: 8px; }
+      .adminMetric { padding: 11px; }
+      .adminSection, .adminListCard { padding: 12px; }
+    }
+
+    @media (max-width: 370px) {
+      .adminMetricGrid { grid-template-columns: 1fr; }
+      .adminHeader h1 { font-size: 15px; }
+      .adminLive { display: none; }
+      .adminHeader { grid-template-columns: 44px minmax(0,1fr); }
+    }
