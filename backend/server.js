@@ -13435,7 +13435,7 @@ await pool.query(`
     app.get(
 
       '/admin/withdrawals',
-
+        authenticate,
       admin,
 
       async (
@@ -13517,7 +13517,7 @@ await pool.query(`
     app.post(
 
       '/admin/withdrawals/:id/approve',
-
+      authenticate,
       admin,
 
       async (
@@ -13589,7 +13589,7 @@ await pool.query(`
     app.post(
 
       '/admin/withdrawals/:id/reject',
-
+      authenticate,
       admin,
 
       async (
@@ -13755,6 +13755,8 @@ await pool.query(`
     app.post(
 
       '/admin/withdrawals/:id/complete',
+
+      authenticate,
 
       admin,
 
@@ -15304,7 +15306,7 @@ app.post(
     app.get(
 
       '/admin/security/config',
-
+      authenticate,
       admin,
 
       (
