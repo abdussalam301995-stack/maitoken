@@ -19,7 +19,7 @@ import {
 } from '@ton/core';
 
 import './App.css';
-
+import AdminPanel from './Admin/AdminPanel';
 
 /* =========================================================
    MAI NETWORK
@@ -3370,7 +3370,13 @@ function App() {
     useState(
       false
     );
-
+  const [
+    isAdmin,
+    setIsAdmin
+  ] =
+    useState(
+      false
+    );
 
   const [
     selectedLevel,
@@ -3410,6 +3416,40 @@ function App() {
 
   const address =
     useTonAddress();
+
+      useEffect(
+    () => {
+      let cancelled = false;
+
+      const checkAdminAccess =
+        async () => {
+          try {
+            await api(
+              '/admin/me'
+            );
+
+            if (!cancelled) {
+              setIsAdmin(
+                true
+              );
+            }
+          } catch {
+            if (!cancelled) {
+              setIsAdmin(
+                false
+              );
+            }
+          }
+        };
+
+      checkAdminAccess();
+
+      return () => {
+        cancelled = true;
+      };
+    },
+    []
+  );
 
 
   /* =======================================================
@@ -4249,7 +4289,17 @@ function App() {
 
             )
 
+                    : view ===
+            'admin'
+            ? (
 
+              <AdminPanel
+                back={
+                  closeView
+                }
+              />
+
+            )
           : tab ===
             'home'
             ? (
@@ -4422,7 +4472,15 @@ function App() {
                     'terms'
                   )
                 }
+                               isAdmin={
+                  isAdmin
+                }
 
+                openAdmin={() =>
+                  openView(
+                    'admin'
+                  )
+                }
                 supportUrl={
                   supportUrl
                 }
@@ -11209,6 +11267,8 @@ function ProfilePage({
   user,
   openWithdraw,
   openTerms,
+    isAdmin,
+  openAdmin,
   supportUrl,
   withdrawals,
   setWithdrawals,
@@ -11416,7 +11476,43 @@ function ProfilePage({
 
   };
 
+        {isAdmin && (
+          <>
+            {/* =================================================
+                ADMIN CONTROL CENTER
+                ================================================= */}
 
+            <button
+              className="settingRow"
+              onClick={() => {
+                playClick();
+                openAdmin();
+              }}
+            >
+              <span className="settingLeft">
+
+                <i className="settingIcon">
+                  <Icon name="shield" />
+                </i>
+
+                <span>
+                  <b>
+                    Admin Control Center
+                  </b>
+
+                  <small>
+                    MAI Network administration
+                  </small>
+                </span>
+
+              </span>
+
+              <em>
+                ›
+              </em>
+            </button>
+          </>
+        )}
   /* =======================================================
      SUPPORT
      ======================================================= */
