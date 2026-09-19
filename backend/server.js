@@ -3377,6 +3377,29 @@ if (
          Never drop the table; add missing columns safely.
          ========================================================= */
 
+      // Older production databases may predate the idempotency column.
+      // Add it before any route or index references it, then backfill legacy rows.
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+      `);
+
+      await pool.query(`
+        UPDATE withdrawals
+        SET idempotency_key = 'legacy:' || id::text
+        WHERE idempotency_key IS NULL OR BTRIM(idempotency_key) = '';
+      `);
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ALTER COLUMN idempotency_key SET NOT NULL;
+      `);
+
+      await pool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_withdrawals_user_idempotency
+        ON withdrawals(telegram_id, idempotency_key);
+      `);
+
       await pool.query(`
         ALTER TABLE withdrawals
         ADD COLUMN IF NOT EXISTS fee NUMERIC(30,8);
@@ -3402,6 +3425,33 @@ if (
         ALTER TABLE withdrawals
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ
         DEFAULT NOW();
+      `);
+
+      // Payout metadata keeps today's manual approval flow compatible with
+      // a future isolated auto-payment worker without exposing signing keys here.
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS payout_mode TEXT DEFAULT 'manual';
+      `);
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS payout_attempts INTEGER DEFAULT 0;
+      `);
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS broadcast_at TIMESTAMPTZ;
+      `);
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
+      `);
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS last_payout_error TEXT;
       `);
 
       await pool.query(`
@@ -12985,6 +13035,15 @@ await pool.query(`
           const user = userResult.rows[0];
 
           if (!user) return res.status(404).json({ success:false, message:'User not found' });
+          if (String(user.account_status || 'active') === 'banned') {
+            return res.status(403).json({ success:false, message:'Withdrawals are disabled for this account' });
+          }
+          if (
+            String(user.account_status || 'active') === 'suspended' &&
+            (!user.suspended_until || new Date(user.suspended_until).getTime() > Date.now())
+          ) {
+            return res.status(403).json({ success:false, message:'Withdrawals are temporarily disabled for this account' });
+          }
           if (!user.wallet_address) return res.status(409).json({ success:false, message:'Connect a wallet first' });
           if (safeNumber(user.balance) < amount) return res.status(409).json({ success:false, message:'Insufficient in-game balance' });
 
@@ -13325,6 +13384,25 @@ await pool.query(`
 
             }
 
+
+            if (String(user.account_status || 'active') === 'banned') {
+              await client.query('ROLLBACK');
+              return res.status(403).json({
+                success:false,
+                message:'Withdrawals are disabled for this account'
+              });
+            }
+
+            if (
+              String(user.account_status || 'active') === 'suspended' &&
+              (!user.suspended_until || new Date(user.suspended_until).getTime() > Date.now())
+            ) {
+              await client.query('ROLLBACK');
+              return res.status(403).json({
+                success:false,
+                message:'Withdrawals are temporarily disabled for this account'
+              });
+            }
 
             if (
               !user.wallet_address
@@ -13959,7 +14037,9 @@ await pool.query(`
 
                   'approved',
 
-                  'processing'
+                  'processing',
+
+                  'broadcasted'
 
                 )
 
@@ -14385,6 +14465,8 @@ await pool.query(`
 
               tx_hash=$2,
 
+              confirmed_at=NOW(),
+
               updated_at=NOW()
 
             WHERE id=$1
@@ -14455,7 +14537,11 @@ await pool.query(`
               withdrawal.id,
 
               {
-                txHash
+                txHash,
+                requestedAmount: safeNumber(withdrawal.amount),
+                fee: safeNumber(withdrawal.fee),
+                receiveAmount: safeNumber(withdrawal.receive_amount),
+                payoutMode: String(withdrawal.payout_mode || 'manual')
               }
 
             ]
