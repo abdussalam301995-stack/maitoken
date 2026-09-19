@@ -3385,6 +3385,19 @@ if (
         ALTER COLUMN id TYPE TEXT USING id::text;
       `);
 
+      // Very old deployments used withdrawals.user_id as a required legacy field.
+      // The current authoritative identity is telegram_id. Keep historical user_id
+      // values for audit/history, but it must not block new current-schema inserts.
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS user_id BIGINT;
+      `);
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ALTER COLUMN user_id DROP NOT NULL;
+      `);
+
       // Older production databases may predate the idempotency column.
       // Add it before any route or index references it, then backfill legacy rows.
       await pool.query(`
