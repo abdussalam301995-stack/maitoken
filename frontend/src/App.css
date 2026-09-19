@@ -10979,3 +10979,63 @@ body.maiAdminOpen .adminPanel.adminV4 {
     top: calc(20px + env(safe-area-inset-top, 0px)) !important;
   }
 }
+
+/* =========================================================
+   MAI ADMIN V4 — TELEGRAM MOBILE TOP CHROME FIX V2
+   Added after testing on Telegram Android WebView.
+
+   Reason:
+   Telegram Android can report safe-area-inset-top as 0px even
+   though Telegram's own Close/title/status chrome overlaps the
+   top of the Mini App. The previous 28px fallback was too small.
+
+   Desktop >= 960px remains unchanged.
+   ========================================================= */
+
+@media (max-width: 959px) and (hover: none) and (pointer: coarse) {
+
+  /* Reserve a real tappable zone below Telegram's own top UI. */
+  .adminV4 .adminTopbar {
+    padding-top:
+      calc(58px + env(safe-area-inset-top, 0px)) !important;
+
+    min-height:
+      calc(100px + env(safe-area-inset-top, 0px)) !important;
+
+    overflow: visible !important;
+  }
+
+  /* Drawer starts below the same Telegram interaction zone. */
+  .adminV4 .adminSidebar {
+    padding-top:
+      calc(54px + env(safe-area-inset-top, 0px)) !important;
+  }
+
+  /* Keep drawer close button below Telegram Close/title chrome. */
+  .adminV4 .adminSidebarClose {
+    top:
+      calc(58px + env(safe-area-inset-top, 0px)) !important;
+  }
+
+  /* Make the actual mobile controls reliably tappable. */
+  .adminV4 .adminMenuButton,
+  .adminV4 .adminBackButton,
+  .adminV4 .adminTopbarLeft,
+  .adminV4 .adminTopStatus {
+    position: relative !important;
+    z-index: 3 !important;
+    pointer-events: auto !important;
+  }
+}
+
+/* Very short/wide mobile WebViews still need the same safe top zone. */
+@media (max-width: 959px) and (max-height: 600px) and (hover: none) and (pointer: coarse) {
+  .adminV4 .adminTopbar {
+    padding-top:
+      calc(52px + env(safe-area-inset-top, 0px)) !important;
+
+    min-height:
+      calc(94px + env(safe-area-inset-top, 0px)) !important;
+  }
+}
+
