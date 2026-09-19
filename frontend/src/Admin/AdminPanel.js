@@ -56,12 +56,20 @@
       ['users', '👥', 'Users'],
       ['multi', '◎', 'Multi-Account'],
       ['security', '🛡', 'Security'],
-      ['promotions', '🚀', 'Promotions'],
       ['withdrawals', '↗', 'Withdrawals'],
       ['fraud', '⚠', 'Fraud Check'],
       ['payments', '◈', 'Payments'],
-      ['audit', '☷', 'Audit'],
-      ['settings', '⚙', 'Settings']
+      ['promotions', '🚀', 'Promotions'],
+      ['audit', '☷', 'Audit Logs'],
+      ['settings', '⚙', 'System Settings']
+    ];
+
+    const LOCKED_NAV = [
+      ['tasks', '✓', 'Tasks & Missions'],
+      ['giveaway', '🎁', 'Giveaway'],
+      ['broadcast', '📣', 'Broadcast Message'],
+      ['invites', '👥', 'Active Invites'],
+      ['launch', '🚀', 'Launch Control']
     ];
 
     const fmt = value =>
@@ -128,6 +136,7 @@
       const [loading, setLoading] = useState(true);
       const [error, setError] = useState('');
       const [notice, setNotice] = useState('');
+      const [menuOpen, setMenuOpen] = useState(false);
 
       const loadAll = useCallback(async (silent = false) => {
         if (!silent) setLoading(true);
@@ -748,23 +757,85 @@
 
 
       const renderMultiAccount = () => {
-        const linked = users.filter(user => Number(user.linked_device_accounts || 0) > 1 || Number(user.device_count || 0) > 1);
+        const candidates = users
+          .filter(user =>
+            Number(user.linked_device_accounts || 0) > 0 ||
+            Number(user.device_count || 0) > 1
+          )
+          .sort((a, b) =>
+            Number(b.linked_device_accounts || 0) -
+            Number(a.linked_device_accounts || 0)
+          );
+
         return (
           <>
-            <section className="adminSection">
-              <div className="adminSectionHead"><div><span>MULTI-ACCOUNT DETECTION</span><h3>Device-linked account groups</h3></div></div>
-              <p className="adminFootnote">Device and IP matches are review signals. Shared Wi-Fi, family and office networks can create legitimate matches.</p>
+            <section className="adminSection adminCommandIntro">
+              <div className="adminSectionHead">
+                <div>
+                  <span>MULTI-ACCOUNT DETECTION</span>
+                  <h3>Device-linked review queue</h3>
+                </div>
+              </div>
+              <p className="adminFootnote">
+                Accounts are ordered by device-link signals. Open Inspect to see the
+                exact registered devices and the unique accounts associated with them.
+                Shared IP/device matches are review signals only — not proof of abuse.
+              </p>
             </section>
-            <div className="adminTableWrap">
-              <table className="adminTable">
-                <thead><tr><th>#</th><th>UID</th><th>User</th><th>Devices</th><th>Linked</th><th>Warnings</th><th>Status</th><th>Action</th></tr></thead>
-                <tbody>
-                  {linked.map((user,index) => <tr key={user.telegram_id}>
-                    <td>{index+1}</td><td>{user.telegram_id}</td><td>@{user.username || 'no-username'}</td><td>{user.device_count || 0}</td><td>{user.linked_device_accounts || 0}</td><td>{user.warning_count || 0}</td><td><Status>{user.account_status}</Status></td><td><button className="adminTableBtn" onClick={() => openUser(user.telegram_id)}>Inspect</button></td>
-                  </tr>)}
-                </tbody>
-              </table>
-              {!linked.length && <Empty text="No current multi-account device groups." />}
+
+            <div className="adminDeviceGroupList">
+              {candidates.map((user, index) => (
+                <article className="adminDeviceGroup" key={user.telegram_id}>
+                  <div className="adminDeviceGroupHead">
+                    <div>
+                      <small>REVIEW GROUP #{String(index + 1).padStart(2, '0')}</small>
+                      <h4>{user.first_name || user.username || `UID ${user.telegram_id}`}</h4>
+                      <span>Primary UID {user.telegram_id}</span>
+                    </div>
+                    <Status>{user.account_status}</Status>
+                  </div>
+
+                  <div className="adminDeviceGroupStats">
+                    <div><span>Registered Devices</span><b>{user.device_count || 0}</b></div>
+                    <div><span>Linked Accounts</span><b>{user.linked_device_accounts || 0}</b></div>
+                    <div><span>Warnings</span><b>{user.warning_count || 0}</b></div>
+                  </div>
+
+                  <div className="adminGroupTableWrap">
+                    <table className="adminTable adminGroupPreviewTable">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>UID</th>
+                          <th>Username</th>
+                          <th>Signal</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td>1</td>
+                          <td>{user.telegram_id}</td>
+                          <td>@{user.username || 'no-username'}</td>
+                          <td>{Number(user.linked_device_accounts || 0) > 0 ? 'Device link' : 'Multiple devices'}</td>
+                          <td><Status>{user.account_status}</Status></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <button
+                    className="adminInspectGroup"
+                    onClick={() => openUser(user.telegram_id)}
+                  >
+                    Inspect device group →
+                  </button>
+                </article>
+              ))}
+
+              {!candidates.length && (
+                <Empty text="No current device-linked account groups." />
+              )}
             </div>
           </>
         );
@@ -802,51 +873,174 @@
         return renderSettings();
       };
 
+      const currentLabel =
+        NAV.find(([key]) => key === tab)?.[2] || 'Dashboard';
+
+      const closeMenuAndOpen = key => {
+        setTab(key);
+        setSelectedUser(null);
+        setUserDetail(null);
+        setMenuOpen(false);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      };
+
       return (
-        <div className="adminPanel">
-          <header className="adminHeader">
-            <button type="button" onClick={back} aria-label="Back">←</button>
-            <div>
-              <small>MAI NETWORK</small>
-              <h1>Admin Control Center</h1>
-            </div>
-            <span className="adminLive">LIVE</span>
-          </header>
+        <div className={`adminPanel adminV4 ${menuOpen ? 'menuOpen' : ''}`}>
+          <div
+            className="adminMobileShade"
+            onClick={() => setMenuOpen(false)}
+            aria-hidden="true"
+          />
 
-          <nav className="adminNav" aria-label="Admin sections">
-            {NAV.map(([key, icon, label]) => (
-              <button
-                key={key}
-                className={tab === key ? 'active' : ''}
-                onClick={() => {
-                  setTab(key);
-                  setSelectedUser(null);
-                  setUserDetail(null);
-                }}
-              >
-                <i>{icon}</i>
-                <span>{label}</span>
-                {navCount(key) > 0 && <em>{navCount(key)}</em>}
-              </button>
-            ))}
-          </nav>
-
-          <main className="adminContent">
-            {error && (
-              <div className="adminAlert bad">
-                <b>Admin request failed</b>
-                <span>{error}</span>
+          <aside className="adminSidebar">
+            <div className="adminBrand">
+              <div className="adminBrandMark">M</div>
+              <div>
+                <b>MAI NETWORK</b>
+                <span>Admin Command Center</span>
               </div>
-            )}
+              <button
+                className="adminSidebarClose"
+                onClick={() => setMenuOpen(false)}
+                aria-label="Close menu"
+              >
+                ×
+              </button>
+            </div>
 
-            {notice && <div className="adminToast">{notice}</div>}
+            <div className="adminSideNav">
+              {NAV.map(([key, icon, label]) => (
+                <button
+                  key={key}
+                  className={tab === key ? 'active' : ''}
+                  onClick={() => closeMenuAndOpen(key)}
+                >
+                  <i>{icon}</i>
+                  <span>{label}</span>
+                  {navCount(key) > 0 && <em>{navCount(key)}</em>}
+                </button>
+              ))}
 
-            {loading ? <Loader /> : renderCurrent()}
-          </main>
+              <div className="adminSideDivider">
+                <span>SERVER MODULES</span>
+              </div>
+
+              {LOCKED_NAV.map(([key, icon, label]) => (
+                <button
+                  key={key}
+                  className="adminLockedNav"
+                  disabled
+                  title="Backend module not enabled yet"
+                >
+                  <i>{icon}</i>
+                  <span>{label}</span>
+                  <small>LOCKED</small>
+                </button>
+              ))}
+            </div>
+
+            <div className="adminSidebarFoot">
+              <b>MAI NETWORK</b>
+              <span>Secure • Fair • Auditable</span>
+              <small>Admin V4</small>
+            </div>
+          </aside>
+
+          <section className="adminWorkspace">
+            <header className="adminTopbar">
+              <div className="adminTopbarLeft">
+                <button
+                  className="adminMenuButton"
+                  onClick={() => setMenuOpen(true)}
+                  aria-label="Open admin menu"
+                >
+                  ☰
+                </button>
+                <button
+                  className="adminBackButton"
+                  type="button"
+                  onClick={back}
+                  aria-label="Back to MAI"
+                >
+                  ←
+                </button>
+                <div className="adminMobileTitle">
+                  <small>MAI ADMIN</small>
+                  <b>{currentLabel}</b>
+                </div>
+              </div>
+
+              <div className="adminGlobalSearch">
+                <span>⌕</span>
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  onFocus={() => setTab('users')}
+                  placeholder="Search users (UID / @username / wallet)"
+                />
+              </div>
+
+              <div className="adminTopStatus">
+                <span className="adminOnlineDot" />
+                <b>Online</b>
+              </div>
+
+              <div className="adminAdminChip">
+                <i>A</i>
+                <div>
+                  <b>Admin</b>
+                  <small>Authorized</small>
+                </div>
+              </div>
+            </header>
+
+            <main className="adminContent">
+              <div className="adminPageHeading">
+                <div>
+                  <small>MAI NETWORK / {currentLabel.toUpperCase()}</small>
+                  <h1>
+                    {tab === 'dashboard'
+                      ? 'Welcome Back, Admin'
+                      : currentLabel}
+                  </h1>
+                  <p>
+                    {tab === 'dashboard'
+                      ? 'Monitor, manage and protect the MAI Network.'
+                      : 'Server-authoritative administration and review.'}
+                  </p>
+                </div>
+                <button
+                  className="adminRefresh"
+                  onClick={() => loadAll()}
+                  disabled={loading}
+                  aria-label="Refresh admin data"
+                >
+                  ↻
+                </button>
+              </div>
+
+              {error && (
+                <div className="adminAlert bad">
+                  <b>Admin request failed</b>
+                  <span>{error}</span>
+                </div>
+              )}
+
+              {notice && <div className="adminToast">{notice}</div>}
+
+              {loading ? <Loader /> : renderCurrent()}
+            </main>
+          </section>
 
           {selectedUser && (
-            <div className="adminModalBackdrop" onClick={() => setSelectedUser(null)}>
-              <section className="adminModal" onClick={e => e.stopPropagation()}>
+            <div
+              className="adminModalBackdrop"
+              onClick={() => setSelectedUser(null)}
+            >
+              <section
+                className="adminModal adminUserInspector"
+                onClick={e => e.stopPropagation()}
+              >
                 <div className="adminModalHead">
                   <div>
                     <span>USER SECURITY DETAIL</span>
@@ -872,44 +1066,131 @@
                       <div><span>Last Updated</span><b>{when(userDetail.user?.updated_at)}</b></div>
                     </div>
 
-                    <h4>Registered Devices</h4>
-                    <div className="adminDeviceList">
-                      {(userDetail.security?.devices || []).map(device => (
-                        <div className="adminDeviceCard" key={device.device_hash}>
-                          <div><span>Device</span><b>{device.device_label || 'Unknown device'}</b></div>
-                          <div><span>Device ID</span><code>{short(device.device_hash,12,10)}</code></div>
-                          <div><span>Accounts on device</span><b>{device.account_count || 1}</b></div>
-                          <div><span>First seen</span><small>{when(device.first_seen)}</small></div>
-                          <div><span>Last seen</span><small>{when(device.last_seen)}</small></div>
-                        </div>
-                      ))}
-                      {!(userDetail.security?.devices || []).length && <Empty text="No registered device records." />}
+                    <div className="adminInspectorTitle">
+                      <div>
+                        <small>DEVICE CORRELATION</small>
+                        <h4>Registered Device Groups</h4>
+                      </div>
+                      <span>{(userDetail.security?.devices || []).length} devices</span>
                     </div>
-                    <p className="adminFootnote">Device names are best-effort labels from the Telegram WebView/browser. Device ID is a server-side hash, not a raw hardware identifier.</p>
 
-                    <h4>Linked Accounts · Same Device</h4>
+                    <div className="adminDeviceList">
+                      {(userDetail.security?.devices || []).map((device, deviceIndex) => {
+                        const linkedForDevice =
+                          (userDetail.security?.linkedDeviceAccounts || [])
+                            .filter(account =>
+                              Array.isArray(account.shared_device_hashes) &&
+                              account.shared_device_hashes.includes(device.device_hash)
+                            );
+
+                        return (
+                          <article
+                            className="adminDeviceCard adminDeviceGroupCard"
+                            key={device.device_hash}
+                          >
+                            <div className="adminDeviceGroupHead">
+                              <div>
+                                <small>DEVICE GROUP #{String(deviceIndex + 1).padStart(2, '0')}</small>
+                                <h4>{device.device_label || 'Unknown device'}</h4>
+                                <code>{short(device.device_hash, 12, 10)}</code>
+                              </div>
+                              <span className="adminDeviceCount">
+                                {device.account_count || 1} accounts
+                              </span>
+                            </div>
+
+                            <div className="adminDeviceMeta">
+                              <span>First seen <b>{when(device.first_seen)}</b></span>
+                              <span>Last seen <b>{when(device.last_seen)}</b></span>
+                            </div>
+
+                            <div className="adminGroupTableWrap">
+                              <table className="adminTable adminLinkedTable">
+                                <thead>
+                                  <tr>
+                                    <th>#</th>
+                                    <th>UID</th>
+                                    <th>Username</th>
+                                    <th>Wallet</th>
+                                    <th>Last Match</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <tr>
+                                    <td>1</td>
+                                    <td>{userDetail.user?.telegram_id}</td>
+                                    <td>@{userDetail.user?.username || 'no-username'}</td>
+                                    <td><code>{short(userDetail.user?.wallet_address, 8, 5)}</code></td>
+                                    <td>Owner</td>
+                                  </tr>
+                                  {linkedForDevice.map((item, index) => (
+                                    <tr key={`${device.device_hash}-${item.telegram_id}`}>
+                                      <td>{index + 2}</td>
+                                      <td>{item.telegram_id}</td>
+                                      <td>@{item.username || 'no-username'}</td>
+                                      <td><code>{short(item.wallet_address, 8, 5)}</code></td>
+                                      <td>{when(item.last_seen)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </article>
+                        );
+                      })}
+                      {!(userDetail.security?.devices || []).length && (
+                        <Empty text="No registered device records." />
+                      )}
+                    </div>
+
+                    <p className="adminFootnote">
+                      Device labels are best-effort Telegram WebView/browser labels.
+                      Device IDs shown here are privacy-safe server hashes, not raw
+                      hardware identifiers.
+                    </p>
+
+                    <div className="adminInspectorTitle">
+                      <div>
+                        <small>NETWORK CORRELATION</small>
+                        <h4>Shared IP Signals</h4>
+                      </div>
+                    </div>
+
                     <div className="adminTableWrap adminModalTable">
                       <table className="adminTable">
-                        <thead><tr><th>#</th><th>UID</th><th>User</th><th>Device Links</th><th>Last Match</th></tr></thead>
-                        <tbody>{(userDetail.security?.linkedDeviceAccounts || []).map((item,index) => (
-                          <tr key={item.telegram_id}><td>{index+1}</td><td>{item.telegram_id}</td><td>@{item.username || 'no-username'}</td><td>{item.shared_device_count || 1}</td><td>{when(item.last_seen)}</td></tr>
-                        ))}</tbody>
+                        <thead>
+                          <tr>
+                            <th>#</th>
+                            <th>UID</th>
+                            <th>User</th>
+                            <th>Shared Signals</th>
+                            <th>Last Match</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(userDetail.security?.sharedIpAccounts || []).map((item, index) => (
+                            <tr key={item.telegram_id}>
+                              <td>{index + 1}</td>
+                              <td>{item.telegram_id}</td>
+                              <td>@{item.username || 'no-username'}</td>
+                              <td>{item.shared_ip_count || 1}</td>
+                              <td>{when(item.last_seen)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
                       </table>
-                      {!(userDetail.security?.linkedDeviceAccounts || []).length && <Empty text="No other accounts share a registered device." />}
+                      {!(userDetail.security?.sharedIpAccounts || []).length && (
+                        <Empty text="No other accounts share observed IP signals." />
+                      )}
                     </div>
 
-                    <h4>Linked Accounts · Shared IP</h4>
-                    <div className="adminCompactList">
-                      {(userDetail.security?.sharedIpAccounts || []).map(item => (
-                        <div className="adminRelationRow" key={item.telegram_id}>
-                          <div><b>{item.first_name || 'MAI User'}</b><span>@{item.username || 'no-username'} · UID {item.telegram_id}</span></div>
-                          <div><strong>{item.shared_ip_count || 1} shared IP signal</strong><small>Last match {when(item.last_seen)}</small></div>
-                        </div>
-                      ))}
-                      {!(userDetail.security?.sharedIpAccounts || []).length && <Empty text="No other accounts share observed IP signals." />}
+                    <div className="adminInspectorTitle">
+                      <div>
+                        <small>SECURITY HISTORY</small>
+                        <h4>Recent Security Logs</h4>
+                      </div>
                     </div>
 
-                    <h4>Recent Security Logs</h4>
                     <div className="adminLogBox">
                       {(userDetail.security?.logs || []).slice(0, 30).map((log, index) => (
                         <div key={`${log.created_at}-${index}`}>
@@ -918,7 +1199,21 @@
                           <small>{when(log.created_at)}</small>
                         </div>
                       ))}
-                      {!(userDetail.security?.logs || []).length && <Empty text="No security logs." />}
+                      {!(userDetail.security?.logs || []).length && (
+                        <Empty text="No security logs." />
+                      )}
+                    </div>
+
+                    <div className="adminInspectorActions">
+                      <button onClick={() => messageUser(userDetail.user)}>Message</button>
+                      {userDetail.user?.account_status === 'active' ? (
+                        <>
+                          <button className="warn" onClick={() => suspendUser(userDetail.user)}>Suspend</button>
+                          <button className="danger" onClick={() => banUser(userDetail.user)}>Ban</button>
+                        </>
+                      ) : (
+                        <button className="good" onClick={() => restoreUser(userDetail.user)}>Restore Access</button>
+                      )}
                     </div>
                   </>
                 )}
