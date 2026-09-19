@@ -14129,85 +14129,62 @@ app.get(
   '/admin/dashboard',
   authenticate,
   admin,
-
   async (req, res, next) => {
     try {
-      const result =
-        await pool.query(
-          `
+      const [summaryResult, growthResult] = await Promise.all([
+        pool.query(`
           SELECT
+            (SELECT COUNT(*)::int FROM users) AS total_users,
+            (SELECT COUNT(*)::int FROM users WHERE account_status='banned') AS banned_users,
+            (SELECT COUNT(*)::int FROM users WHERE account_status='suspended' AND (suspended_until IS NULL OR suspended_until > NOW())) AS suspended_users,
+            (SELECT COUNT(*)::int FROM users WHERE created_at >= NOW() - INTERVAL '24 hours') AS new_users_24h,
+            (SELECT COUNT(*)::int FROM campaigns WHERE payment_status='paid' AND status='pending') AS pending_campaigns,
+            (SELECT COUNT(*)::int FROM campaigns WHERE payment_status='paid' AND status='approved') AS active_campaigns,
+            (SELECT COUNT(*)::int FROM withdrawals) AS total_withdrawals,
+            (SELECT COUNT(*)::int FROM withdrawals WHERE status IN ('pending','security_check')) AS pending_withdrawals,
+            (SELECT COUNT(*)::int FROM withdrawals WHERE status='security_check') AS risky_withdrawals,
+            (SELECT COALESCE(SUM(amount),0)::numeric FROM withdrawals WHERE status='completed') AS mai_distributed,
+            (SELECT COUNT(*)::int FROM security_logs WHERE severity='warn' AND created_at >= NOW() - INTERVAL '24 hours') AS security_warnings_24h,
+            (SELECT COUNT(DISTINCT device_hash)::int FROM device_accounts) AS known_devices,
+            (SELECT COUNT(*)::int FROM (SELECT device_hash FROM device_accounts GROUP BY device_hash HAVING COUNT(DISTINCT telegram_id) > 1) shared_devices) AS shared_devices
+        `),
+        pool.query(`
+          WITH days AS (
+            SELECT generate_series(
+              (CURRENT_DATE - INTERVAL '29 days')::date,
+              CURRENT_DATE,
+              INTERVAL '1 day'
+            )::date AS day
+          )
+          SELECT
+            TO_CHAR(days.day, 'YYYY-MM-DD') AS day,
+            (SELECT COUNT(*)::int FROM users u WHERE u.created_at < days.day + INTERVAL '1 day') AS total,
+            (SELECT COUNT(*)::int FROM users u WHERE u.created_at >= days.day AND u.created_at < days.day + INTERVAL '1 day') AS joined
+          FROM days
+          ORDER BY days.day
+        `)
+      ]);
 
-            (SELECT COUNT(*)::int
-             FROM users)
-              AS total_users,
+      const dashboard = summaryResult.rows[0] || {};
+      dashboard.user_growth_30d = growthResult.rows || [];
 
-            (SELECT COUNT(*)::int FROM users WHERE account_status='banned')
-              AS banned_users,
+      // These states describe this server's own configured/operational modules.
+      // We intentionally do not claim an external Telegram API health check here.
+      dashboard.system_status = {
+        bot_api: BOT_TOKEN ? 'configured' : 'unconfigured',
+        database: 'online',
+        withdrawals: 'online',
+        notifications: BOT_TOKEN ? 'configured' : 'unconfigured',
+        security: 'online'
+      };
 
-            (SELECT COUNT(*)::int
-             FROM users
-             WHERE account_status='suspended'
-               AND (suspended_until IS NULL OR suspended_until > NOW()))
-              AS suspended_users,
-
-            (SELECT COUNT(*)::int
-             FROM campaigns
-             WHERE payment_status='paid'
-               AND status='pending')
-              AS pending_campaigns,
-
-            (SELECT COUNT(*)::int
-             FROM campaigns
-             WHERE payment_status='paid'
-               AND status='approved')
-              AS active_campaigns,
-
-            (SELECT COUNT(*)::int
-             FROM withdrawals
-             WHERE status IN (
-               'pending',
-               'security_check'
-             ))
-              AS pending_withdrawals,
-
-            (SELECT COUNT(*)::int
-             FROM withdrawals
-             WHERE status='security_check')
-              AS risky_withdrawals,
-
-            (SELECT COUNT(*)::int
-             FROM security_logs
-             WHERE severity='warn'
-               AND created_at >=
-                   NOW() - INTERVAL '24 hours')
-              AS security_warnings_24h,
-
-            (SELECT COUNT(DISTINCT device_hash)::int
-             FROM device_accounts)
-              AS known_devices,
-
-            (SELECT COUNT(*)::int
-             FROM (
-               SELECT device_hash
-               FROM device_accounts
-               GROUP BY device_hash
-               HAVING COUNT(DISTINCT telegram_id) > 1
-             ) shared_devices)
-              AS shared_devices
-
-          `
-        );
-
-      res.json({
-        success: true,
-        dashboard: result.rows[0]
-      });
-
+      res.json({ success: true, dashboard });
     } catch (error) {
       next(error);
     }
   }
 );
+
        /* =========================================================
    ADMIN USERS
 

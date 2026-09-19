@@ -328,36 +328,66 @@
       };
 
       const renderDashboard = () => {
-        const cards = [
-          ['Total Users', dashboard?.total_users, 'All registered MAI accounts', '👥'],
-          ['Pending Promotions', dashboard?.pending_campaigns, 'Paid and waiting for review', '🚀'],
-          ['Pending Withdrawals', dashboard?.pending_withdrawals, 'Requires admin processing', '↗'],
-          ['Security Warnings', dashboard?.security_warnings_24h, 'Warnings in the last 24 hours', '🛡'],
-          ['Active Campaigns', dashboard?.active_campaigns, 'Approved and published', '✓'],
-          ['Risky Withdrawals', dashboard?.risky_withdrawals, 'Security-check queue', '!'],
-          ['Banned Users', dashboard?.banned_users, 'Access blocked', '⊘'],
-          ['Suspended Users', dashboard?.suspended_users, 'Temporary restrictions', '⏱']
+        const growth = Array.isArray(dashboard?.user_growth_30d)
+          ? dashboard.user_growth_30d
+          : [];
+        const maxGrowth = Math.max(1, ...growth.map(item => Number(item.total || 0)));
+        const chartPoints = growth.length > 1
+          ? growth.map((item, index) => {
+              const x = (index / (growth.length - 1)) * 100;
+              const y = 94 - ((Number(item.total || 0) / maxGrowth) * 82);
+              return `${x.toFixed(2)},${y.toFixed(2)}`;
+            }).join(' ')
+          : '';
+
+        const activeUsers = Math.max(
+          0,
+          Number(dashboard?.total_users || 0) -
+          Number(dashboard?.banned_users || 0) -
+          Number(dashboard?.suspended_users || 0)
+        );
+
+        const primaryCards = [
+          ['Total Users', dashboard?.total_users, 'All registered accounts', '👥'],
+          ['Active Users', activeUsers, 'Accounts currently active', '●'],
+          ['Suspended Users', dashboard?.suspended_users, 'Temporary restrictions', '⏱'],
+          ['Total Withdrawals', dashboard?.total_withdrawals, 'All withdrawal requests', '↗'],
+          ['MAI Distributed', dashboard?.mai_distributed, 'Completed withdrawals', '◈']
         ];
+
+        const secondaryCards = [
+          ['New Users (24h)', dashboard?.new_users_24h, 'Joined in last 24 hours'],
+          ['Withdrawal Requests', dashboard?.pending_withdrawals, 'Pending admin review'],
+          ['Security Flags', dashboard?.security_warnings_24h, 'Warnings in last 24 hours'],
+          ['Multi-Account Groups', dashboard?.shared_devices, 'Shared-device review signals']
+        ];
+
+        const recentUsers = users.slice(0, 6);
+        const recentWithdrawals = [...withdrawals]
+          .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+          .slice(0, 6);
+        const securityAlerts = audit
+          .filter(item => /security|ban|suspend|withdraw/i.test(String(item.action || '')))
+          .slice(0, 5);
+        const systems = dashboard?.system_status || {};
 
         return (
           <>
-            <section className="adminHero">
+            <section className="adminDashboardWelcome">
               <div>
-                <span className="adminEyebrow">LIVE OPERATIONS</span>
-                <h2>Network Overview</h2>
-                <p>
-                  Secure operational view of MAI Network users, payments,
-                  promotions, withdrawals and risk signals.
-                </p>
+                <span className="adminEyebrow">MAI NETWORK COMMAND CENTER</span>
+                <h2>👋 Welcome Back, Admin</h2>
+                <p>Monitor, manage and protect MAI Network from one secure workspace.</p>
               </div>
-              <button className="adminRefresh" onClick={() => loadAll()} disabled={loading}>
-                ↻
-              </button>
+              <div className="adminDashboardClock">
+                <b>{new Date().toLocaleDateString()}</b>
+                <span>Live server data</span>
+              </div>
             </section>
 
-            <div className="adminMetricGrid">
-              {cards.map(([label, value, sub, icon]) => (
-                <article className="adminMetric" key={label}>
+            <div className="adminPrimaryMetrics">
+              {primaryCards.map(([label, value, sub, icon]) => (
+                <article className="adminMetric adminMetricPrimary" key={label}>
                   <div className="adminMetricIcon">{icon}</div>
                   <span>{label}</span>
                   <strong>{fmt(value)}</strong>
@@ -366,23 +396,101 @@
               ))}
             </div>
 
-            <section className="adminSection">
-              <div className="adminSectionHead">
-                <div>
-                  <span>SECURITY SNAPSHOT</span>
-                  <h3>Device & Risk Signals</h3>
+            <div className="adminDashboardSplit adminDashboardMainSplit">
+              <section className="adminSection adminGrowthPanel">
+                <div className="adminSectionHead">
+                  <div><span>ANALYTICS</span><h3>User Growth</h3></div>
+                  <small>Last 30 Days</small>
                 </div>
-                <button onClick={() => setTab('security')}>Open →</button>
-              </div>
-              <div className="adminMiniStats">
-                <div><span>Known Devices</span><b>{fmt(dashboard?.known_devices)}</b></div>
-                <div><span>Shared Devices</span><b>{fmt(dashboard?.shared_devices)}</b></div>
-                <div><span>24h Warnings</span><b>{fmt(dashboard?.security_warnings_24h)}</b></div>
-              </div>
-              <p className="adminFootnote">
-                Shared IP/device matches are risk signals only. They are not treated as proof of abuse.
-              </p>
-            </section>
+                {growth.length > 1 ? (
+                  <div className="adminGrowthChart" aria-label="30 day user growth chart">
+                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img">
+                      <defs>
+                        <linearGradient id="maiGrowthFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="currentColor" stopOpacity=".28" />
+                          <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
+                        </linearGradient>
+                      </defs>
+                      <polygon points={`0,100 ${chartPoints} 100,100`} fill="url(#maiGrowthFill)" />
+                      <polyline points={chartPoints} fill="none" vectorEffect="non-scaling-stroke" />
+                    </svg>
+                    <div className="adminChartLegend">
+                      <span>{growth[0]?.day || '—'}</span>
+                      <b>{fmt(growth[growth.length - 1]?.total)} total users</b>
+                      <span>{growth[growth.length - 1]?.day || '—'}</span>
+                    </div>
+                  </div>
+                ) : <Empty text="Growth history will appear when enough daily data is available." />}
+              </section>
+
+              <section className="adminSection adminSystemPanel">
+                <div className="adminSectionHead"><div><span>INFRASTRUCTURE</span><h3>System Status</h3></div></div>
+                <div className="adminSystemList">
+                  {[
+                    ['Bot API', systems.bot_api],
+                    ['Database', systems.database],
+                    ['Withdrawal System', systems.withdrawals],
+                    ['Notification System', systems.notifications],
+                    ['Security Monitoring', systems.security]
+                  ].map(([label, value]) => (
+                    <div key={label}>
+                      <span>{label}</span>
+                      <Status>{value || 'unknown'}</Status>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+
+            <div className="adminSecondaryMetrics">
+              {secondaryCards.map(([label, value, sub]) => (
+                <article className="adminMetric adminMetricCompact" key={label}>
+                  <span>{label}</span><strong>{fmt(value)}</strong><small>{sub}</small>
+                </article>
+              ))}
+            </div>
+
+            <div className="adminDashboardSplit">
+              <section className="adminSection">
+                <div className="adminSectionHead"><div><span>USERS</span><h3>Recent Users</h3></div><button onClick={() => setTab('users')}>View All →</button></div>
+                <div className="adminTableWrap"><table className="adminTable adminDashboardTable"><thead><tr><th>User</th><th>Status</th><th>Balance</th><th>Joined</th></tr></thead><tbody>
+                  {recentUsers.map(user => <tr key={user.telegram_id}><td><b>{user.first_name || 'MAI User'}</b><small>@{user.username || 'no-username'} · {user.telegram_id}</small></td><td><Status>{user.account_status}</Status></td><td>{fmt(user.balance)} MAI</td><td>{when(user.created_at)}</td></tr>)}
+                </tbody></table></div>
+                {!recentUsers.length && <Empty text="No users yet." />}
+              </section>
+
+              <section className="adminSection">
+                <div className="adminSectionHead"><div><span>PAYOUTS</span><h3>Recent Withdrawals</h3></div><button onClick={() => setTab('withdrawals')}>View All →</button></div>
+                <div className="adminTableWrap"><table className="adminTable adminDashboardTable"><thead><tr><th>ID</th><th>User</th><th>Amount</th><th>Status</th></tr></thead><tbody>
+                  {recentWithdrawals.map(item => <tr key={item.id}><td>#{item.id}</td><td>{item.first_name || item.telegram_id}</td><td>{fmt(item.amount)} MAI</td><td><Status>{item.status}</Status></td></tr>)}
+                </tbody></table></div>
+                {!recentWithdrawals.length && <Empty text="No active withdrawal records." />}
+              </section>
+            </div>
+
+            <div className="adminDashboardBottom">
+              <section className="adminSection adminSecurityAlerts">
+                <div className="adminSectionHead"><div><span>SECURITY</span><h3>Security Alerts</h3></div><button onClick={() => setTab('audit')}>Audit Logs →</button></div>
+                {securityAlerts.length ? <div className="adminCompactList">{securityAlerts.map(item => <div key={item.id}><div><b>{String(item.action || '').replaceAll('_', ' ')}</b><small>{item.target_id || 'System'} · {when(item.created_at)}</small></div><Status>{item.target_type || 'event'}</Status></div>)}</div> : <Empty text="No recent security-related admin events." />}
+              </section>
+
+              <section className="adminSection adminQuickActions">
+                <div className="adminSectionHead"><div><span>OPERATIONS</span><h3>Quick Actions</h3></div></div>
+                <div className="adminQuickGrid">
+                  <button onClick={() => setTab('users')}>👥 Manage Users</button>
+                  <button onClick={() => setTab('withdrawals')}>↗ Review Withdrawals</button>
+                  <button onClick={() => setTab('fraud')}>⚠ Fraud Check</button>
+                  <button onClick={() => setTab('security')}>🛡 Security</button>
+                </div>
+              </section>
+
+              <section className="adminSection adminRiskOverview">
+                <div className="adminSectionHead"><div><span>RISK</span><h3>Risk Overview</h3></div></div>
+                <div className="adminRiskRing" style={{'--risk': `${Math.min(100, Number(dashboard?.security_warnings_24h || 0) * 5)}%`}}><div><b>{fmt(dashboard?.security_warnings_24h)}</b><span>24h flags</span></div></div>
+                <div className="adminRiskLegend"><span>Shared devices <b>{fmt(dashboard?.shared_devices)}</b></span><span>Risky withdrawals <b>{fmt(dashboard?.risky_withdrawals)}</b></span></div>
+                <p className="adminFootnote">These are risk signals only. They are not treated as proof of abuse.</p>
+              </section>
+            </div>
           </>
         );
       };
