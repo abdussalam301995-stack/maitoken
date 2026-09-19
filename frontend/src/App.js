@@ -12825,621 +12825,366 @@ function WithdrawPage({
   playClick
 }) {
 
-  const [
-    amount,
-    setAmount
-  ] =
-    useState(
-      ''
-    );
+  const [amount, setAmount] = useState('');
+  const [history, setHistory] = useState([]);
+  const [minimum, setMinimum] = useState(500);
+  const [feeFixed, setFeeFixed] = useState(70);
+  const [feePercent, setFeePercent] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [challengeBusy, setChallengeBusy] = useState(false);
+  const [challenge, setChallenge] = useState(null);
+  const [challengeCode, setChallengeCode] = useState('');
+  const [challengeSeconds, setChallengeSeconds] = useState(0);
 
+  const load = useCallback(async () => {
+    try {
+      const data = await api('/api/withdrawals');
+      setHistory(data.items || []);
+      setMinimum(Number(data.minWithdrawal || 500));
+      setFeeFixed(Number(data.withdrawFeeFixed ?? 70));
+      setFeePercent(Number(data.withdrawFeePercent ?? 0));
+    } catch (error) {
+      toast(error.message);
+    }
+  }, [toast]);
 
-  const [
-    history,
-    setHistory
-  ] =
-    useState(
-      []
-    );
+  useEffect(() => {
+    load();
+  }, [load]);
 
+  useEffect(() => {
+    if (!challenge?.expiresAt) {
+      setChallengeSeconds(0);
+      return undefined;
+    }
 
-  const [
-    minimum,
-    setMinimum
-  ] =
-    useState(
-      500
-    );
+    const tick = () => {
+      const seconds = Math.max(
+        0,
+        Math.ceil((new Date(challenge.expiresAt).getTime() - Date.now()) / 1000)
+      );
+      setChallengeSeconds(seconds);
+    };
 
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [challenge]);
 
-  const [
-    busy,
-    setBusy
-  ] =
-    useState(
-      false
-    );
+  useEffect(() => {
+    if (!challenge) return undefined;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [challenge]);
 
+  const available = Number(user?.inGameBalance ?? user?.balance ?? 0);
+  const numericAmount = Number(amount || 0);
+  const calculatedFee = Math.max(
+    0,
+    feeFixed + (numericAmount * feePercent) / 100
+  );
+  const receiveAmount = Math.max(0, numericAmount - calculatedFee);
 
-  /* =======================================================
-     LOAD HISTORY
-     ======================================================= */
-
-  const load =
-    useCallback(
-      async () => {
-
-        try {
-
-          const data =
-            await api(
-              '/api/withdrawals'
-            );
-
-
-          setHistory(
-            data.items ||
-            []
-          );
-
-
-          setMinimum(
-            Number(
-              data.minWithdrawal ||
-              500
-            )
-          );
-
-
-        } catch (
-          error
-        ) {
-
-          toast(
-            error.message
-          );
-
-        }
-
-      },
-      [
-        toast
-      ]
-    );
-
-
-  useEffect(
-    () => {
-
-      load();
-
-    },
-    [
-      load
-    ]
+  const activeWithdrawal = history.find(item =>
+    ['pending', 'security_check', 'approved', 'processing'].includes(
+      String(item.status || '').toLowerCase()
+    )
   );
 
-
-  const available =
-    Number(
-      user?.inGameBalance ??
-      user?.balance ??
-      0
-    );
-
-
-  /* =======================================================
-     SUBMIT WITHDRAWAL
-     ======================================================= */
-
-  const submit =
-    async () => {
-
-      const value =
-        Number(
-          amount
-        );
-
-
-      if (
-        !Number.isFinite(
-          value
-        ) ||
-        value <
-          minimum
-      ) {
-
-        toast(
-          `Minimum ${minimum} MAI`
-        );
-
-
-        return;
-
-      }
-
-
-      if (
-        value >
-        available
-      ) {
-
-        toast(
-          'Insufficient in-game balance'
-        );
-
-
-        return;
-
-      }
-
-
-      if (
-        !user.walletAddress
-      ) {
-
-        toast(
-          t(
-            'connectWallet'
-          )
-        );
-
-
-        return;
-
-      }
-
-
-      playClick();
-
-
-      const confirmed =
-        window.confirm(
-
-          `${t(
-            'withdraw'
-          )} ${fmtSmart(
-            value,
-            4
-          )} MAI → ${short(
-            user.walletAddress
-          )}?`
-
-        );
-
-
-      if (
-        !confirmed
-      ) {
-
-        return;
-
-      }
-
-
-      setBusy(
-        true
-      );
-
-
-      try {
-
-        const randomKey =
-
-          window.crypto
-            ?.randomUUID
-            ? window.crypto
-                .randomUUID()
-            : `${Date.now()}_${Math.random()}`;
-
-
-        const data =
-          await api(
-            '/api/withdrawals',
-            {
-              method:
-                'POST',
-
-              body: {
-                amount:
-                  value
-              },
-
-              idempotency:
-                randomKey
-            }
-          );
-
-
-        if (
-          data.user
-        ) {
-
-          setBoot(
-            old => ({
-
-              ...old,
-
-              user:
-                data.user
-
-            })
-          );
-
-        }
-
-
-        playReward();
-
-
-        toast(
-
-          `Withdrawal: ${data
-            .withdrawal
-            .status}`
-
-        );
-
-
-        setAmount(
-          ''
-        );
-
-
-        await load();
-
-
-      } catch (
-        error
-      ) {
-
-        toast(
-          error.message
-        );
-
-
-      } finally {
-
-        setBusy(
-          false
-        );
-
-      }
-
+  const validateAmount = () => {
+    if (!Number.isFinite(numericAmount) || numericAmount < minimum) {
+      toast(`Minimum ${minimum} MAI`);
+      return false;
+    }
+    if (numericAmount > available) {
+      toast('Insufficient in-game balance');
+      return false;
+    }
+    if (!user.walletAddress) {
+      toast(t('connectWallet'));
+      return false;
+    }
+    if (receiveAmount <= 0) {
+      toast('Withdrawal amount must be greater than the fee');
+      return false;
+    }
+    if (activeWithdrawal) {
+      toast('You already have an active withdrawal');
+      return false;
+    }
+    return true;
   };
 
+  const requestChallenge = async () => {
+    if (!validateAmount()) return;
+
+    playClick();
+    setChallengeBusy(true);
+    setChallengeCode('');
+
+    try {
+      const data = await api('/api/withdrawals/challenge', {
+        method: 'POST',
+        body: { amount: numericAmount }
+      });
+      setChallenge(data.challenge || null);
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      setChallengeBusy(false);
+    }
+  };
+
+  const closeChallenge = () => {
+    if (busy) return;
+    playClick();
+    setChallenge(null);
+    setChallengeCode('');
+  };
+
+  const submitVerifiedWithdrawal = async () => {
+    if (!challenge || busy) return;
+
+    if (challengeSeconds <= 0) {
+      toast('Security code expired. Refresh and try again.');
+      return;
+    }
+
+    const normalizedCode = String(challengeCode || '').trim().toUpperCase();
+    if (!/^[A-Z2-9]{6}$/.test(normalizedCode)) {
+      toast('Enter the 6-character security code');
+      return;
+    }
+
+    setBusy(true);
+    playClick();
+
+    try {
+      const randomKey = window.crypto?.randomUUID
+        ? window.crypto.randomUUID()
+        : `${Date.now()}_${Math.random()}`;
+
+      const data = await api('/api/withdrawals', {
+        method: 'POST',
+        body: {
+          amount: numericAmount,
+          challengeId: challenge.id,
+          challengeCode: normalizedCode
+        },
+        idempotency: randomKey
+      });
+
+      if (data.user) {
+        setBoot(old => ({ ...old, user: data.user }));
+      }
+
+      playReward();
+      toast(`Withdrawal: ${data.withdrawal.status}`);
+      setAmount('');
+      setChallenge(null);
+      setChallengeCode('');
+      await load();
+    } catch (error) {
+      toast(error.message);
+      if (/expired|no longer valid|max|attempt/i.test(String(error.message || ''))) {
+        setChallenge(null);
+        setChallengeCode('');
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
-
-    <PageShell
-
-      title={
-        t(
-          'withdrawTitle'
-        )
-      }
-
-      back={
-        back
-      }
-
-      playClick={
-        playClick
-      }
-    >
-
+    <PageShell title={t('withdrawTitle')} back={back} playClick={playClick}>
       <section className="withdrawBox glass">
-
         <div className="balanceBig">
-
-          <span>
-            {t('availableBalance')}
-          </span>
-
-
-          <b>
-
-            {
-              fmtSmart(
-                available,
-                4
-              )
-            }
-
-            {' '}
-
-            MAI
-
-          </b>
-
+          <span>{t('availableBalance')}</span>
+          <b>{fmtSmart(available, 4)} MAI</b>
         </div>
-
 
         <div className="miniGrid">
-
           <div>
-
-            <span>
-              {t('minimum')}
-            </span>
-
-
-            <b>
-
-              {
-                fmtSmart(
-                  minimum,
-                  0
-                )
-              }
-
-              {' '}
-
-              MAI
-
-            </b>
-
+            <span>{t('minimum')}</span>
+            <b>{fmtSmart(minimum, 0)} MAI</b>
           </div>
-
-
           <div>
-
-            <span>
-              {t('lockedBalance')}
-            </span>
-
-
-            <b>
-
-              {
-                fmtSmart(
-                  user.lockedBalance,
-                  4
-                )
-              }
-
-              {' '}
-
-              MAI
-
-            </b>
-
+            <span>Withdrawal Fee</span>
+            <b>{fmtSmart(feeFixed, 0)} MAI</b>
           </div>
-
+          <div>
+            <span>{t('lockedBalance')}</span>
+            <b>{fmtSmart(user.lockedBalance, 4)} MAI</b>
+          </div>
+          <div>
+            <span>You Receive</span>
+            <b className="withdrawReceiveValue">{fmtSmart(receiveAmount, 4)} MAI</b>
+          </div>
         </div>
 
+        {activeWithdrawal && (
+          <div className="withdrawActiveNotice">
+            <b>Withdrawal in progress</b>
+            <span>
+              {fmtSmart(activeWithdrawal.amount, 4)} MAI · {String(activeWithdrawal.status).replace(/_/g, ' ')}
+            </span>
+          </div>
+        )}
 
         <label>
-
           {t('amount')}
-
-
           <div className="amount">
-
             <input
               type="number"
-
-              min={
-                minimum
-              }
-
-              value={
-                amount
-              }
-
-              onChange={
-                event =>
-                  setAmount(
-                    event
-                      .target
-                      .value
-                  )
-              }
-
-              placeholder={
-                `Min ${minimum}`
-              }
+              min={minimum}
+              value={amount}
+              onChange={event => setAmount(event.target.value)}
+              placeholder={`Min ${minimum}`}
+              disabled={!!activeWithdrawal}
             />
-
-
             <button
               type="button"
-
+              disabled={!!activeWithdrawal}
               onClick={() => {
-
                 playClick();
-
-                setAmount(
-                  String(
-                    available
-                  )
-                );
-
+                setAmount(String(available));
               }}
             >
-
               {t('max')}
-
             </button>
-
           </div>
-
         </label>
 
-
-        <div className="walletDest">
-
-          <span>
-            {t('destination')}
-          </span>
-
-
-          <b>
-
-            {
-              short(
-                user.walletAddress,
-                t(
-                  'notConnected'
-                )
-              )
-            }
-
-          </b>
-
+        <div className="withdrawFeePreview">
+          <div><span>Requested</span><b>{fmtSmart(numericAmount, 4)} MAI</b></div>
+          <div><span>Network withdrawal fee</span><b>- {fmtSmart(calculatedFee, 4)} MAI</b></div>
+          <div className="net"><span>Wallet receives</span><b>{fmtSmart(receiveAmount, 4)} MAI</b></div>
         </div>
 
+        <div className="walletDest">
+          <span>{t('destination')}</span>
+          <b>{short(user.walletAddress, t('notConnected'))}</b>
+        </div>
 
         <button
           className="goldBtn full holdBtn"
-
           disabled={
             busy ||
+            challengeBusy ||
+            !!activeWithdrawal ||
             !user.walletAddress ||
-            Number(
-              amount
-            ) <
-              minimum ||
-            Number(
-              amount
-            ) >
-              available
+            numericAmount < minimum ||
+            numericAmount > available ||
+            receiveAmount <= 0
           }
-
-          onClick={
-            submit
-          }
+          onClick={requestChallenge}
         >
-
-          {
-            busy
-              ? t(
-                  'checking'
-                )
-
-              : t(
-                  'holdWithdraw'
-                )
-          }
-
+          {challengeBusy ? 'Preparing Security Check…' : 'SECURE WITHDRAWAL'}
         </button>
 
+        <p className="withdrawSecurityHint">
+          🔒 Every withdrawal is verified server-side before MAI is locked for payout.
+        </p>
       </section>
 
-
-      <h3 className="withdrawHistoryTitle">
-
-        {
-          t(
-            'withdrawalHistory'
-          )
-        }
-
-      </h3>
-
+      <h3 className="withdrawHistoryTitle">{t('withdrawalHistory')}</h3>
 
       <div className="stack">
-
-        {
-          history.length
-            ? history.map(
-                item => (
-
-                  <div
-                    className="history glass"
-
-                    key={
-                      item.id
-                    }
-                  >
-
-                    <div>
-
-                      <b>
-
-                        {
-                          fmtSmart(
-                            item.amount,
-                            4
-                          )
-                        }
-
-                        {' '}
-
-                        MAI
-
-                      </b>
-
-
-                      <span>
-
-                        {
-                          new Date(
-                            item.created_at
-                          )
-                            .toLocaleString()
-                        }
-
-                      </span>
-
-
-                      <small>
-
-                        {
-                          short(
-                            item.wallet_address
-                          )
-                        }
-
-                      </small>
-
-                    </div>
-
-
-                    <em
-                      className={
-                        `st ${item.status}`
-                      }
-                    >
-
-                      {
-                        String(
-                          item.status
-                        )
-                          .replace(
-                            /_/g,
-                            ' '
-                          )
-                      }
-
-                    </em>
-
-                  </div>
-
-                )
-              )
-
-            : (
-
-              <div className="empty glass">
-
-                {
-                  t(
-                    'noWithdrawals'
-                  )
-                }
-
-              </div>
-
-            )
-        }
-
+        {history.length ? history.map(item => (
+          <div className="history glass" key={item.id}>
+            <div>
+              <b>{fmtSmart(item.amount, 4)} MAI</b>
+              <span>{new Date(item.created_at).toLocaleString()}</span>
+              <small>{short(item.wallet_address)}</small>
+              {Number(item.fee || 0) > 0 && (
+                <small>Fee {fmtSmart(item.fee, 4)} · Receive {fmtSmart(item.receive_amount, 4)} MAI</small>
+              )}
+            </div>
+            <em className={`st ${item.status}`}>
+              {String(item.status).replace(/_/g, ' ')}
+            </em>
+          </div>
+        )) : (
+          <div className="empty glass">{t('noWithdrawals')}</div>
+        )}
       </div>
 
+      {challenge && (
+        <div className="withdrawVerifyOverlay" role="dialog" aria-modal="true">
+          <div className="withdrawVerifyModal glass">
+            <div className="withdrawVerifyShield">🛡</div>
+            <span className="withdrawVerifyEyebrow">SECURE VERIFICATION</span>
+            <h3>Confirm Withdrawal</h3>
+            <p>
+              Enter the security code below. The code is single-use and expires automatically.
+            </p>
+
+            <div className="withdrawVerifySummary">
+              <div><span>Withdraw</span><b>{fmtSmart(challenge.amount, 4)} MAI</b></div>
+              <div><span>Fee</span><b>{fmtSmart(challenge.fee, 4)} MAI</b></div>
+              <div><span>You receive</span><b>{fmtSmart(challenge.receiveAmount, 4)} MAI</b></div>
+            </div>
+
+            <div className="withdrawCaptchaFrame">
+              <img src={challenge.image} alt="Withdrawal security code" />
+              <button
+                type="button"
+                disabled={challengeBusy || busy}
+                onClick={requestChallenge}
+                aria-label="Refresh security code"
+              >
+                ↻
+              </button>
+            </div>
+
+            <div className="withdrawVerifyMeta">
+              <span>Expires in <b>{challengeSeconds}s</b></span>
+              <span>Max attempts: {challenge.maxAttempts || 5}</span>
+            </div>
+
+            <input
+              className="withdrawCodeInput"
+              value={challengeCode}
+              onChange={event => setChallengeCode(
+                event.target.value.toUpperCase().replace(/[^A-Z2-9]/g, '').slice(0, 6)
+              )}
+              onKeyDown={event => {
+                if (event.key === 'Enter') submitVerifiedWithdrawal();
+              }}
+              placeholder="ENTER CODE"
+              inputMode="text"
+              autoCapitalize="characters"
+              autoComplete="off"
+              spellCheck="false"
+              maxLength={6}
+              autoFocus
+            />
+
+            <div className="withdrawVerifyActions">
+              <button type="button" className="withdrawCancelBtn" onClick={closeChallenge} disabled={busy}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="goldBtn"
+                onClick={submitVerifiedWithdrawal}
+                disabled={busy || challengeSeconds <= 0 || challengeCode.length !== 6}
+              >
+                {busy ? 'VERIFYING…' : 'VERIFY & WITHDRAW'}
+              </button>
+            </div>
+
+            <small className="withdrawVerifyFootnote">
+              MAI will only be locked after the server validates this code and rechecks your withdrawal.
+            </small>
+          </div>
+        </div>
+      )}
     </PageShell>
-
   );
-
 }
 
 

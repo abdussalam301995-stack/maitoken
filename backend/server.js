@@ -496,7 +496,7 @@
       withdrawFeeFixed:
         num(
           'WITHDRAW_FEE_FIXED',
-          0
+          70
         ),
 
 
@@ -3371,6 +3371,45 @@ if (
 
 
     /* =========================================================
+       WITHDRAWAL SECURITY CHALLENGES
+
+       Server-owned, short-lived, single-use verification.
+       The answer is never stored in plaintext.
+       ========================================================= */
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS withdrawal_challenges(
+
+          id UUID PRIMARY KEY,
+
+          telegram_id BIGINT NOT NULL,
+
+          amount NUMERIC(30,8) NOT NULL,
+
+          wallet_address TEXT NOT NULL,
+
+          answer_hash TEXT NOT NULL,
+
+          attempts INTEGER NOT NULL DEFAULT 0,
+
+          max_attempts INTEGER NOT NULL DEFAULT 5,
+
+          expires_at TIMESTAMPTZ NOT NULL,
+
+          consumed_at TIMESTAMPTZ,
+
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+
+        );
+      `);
+
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_withdrawal_challenges_user
+        ON withdrawal_challenges(telegram_id, created_at DESC);
+      `);
+
+
+    /* =========================================================
        DEVICE ACCOUNTS
        ========================================================= */
 
@@ -6216,6 +6255,17 @@ await pool.query(`
       ) => {
 
         try {
+
+          if (
+            !/^[0-9a-fA-F-]{36}$/.test(challengeId) ||
+            !/^[A-Z2-9]{6}$/.test(challengeCode)
+          ) {
+            return res.status(400).json({
+              success:false,
+              message:'Security verification is required'
+            });
+          }
+
 
           const risk =
             await riskFor(
@@ -12745,6 +12795,186 @@ await pool.query(`
 
 
     /* =========================================================
+       WITHDRAWAL SECURITY CHALLENGE HELPERS
+       ========================================================= */
+
+    const WITHDRAW_CHALLENGE_TTL_SECONDS = 180;
+    const WITHDRAW_CHALLENGE_MAX_ATTEMPTS = 5;
+
+    function withdrawalChallengeHash(id, answer) {
+      const secret = `${BOT_TOKEN}|${ADMIN_KEY}|MAI_WITHDRAW_CHALLENGE_V1`;
+      return crypto
+        .createHmac('sha256', secret)
+        .update(`${id}:${String(answer || '').trim().toUpperCase()}`)
+        .digest('hex');
+    }
+
+    function makeWithdrawalChallengeCode() {
+      const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let code = '';
+      for (let i = 0; i < 6; i += 1) {
+        code += alphabet[crypto.randomInt(0, alphabet.length)];
+      }
+      return code;
+    }
+
+    const WITHDRAW_GLYPHS = {
+      A:['01110','10001','10001','11111','10001','10001','10001'],
+      B:['11110','10001','10001','11110','10001','10001','11110'],
+      C:['01111','10000','10000','10000','10000','10000','01111'],
+      D:['11110','10001','10001','10001','10001','10001','11110'],
+      E:['11111','10000','10000','11110','10000','10000','11111'],
+      F:['11111','10000','10000','11110','10000','10000','10000'],
+      G:['01111','10000','10000','10111','10001','10001','01111'],
+      H:['10001','10001','10001','11111','10001','10001','10001'],
+      J:['00111','00010','00010','00010','10010','10010','01100'],
+      K:['10001','10010','10100','11000','10100','10010','10001'],
+      L:['10000','10000','10000','10000','10000','10000','11111'],
+      M:['10001','11011','10101','10101','10001','10001','10001'],
+      N:['10001','11001','10101','10011','10001','10001','10001'],
+      P:['11110','10001','10001','11110','10000','10000','10000'],
+      Q:['01110','10001','10001','10001','10101','10010','01101'],
+      R:['11110','10001','10001','11110','10100','10010','10001'],
+      S:['01111','10000','10000','01110','00001','00001','11110'],
+      T:['11111','00100','00100','00100','00100','00100','00100'],
+      U:['10001','10001','10001','10001','10001','10001','01110'],
+      V:['10001','10001','10001','10001','10001','01010','00100'],
+      W:['10001','10001','10001','10101','10101','11011','10001'],
+      X:['10001','10001','01010','00100','01010','10001','10001'],
+      Y:['10001','10001','01010','00100','00100','00100','00100'],
+      Z:['11111','00001','00010','00100','01000','10000','11111'],
+      2:['01110','10001','00001','00010','00100','01000','11111'],
+      3:['11110','00001','00001','01110','00001','00001','11110'],
+      4:['00010','00110','01010','10010','11111','00010','00010'],
+      5:['11111','10000','10000','11110','00001','00001','11110'],
+      6:['01110','10000','10000','11110','10001','10001','01110'],
+      7:['11111','00001','00010','00100','01000','01000','01000'],
+      8:['01110','10001','10001','01110','10001','10001','01110'],
+      9:['01110','10001','10001','01111','00001','00001','01110']
+    };
+
+    function withdrawalChallengeImage(code) {
+      const chars = String(code).split('');
+      const cell = 5;
+      const glyphWidth = 25;
+      const gap = 15;
+      const startX = 18;
+      const startY = 20;
+
+      const pixels = chars.map((char, charIndex) => {
+        const rows = WITHDRAW_GLYPHS[char] || WITHDRAW_GLYPHS.X;
+        const dx = startX + charIndex * (glyphWidth + gap);
+        const jitterY = crypto.randomInt(-3, 4);
+        return rows.flatMap((row, y) => row.split('').map((on, x) => {
+          if (on !== '1') return '';
+          const opacity = (80 + crypto.randomInt(0, 21)) / 100;
+          return `<rect x="${dx + x * cell}" y="${startY + jitterY + y * cell}" width="4.2" height="4.2" rx="1" fill="#f7e6a6" fill-opacity="${opacity}"/>`;
+        })).join('');
+      }).join('');
+
+      const noise = Array.from({ length: 13 }, () => {
+        const x1 = crypto.randomInt(5, 285);
+        const y1 = crypto.randomInt(8, 82);
+        const x2 = crypto.randomInt(5, 285);
+        const y2 = crypto.randomInt(8, 82);
+        return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#8ba6c9" stroke-opacity="0.18" stroke-width="1"/>`;
+      }).join('');
+
+      const dots = Array.from({ length: 24 }, () => {
+        const cx = crypto.randomInt(6, 294);
+        const cy = crypto.randomInt(6, 86);
+        return `<circle cx="${cx}" cy="${cy}" r="1" fill="#6f8db5" fill-opacity="0.22"/>`;
+      }).join('');
+
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="92" viewBox="0 0 300 92"><rect width="300" height="92" rx="16" fill="#0a1220"/><rect x="1" y="1" width="298" height="90" rx="15" fill="none" stroke="#f3c969" stroke-opacity="0.25"/>${noise}${dots}${pixels}</svg>`;
+      return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+    }
+
+    /* =========================================================
+       CREATE WITHDRAWAL SECURITY CHALLENGE
+       ========================================================= */
+
+    app.post(
+      '/api/withdrawals/challenge',
+      authenticate,
+      rateLimit(6, 60000),
+      async (req, res, next) => {
+        try {
+          const amount = Number(req.body?.amount);
+
+          if (!Number.isFinite(amount) || amount < cfg.minWithdrawal || amount > cfg.withdrawMax) {
+            return res.status(400).json({
+              success: false,
+              message: `Withdrawal must be between ${cfg.minWithdrawal} and ${cfg.withdrawMax} MAI`
+            });
+          }
+
+          const userResult = await pool.query(
+            `SELECT telegram_id, balance, wallet_address, wallet_connected_at, account_status, suspended_until
+             FROM users WHERE telegram_id=$1 LIMIT 1`,
+            [req.auth.id]
+          );
+          const user = userResult.rows[0];
+
+          if (!user) return res.status(404).json({ success:false, message:'User not found' });
+          if (!user.wallet_address) return res.status(409).json({ success:false, message:'Connect a wallet first' });
+          if (safeNumber(user.balance) < amount) return res.status(409).json({ success:false, message:'Insufficient in-game balance' });
+
+          if (user.wallet_connected_at && (Date.now() - new Date(user.wallet_connected_at).getTime()) / 1000 < cfg.walletLock) {
+            return res.status(409).json({ success:false, message:'Wallet security lock is active after a wallet change' });
+          }
+
+          const active = await pool.query(
+            `SELECT id FROM withdrawals
+             WHERE telegram_id=$1 AND status IN ('pending','security_check','approved','processing')
+             LIMIT 1`,
+            [req.auth.id]
+          );
+          if (active.rowCount) {
+            return res.status(409).json({ success:false, message:'You already have an active withdrawal' });
+          }
+
+          const id = crypto.randomUUID();
+          const code = makeWithdrawalChallengeCode();
+          const answerHash = withdrawalChallengeHash(id, code);
+          const expiresAt = new Date(Date.now() + WITHDRAW_CHALLENGE_TTL_SECONDS * 1000);
+
+          await pool.query(
+            `UPDATE withdrawal_challenges
+             SET consumed_at=COALESCE(consumed_at, NOW())
+             WHERE telegram_id=$1 AND consumed_at IS NULL`,
+            [req.auth.id]
+          );
+
+          await pool.query(
+            `INSERT INTO withdrawal_challenges(
+               id, telegram_id, amount, wallet_address, answer_hash,
+               attempts, max_attempts, expires_at
+             ) VALUES($1,$2,$3,$4,$5,0,$6,$7)`,
+            [id, req.auth.id, amount, user.wallet_address, answerHash, WITHDRAW_CHALLENGE_MAX_ATTEMPTS, expiresAt]
+          );
+
+          res.json({
+            success: true,
+            challenge: {
+              id,
+              image: withdrawalChallengeImage(code),
+              expiresAt: expiresAt.toISOString(),
+              maxAttempts: WITHDRAW_CHALLENGE_MAX_ATTEMPTS,
+              amount,
+              fee: computeFee(amount),
+              receiveAmount: Math.max(0, amount - computeFee(amount)),
+              walletAddress: user.wallet_address
+            }
+          });
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+
+    /* =========================================================
        WITHDRAWALS GET
        ========================================================= */
 
@@ -12790,6 +13020,12 @@ await pool.query(`
 
             minWithdrawal:
               cfg.minWithdrawal,
+
+            withdrawFeeFixed:
+              cfg.withdrawFeeFixed,
+
+            withdrawFeePercent:
+              cfg.withdrawFeePercent,
 
             items:
               result.rows
@@ -12851,6 +13087,13 @@ await pool.query(`
               ) ||
               ''
             );
+
+
+          const challengeId =
+            String(req.body?.challengeId || '').trim();
+
+          const challengeCode =
+            String(req.body?.challengeCode || '').trim().toUpperCase();
 
 
           if (
@@ -13076,6 +13319,79 @@ await pool.query(`
             }
 
 
+            const activeWithdrawal =
+              await client.query(
+                `
+                SELECT id
+                FROM withdrawals
+                WHERE telegram_id=$1
+                  AND status IN ('pending','security_check','approved','processing')
+                LIMIT 1
+                `,
+                [req.auth.id]
+              );
+
+            if (activeWithdrawal.rowCount) {
+              await client.query('ROLLBACK');
+              return res.status(409).json({
+                success:false,
+                message:'You already have an active withdrawal'
+              });
+            }
+
+            const challengeResult =
+              await client.query(
+                `
+                SELECT *
+                FROM withdrawal_challenges
+                WHERE id=$1 AND telegram_id=$2
+                FOR UPDATE
+                `,
+                [challengeId, req.auth.id]
+              );
+
+            const challenge = challengeResult.rows[0];
+
+            if (
+              !challenge ||
+              challenge.consumed_at ||
+              new Date(challenge.expires_at).getTime() <= Date.now() ||
+              Number(challenge.attempts || 0) >= Number(challenge.max_attempts || WITHDRAW_CHALLENGE_MAX_ATTEMPTS) ||
+              Math.abs(safeNumber(challenge.amount) - amount) > 0.00000001 ||
+              String(challenge.wallet_address) !== String(user.wallet_address)
+            ) {
+              await client.query('ROLLBACK');
+              return res.status(409).json({
+                success:false,
+                message:'Security verification expired or is no longer valid'
+              });
+            }
+
+            const suppliedHash = withdrawalChallengeHash(challengeId, challengeCode);
+            const expectedHash = String(challenge.answer_hash || '');
+            const suppliedBuffer = Buffer.from(suppliedHash, 'hex');
+            const expectedBuffer = Buffer.from(expectedHash, 'hex');
+            const challengeOk =
+              suppliedBuffer.length === expectedBuffer.length &&
+              crypto.timingSafeEqual(suppliedBuffer, expectedBuffer);
+
+            if (!challengeOk) {
+              await client.query(
+                `UPDATE withdrawal_challenges
+                 SET attempts=attempts+1,
+                     consumed_at=CASE WHEN attempts+1 >= max_attempts THEN NOW() ELSE consumed_at END
+                 WHERE id=$1`,
+                [challengeId]
+              );
+              await client.query('COMMIT');
+              await logSecurity(req, 'withdrawal_challenge_failed', 'warn', { challengeId });
+              return res.status(403).json({
+                success:false,
+                message:'Incorrect security code'
+              });
+            }
+
+
             const last =
               (
                 await client.query(
@@ -13247,6 +13563,14 @@ await pool.query(`
                 ? 'security_check'
 
                 : 'pending';
+
+
+            await client.query(
+              `UPDATE withdrawal_challenges
+               SET consumed_at=NOW()
+               WHERE id=$1 AND consumed_at IS NULL`,
+              [challengeId]
+            );
 
 
             await client.query(
@@ -13649,6 +13973,15 @@ await pool.query(`
             );
 
 
+          if (result.rowCount) {
+            await pool.query(
+              `INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,reason,metadata,ip_hash)
+               VALUES($1,$2,$3,$4,$5,$6,$7)`,
+              [req.admin?.telegramId || null, 'withdrawal_approved', 'withdrawal', req.params.id, null, { amount: result.rows[0].amount, wallet: result.rows[0].wallet_address }, hash(req.ip).slice(0,32)]
+            );
+          }
+
+
           res.json({
 
             success:
@@ -13725,10 +14058,10 @@ await pool.query(`
 
           if (
             !withdrawal ||
-
-            [
-              'completed',
-              'rejected'
+            ![
+              'pending',
+              'security_check',
+              'approved'
             ].includes(
               withdrawal.status
             )
@@ -13800,6 +14133,13 @@ await pool.query(`
 
 
           await client.query(
+            `INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,reason,metadata,ip_hash)
+             VALUES($1,$2,$3,$4,$5,$6,$7)`,
+            [req.admin?.telegramId || null, 'withdrawal_rejected', 'withdrawal', withdrawal.id, String(req.body?.reason || '').trim() || null, { amount: withdrawal.amount, wallet: withdrawal.wallet_address }, hash(req.ip).slice(0,32)]
+          );
+
+
+          await client.query(
             'COMMIT'
           );
 
@@ -13867,7 +14207,10 @@ await pool.query(`
 
 
         if (
-          !txHash
+          !txHash ||
+          txHash.length < 32 ||
+          txHash.length > 160 ||
+          !/^[A-Za-z0-9_+\/=-]+$/.test(txHash)
         ) {
 
           return res
@@ -13878,7 +14221,7 @@ await pool.query(`
                 false,
 
               message:
-                'txHash required'
+                'Valid transaction hash required'
 
             });
 
@@ -13947,6 +14290,20 @@ await pool.query(`
 
               });
 
+          }
+
+
+          const duplicateTx = await client.query(
+            `SELECT id FROM withdrawals WHERE tx_hash=$1 AND id<>$2 LIMIT 1`,
+            [txHash, withdrawal.id]
+          );
+
+          if (duplicateTx.rowCount) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+              success:false,
+              message:'This transaction hash is already linked to another withdrawal'
+            });
           }
 
 
@@ -14034,6 +14391,13 @@ await pool.query(`
               }
 
             ]
+          );
+
+
+          await client.query(
+            `INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,reason,metadata,ip_hash)
+             VALUES($1,$2,$3,$4,$5,$6,$7)`,
+            [req.admin?.telegramId || null, 'withdrawal_completed', 'withdrawal', withdrawal.id, null, { amount: withdrawal.amount, receiveAmount: withdrawal.receive_amount, wallet: withdrawal.wallet_address, txHash }, hash(req.ip).slice(0,32)]
           );
 
 

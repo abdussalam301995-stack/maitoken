@@ -11116,3 +11116,305 @@ body.maiAdminOpen .adminPanel.adminV4 {
   }
 
 }
+/* =========================================================
+   MAI WITHDRAWAL SECURITY — FINAL HARDENED UI
+   Added 2026-09-19
+   ========================================================= */
+
+.withdrawReceiveValue {
+  color: var(--green) !important;
+}
+
+.withdrawActiveNotice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(243, 201, 105, 0.2);
+  border-radius: 15px;
+  background: rgba(243, 201, 105, 0.07);
+}
+
+.withdrawActiveNotice b {
+  color: var(--gold-2);
+  font-size: 13px;
+}
+
+.withdrawActiveNotice span {
+  color: var(--text-soft);
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.withdrawFeePreview {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 13px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 16px;
+  background: rgba(5, 10, 18, 0.42);
+}
+
+.withdrawFeePreview > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.withdrawFeePreview span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.withdrawFeePreview b {
+  color: var(--text-soft);
+  font-size: 12px;
+  text-align: right;
+}
+
+.withdrawFeePreview .net {
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.withdrawFeePreview .net b {
+  color: var(--green);
+  font-size: 14px;
+}
+
+.withdrawSecurityHint {
+  margin: 10px 3px 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.withdrawVerifyOverlay {
+  position: fixed;
+  z-index: 200000;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(18px + env(safe-area-inset-top, 0px)) 14px calc(18px + env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  background: rgba(2, 5, 10, 0.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.withdrawVerifyModal {
+  width: min(100%, 430px);
+  max-height: calc(100dvh - 36px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  margin: auto;
+  padding: 22px 18px 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 24px;
+  border-color: rgba(243, 201, 105, 0.22);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.55), 0 0 40px rgba(243, 201, 105, 0.08);
+  text-align: center;
+}
+
+.withdrawVerifyShield {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  margin: 0 auto 10px;
+  border: 1px solid rgba(243, 201, 105, 0.22);
+  border-radius: 17px;
+  background: rgba(243, 201, 105, 0.08);
+  font-size: 27px;
+}
+
+.withdrawVerifyEyebrow {
+  display: block;
+  color: var(--gold);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 1.6px;
+}
+
+.withdrawVerifyModal h3 {
+  margin: 5px 0 7px;
+  color: var(--text);
+  font-size: 21px;
+  font-weight: 950;
+}
+
+.withdrawVerifyModal > p {
+  max-width: 340px;
+  margin: 0 auto 14px;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.withdrawVerifySummary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin-bottom: 13px;
+}
+
+.withdrawVerifySummary > div {
+  min-width: 0;
+  padding: 10px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.withdrawVerifySummary span,
+.withdrawVerifySummary b {
+  display: block;
+}
+
+.withdrawVerifySummary span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.withdrawVerifySummary b {
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--gold-2);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.withdrawCaptchaFrame {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 94px;
+  padding: 0 48px 0 4px;
+  overflow: hidden;
+  border: 1px solid rgba(243, 201, 105, 0.2);
+  border-radius: 17px;
+  background: #0a1220;
+}
+
+.withdrawCaptchaFrame img {
+  width: 100%;
+  max-width: 300px;
+  height: 92px;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.withdrawCaptchaFrame button {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  transform: translateY(-50%);
+  border: 1px solid rgba(243, 201, 105, 0.2);
+  border-radius: 12px;
+  color: var(--gold-2);
+  background: rgba(243, 201, 105, 0.08);
+  font-size: 23px;
+}
+
+.withdrawVerifyMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 8px 2px 12px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.withdrawVerifyMeta b {
+  color: var(--gold);
+}
+
+.withdrawCodeInput {
+  width: 100%;
+  min-height: 54px;
+  padding: 12px 14px;
+  border: 1px solid rgba(243, 201, 105, 0.25);
+  border-radius: 15px;
+  outline: none;
+  color: var(--text);
+  background: rgba(5, 9, 16, 0.76);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 7px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.withdrawCodeInput:focus {
+  border-color: rgba(243, 201, 105, 0.58);
+  box-shadow: 0 0 0 3px rgba(243, 201, 105, 0.07);
+}
+
+.withdrawCodeInput::placeholder {
+  color: rgba(184, 194, 216, 0.45);
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 2px;
+}
+
+.withdrawVerifyActions {
+  display: grid;
+  grid-template-columns: 0.8fr 1.4fr;
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.withdrawVerifyActions .goldBtn {
+  min-width: 0;
+  padding-left: 10px;
+  padding-right: 10px;
+  font-size: 12px;
+}
+
+.withdrawCancelBtn {
+  min-height: 50px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 15px;
+  color: var(--text-soft);
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.withdrawVerifyFootnote {
+  display: block;
+  margin-top: 11px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+@media (max-width: 380px) {
+  .withdrawVerifyModal {
+    padding: 18px 12px 14px;
+  }
+
+  .withdrawVerifySummary {
+    gap: 5px;
+  }
+
+  .withdrawVerifySummary b {
+    font-size: 10px;
+  }
+
+  .withdrawVerifyActions {
+    grid-template-columns: 1fr;
+  }
+}
