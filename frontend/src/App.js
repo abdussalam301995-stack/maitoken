@@ -3631,7 +3631,7 @@ function App() {
      BOOTSTRAP
      ======================================================= */
 
-  const refresh =
+    const refresh =
     useCallback(
       async () => {
 
@@ -3651,6 +3651,11 @@ function App() {
         );
 
 
+        setToast(
+          ''
+        );
+
+
         return data;
 
       },
@@ -3661,16 +3666,149 @@ function App() {
   useEffect(
     () => {
 
-      refresh()
-        .catch(
-          error => {
+      let cancelled =
+        false;
 
-            setToast(
-              error.message
+      let retryTimer =
+        null;
+
+
+      const bootstrapApp =
+        async () => {
+
+          /*
+            Telegram Android WebView can expose
+            window.Telegram.WebApp before initData
+            is fully available.
+
+            Wait briefly for initData before sending
+            the authenticated bootstrap request.
+          */
+
+          const maxWaitMs =
+            4000;
+
+          const intervalMs =
+            100;
+
+          const startedAt =
+            Date.now();
+
+
+          while (
+            !cancelled &&
+            !tg()?.initData &&
+            !process.env.REACT_APP_DEV_USER_ID &&
+            Date.now() - startedAt < maxWaitMs
+          ) {
+
+            await new Promise(
+              resolve =>
+                setTimeout(
+                  resolve,
+                  intervalMs
+                )
             );
 
           }
-        );
+
+
+          if (
+            cancelled
+          ) {
+
+            return;
+
+          }
+
+
+          try {
+
+            await refresh();
+
+
+          } catch (
+            error
+          ) {
+
+            if (
+              cancelled
+            ) {
+
+              return;
+
+            }
+
+
+            /*
+              A Telegram startup race can still happen
+              on a slow WebView. Retry bootstrap once
+              after a short delay.
+            */
+
+            retryTimer =
+              setTimeout(
+                async () => {
+
+                  if (
+                    cancelled
+                  ) {
+
+                    return;
+
+                  }
+
+
+                  try {
+
+                    await refresh();
+
+
+                  } catch (
+                    retryError
+                  ) {
+
+                    if (
+                      !cancelled
+                    ) {
+
+                      setToast(
+                        retryError.message
+                      );
+
+                    }
+
+                  }
+
+                },
+                700
+              );
+
+          }
+
+        };
+
+
+      bootstrapApp();
+
+
+      return () => {
+
+        cancelled =
+          true;
+
+
+        if (
+          retryTimer
+        ) {
+
+          clearTimeout(
+            retryTimer
+          );
+
+        }
+
+      };
 
     },
     [
