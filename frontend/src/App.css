@@ -11054,3 +11054,29 @@ body.maiAdminOpen .adminPanel.adminV4 {
   }
 
 }
+
+/* =========================================================
+   MAI ADMIN V4 - MOBILE SIDEBAR TOUCH LAYER FIX
+   Keep sidebar above the mobile shade.
+   Desktop is not affected.
+   ========================================================= */
+
+@media (max-width: 959px) and (hover: none) and (pointer: coarse) {
+
+  .adminV4 .adminSidebar {
+    z-index: 100002 !important;
+    pointer-events: auto !important;
+  }
+
+  .adminV4 .adminMobileShade {
+    z-index: 100001 !important;
+  }
+
+  .adminV4 .adminSidebar .adminNavButton {
+    position: relative !important;
+    z-index: 1 !important;
+    pointer-events: auto !important;
+    touch-action: manipulation;
+  }
+
+}
