@@ -11080,3 +11080,39 @@ body.maiAdminOpen .adminPanel.adminV4 {
   }
 
 }
+
+/* =========================================================
+   MAI ADMIN V4 - MOBILE INSPECTOR CLOSE BUTTON
+   Desktop: hidden
+   Mobile: visible at bottom of User Inspector
+   ========================================================= */
+
+.adminMobileInspectorClose {
+  display: none;
+}
+
+@media (max-width: 959px) and (hover: none) and (pointer: coarse) {
+
+  .adminV4 .adminMobileInspectorClose {
+    display: block !important;
+    width: 100% !important;
+    min-height: 52px !important;
+    margin: 22px 0 10px !important;
+    padding: 14px 18px !important;
+
+    border: 1px solid rgba(34, 211, 238, 0.45) !important;
+    border-radius: 14px !important;
+
+    background: rgba(8, 145, 178, 0.16) !important;
+    color: #e6fbff !important;
+
+    font-size: 15px !important;
+    font-weight: 800 !important;
+    letter-spacing: 0.04em !important;
+
+    cursor: pointer !important;
+    pointer-events: auto !important;
+    touch-action: manipulation !important;
+  }
+
+}

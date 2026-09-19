@@ -1361,6 +1361,13 @@
                     </div>
                   </>
                 )}
+                <button
+                  type="button"
+                  className="adminMobileInspectorClose"
+                    onClick={() => setSelectedUser(null)}
+                    >
+                    ✕ Close Inspector
+                    </button>
               </section>
             </div>
           )}
