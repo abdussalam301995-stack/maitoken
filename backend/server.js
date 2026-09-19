@@ -2960,7 +2960,7 @@ if (
       await pool.query(`
         CREATE TABLE IF NOT EXISTS ad_sessions(
 
-          id UUID
+          id TEXT
             PRIMARY KEY,
 
           telegram_id BIGINT
@@ -3322,7 +3322,7 @@ if (
       await pool.query(`
         CREATE TABLE IF NOT EXISTS withdrawals(
 
-          id UUID
+          id TEXT
             PRIMARY KEY,
 
           telegram_id BIGINT
@@ -3376,6 +3376,14 @@ if (
          withdrawals table from an older version.
          Never drop the table; add missing columns safely.
          ========================================================= */
+
+      // Legacy production databases may have BIGINT withdrawal IDs, while
+      // current requests use crypto.randomUUID(). Store IDs as TEXT so both
+      // historical numeric IDs and new UUID IDs remain valid without deleting data.
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ALTER COLUMN id TYPE TEXT USING id::text;
+      `);
 
       // Older production databases may predate the idempotency column.
       // Add it before any route or index references it, then backfill legacy rows.
@@ -3507,7 +3515,7 @@ if (
       await pool.query(`
         CREATE TABLE IF NOT EXISTS withdrawal_challenges(
 
-          id UUID PRIMARY KEY,
+          id TEXT PRIMARY KEY,
 
           telegram_id BIGINT NOT NULL,
 
@@ -3528,6 +3536,14 @@ if (
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 
         );
+      `);
+
+      // Legacy challenge tables may also use BIGINT IDs. The API challenge ID
+      // is a UUID string, so normalize this identifier to TEXT while preserving
+      // every existing challenge row. No table or financial data is dropped.
+      await pool.query(`
+        ALTER TABLE withdrawal_challenges
+        ALTER COLUMN id TYPE TEXT USING id::text;
       `);
 
       await pool.query(`
