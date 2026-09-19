@@ -10940,3 +10940,42 @@ body.maiAdminOpen .adminPanel.adminV4 {
     grid-template-columns: 1fr !important;
   }
 }
+
+/* =========================================================
+   PHASE 1 MOBILE TELEGRAM SAFE-AREA HOTFIX
+   Keeps Admin controls below Telegram / phone top chrome.
+   Desktop (>= 960px) is intentionally unchanged.
+   ========================================================= */
+
+@media (max-width: 959px) {
+  .adminV4 .adminTopbar {
+    min-height: calc(56px + env(safe-area-inset-top, 0px)) !important;
+    padding-top: calc(14px + env(safe-area-inset-top, 0px)) !important;
+  }
+
+  .adminV4 .adminSidebar {
+    padding-top: env(safe-area-inset-top, 0px) !important;
+  }
+
+  .adminV4 .adminSidebarClose {
+    top: calc(10px + env(safe-area-inset-top, 0px)) !important;
+  }
+}
+
+/* Telegram Android WebView may report a zero CSS safe-area even while
+   its own header occupies the top of the viewport. Reserve a small
+   mobile-only interaction zone so Menu / Dashboard controls remain tappable. */
+@media (max-width: 959px) and (hover: none) and (pointer: coarse) {
+  .adminV4 .adminTopbar {
+    padding-top: calc(28px + env(safe-area-inset-top, 0px)) !important;
+    min-height: calc(70px + env(safe-area-inset-top, 0px)) !important;
+  }
+
+  .adminV4 .adminSidebar {
+    padding-top: calc(18px + env(safe-area-inset-top, 0px)) !important;
+  }
+
+  .adminV4 .adminSidebarClose {
+    top: calc(20px + env(safe-area-inset-top, 0px)) !important;
+  }
+}
