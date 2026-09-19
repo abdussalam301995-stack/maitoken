@@ -3369,7 +3369,84 @@ if (
         );
       `);
 
+      /* =========================================================
+         WITHDRAWALS - SAFE SCHEMA MIGRATION
 
+         Existing production databases may already have the
+         withdrawals table from an older version.
+         Never drop the table; add missing columns safely.
+         ========================================================= */
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS fee NUMERIC(30,8);
+      `);
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS receive_amount NUMERIC(30,8);
+      `);
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS risk_flags JSONB
+        DEFAULT '[]'::jsonb;
+      `);
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS tx_hash TEXT;
+      `);
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ
+        DEFAULT NOW();
+      `);
+
+      await pool.query(`
+        UPDATE withdrawals
+        SET fee = 0
+        WHERE fee IS NULL;
+      `);
+
+      await pool.query(`
+        UPDATE withdrawals
+        SET receive_amount = amount
+        WHERE receive_amount IS NULL;
+      `);
+
+      await pool.query(`
+        UPDATE withdrawals
+        SET risk_flags = '[]'::jsonb
+        WHERE risk_flags IS NULL;
+      `);
+
+      await pool.query(`
+        UPDATE withdrawals
+        SET updated_at = COALESCE(updated_at, created_at, NOW())
+        WHERE updated_at IS NULL;
+      `);
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ALTER COLUMN fee SET NOT NULL;
+      `);
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ALTER COLUMN receive_amount SET NOT NULL;
+      `);
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ALTER COLUMN risk_flags SET NOT NULL;
+      `);
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ALTER COLUMN updated_at SET NOT NULL;
+      `);
     /* =========================================================
        WITHDRAWAL SECURITY CHALLENGES
 
