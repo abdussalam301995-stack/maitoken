@@ -11032,10 +11032,10 @@ body.maiAdminOpen .adminPanel.adminV4 {
 @media (max-width: 959px) and (max-height: 600px) and (hover: none) and (pointer: coarse) {
   .adminV4 .adminTopbar {
     padding-top:
-      calc(52px + env(safe-area-inset-top, 0px)) !important;
+      calc(112px + env(safe-area-inset-top, 0px)) !important;
 
     min-height:
-      calc(94px + env(safe-area-inset-top, 0px)) !important;
+      calc(154px + env(safe-area-inset-top, 0px)) !important;
   }
 }
 
