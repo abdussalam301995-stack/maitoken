@@ -54,9 +54,11 @@
     const NAV = [
       ['dashboard', '⌂', 'Dashboard'],
       ['users', '👥', 'Users'],
+      ['multi', '◎', 'Multi-Account'],
       ['security', '🛡', 'Security'],
       ['promotions', '🚀', 'Promotions'],
       ['withdrawals', '↗', 'Withdrawals'],
+      ['fraud', '⚠', 'Fraud Check'],
       ['payments', '◈', 'Payments'],
       ['audit', '☷', 'Audit'],
       ['settings', '⚙', 'Settings']
@@ -308,6 +310,8 @@
 
       const navCount = key => {
         if (key === 'users') return users.length;
+        if (key === 'multi') return users.filter(u => Number(u.linked_device_accounts || 0) > 1).length;
+        if (key === 'fraud') return withdrawals.filter(w => Array.isArray(w.risk_flags) && w.risk_flags.length).length;
         if (key === 'security') return Number(dashboard?.security_warnings_24h || 0);
         if (key === 'promotions') return Number(dashboard?.pending_campaigns || 0);
         if (key === 'withdrawals') return Number(dashboard?.pending_withdrawals || 0);
@@ -742,12 +746,57 @@
         </>
       );
 
+
+      const renderMultiAccount = () => {
+        const linked = users.filter(user => Number(user.linked_device_accounts || 0) > 1 || Number(user.device_count || 0) > 1);
+        return (
+          <>
+            <section className="adminSection">
+              <div className="adminSectionHead"><div><span>MULTI-ACCOUNT DETECTION</span><h3>Device-linked account groups</h3></div></div>
+              <p className="adminFootnote">Device and IP matches are review signals. Shared Wi-Fi, family and office networks can create legitimate matches.</p>
+            </section>
+            <div className="adminTableWrap">
+              <table className="adminTable">
+                <thead><tr><th>#</th><th>UID</th><th>User</th><th>Devices</th><th>Linked</th><th>Warnings</th><th>Status</th><th>Action</th></tr></thead>
+                <tbody>
+                  {linked.map((user,index) => <tr key={user.telegram_id}>
+                    <td>{index+1}</td><td>{user.telegram_id}</td><td>@{user.username || 'no-username'}</td><td>{user.device_count || 0}</td><td>{user.linked_device_accounts || 0}</td><td>{user.warning_count || 0}</td><td><Status>{user.account_status}</Status></td><td><button className="adminTableBtn" onClick={() => openUser(user.telegram_id)}>Inspect</button></td>
+                  </tr>)}
+                </tbody>
+              </table>
+              {!linked.length && <Empty text="No current multi-account device groups." />}
+            </div>
+          </>
+        );
+      };
+
+      const renderFraudCheck = () => {
+        const risky = withdrawals.filter(item => Array.isArray(item.risk_flags) && item.risk_flags.length > 0);
+        return (
+          <>
+            <section className="adminSection adminFraudIntro">
+              <div className="adminSectionHead"><div><span>PAYMENT FRAUD CHECK</span><h3>Withdrawal risk review</h3></div></div>
+              <p className="adminFootnote">Review risk flags, wallet and account history before acting. MAI does not treat a shared IP or device alone as proof of abuse.</p>
+            </section>
+            <div className="adminTableWrap">
+              <table className="adminTable">
+                <thead><tr><th>#</th><th>UID</th><th>Amount</th><th>Wallet</th><th>Signals</th><th>Status</th><th>Review</th></tr></thead>
+                <tbody>{risky.map((item,index) => <tr key={item.id}><td>{index+1}</td><td>{item.telegram_id}</td><td>{fmt(item.amount)} MAI</td><td><code>{short(item.wallet_address,8,6)}</code></td><td>{item.risk_flags.join(', ')}</td><td><Status>{item.status}</Status></td><td><button className="adminTableBtn" onClick={() => openUser(item.telegram_id)}>Inspect</button></td></tr>)}</tbody>
+              </table>
+              {!risky.length && <Empty text="No withdrawal requests currently carry risk flags." />}
+            </div>
+          </>
+        );
+      };
+
       const renderCurrent = () => {
         if (tab === 'dashboard') return renderDashboard();
         if (tab === 'users') return renderUsers();
+        if (tab === 'multi') return renderMultiAccount();
         if (tab === 'security') return renderSecurity();
         if (tab === 'promotions') return renderPromotions();
         if (tab === 'withdrawals') return renderWithdrawals();
+        if (tab === 'fraud') return renderFraudCheck();
         if (tab === 'payments') return renderPayments();
         if (tab === 'audit') return renderAudit();
         return renderSettings();
@@ -839,13 +888,13 @@
                     <p className="adminFootnote">Device names are best-effort labels from the Telegram WebView/browser. Device ID is a server-side hash, not a raw hardware identifier.</p>
 
                     <h4>Linked Accounts · Same Device</h4>
-                    <div className="adminCompactList">
-                      {(userDetail.security?.linkedDeviceAccounts || []).map(item => (
-                        <div className="adminRelationRow" key={item.telegram_id}>
-                          <div><b>{item.first_name || 'MAI User'}</b><span>@{item.username || 'no-username'} · UID {item.telegram_id}</span></div>
-                          <div><strong>{item.shared_device_count || 1} shared device</strong><small>Last match {when(item.last_seen)}</small></div>
-                        </div>
-                      ))}
+                    <div className="adminTableWrap adminModalTable">
+                      <table className="adminTable">
+                        <thead><tr><th>#</th><th>UID</th><th>User</th><th>Device Links</th><th>Last Match</th></tr></thead>
+                        <tbody>{(userDetail.security?.linkedDeviceAccounts || []).map((item,index) => (
+                          <tr key={item.telegram_id}><td>{index+1}</td><td>{item.telegram_id}</td><td>@{item.username || 'no-username'}</td><td>{item.shared_device_count || 1}</td><td>{when(item.last_seen)}</td></tr>
+                        ))}</tbody>
+                      </table>
                       {!(userDetail.security?.linkedDeviceAccounts || []).length && <Empty text="No other accounts share a registered device." />}
                     </div>
 
