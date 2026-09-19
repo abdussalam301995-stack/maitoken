@@ -11039,3 +11039,18 @@ body.maiAdminOpen .adminPanel.adminV4 {
   }
 }
 
+/* =========================================================
+   MAI ADMIN V4 - TELEGRAM MOBILE TOPBAR FINAL POSITION FIX
+   Keep admin controls below Telegram's native Close header.
+   Desktop is not affected.
+   ========================================================= */
+
+@media (max-width: 959px) and (hover: none) and (pointer: coarse) {
+
+  .adminV4 .adminTopbar {
+    padding-top: calc(100px + env(safe-area-inset-top, 0px)) !important;
+    min-height: calc(148px + env(safe-area-inset-top, 0px)) !important;
+    align-items: flex-end !important;
+  }
+
+}
