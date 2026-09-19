@@ -6256,16 +6256,7 @@ await pool.query(`
 
         try {
 
-          if (
-            !/^[0-9a-fA-F-]{36}$/.test(challengeId) ||
-            !/^[A-Z2-9]{6}$/.test(challengeCode)
-          ) {
-            return res.status(400).json({
-              success:false,
-              message:'Security verification is required'
-            });
-          }
-
+        
 
           const risk =
             await riskFor(
