@@ -5,6 +5,28 @@
     const helmet = require('helmet');
     const crypto = require('crypto');
 
+    // =========================================================
+    // TON PAYOUT SDK
+    // Secrets are read only from server environment variables.
+    // =========================================================
+    const {
+      Address,
+      beginCell,
+      internal,
+      SendMode,
+      toNano
+    } = require('@ton/core');
+
+    const {
+      TonClient,
+      WalletContractV5R1,
+      JettonMaster
+    } = require('@ton/ton');
+
+    const {
+      mnemonicToPrivateKey
+    } = require('@ton/crypto');
+
     const {
       MAI_MINING_LEVELS,
       getMiningLevelForHolding,
@@ -263,6 +285,75 @@
         process.env.MAI_DECIMALS ||
         9
       );
+
+
+    /* =========================================================
+       MAI PAYOUT WALLET / WORKER
+
+       IMPORTANT:
+       - Keep MAI_PAYOUT_ENABLED=false until controlled testing.
+       - MAI_PAYOUT_MNEMONIC must exist only in Render secrets.
+       - The derived W5 address MUST equal MAI_PAYOUT_WALLET.
+       ========================================================= */
+
+    const MAI_PAYOUT_WALLET =
+      String(
+        process.env.MAI_PAYOUT_WALLET ||
+        'UQAbhVECcLMyaHiPrnX52TSlTeHm5NQZOQeVlm_WfzhN27mc'
+      ).trim();
+
+    const MAI_PAYOUT_ENABLED =
+      String(
+        process.env.MAI_PAYOUT_ENABLED ||
+        'false'
+      ).toLowerCase() === 'true';
+
+    const MAI_PAYOUT_MNEMONIC =
+      String(
+        process.env.MAI_PAYOUT_MNEMONIC ||
+        ''
+      ).trim();
+
+    const TON_RPC_ENDPOINT =
+      String(
+        process.env.TON_RPC_ENDPOINT ||
+        'https://toncenter.com/api/v2/jsonRPC'
+      ).trim();
+
+    const TONCENTER_V3_BASE =
+      String(
+        process.env.TONCENTER_V3_BASE ||
+        'https://toncenter.com/api/v3'
+      ).trim().replace(/\/$/, '');
+
+    const TONCENTER_API_KEY =
+      String(
+        process.env.TONCENTER_API_KEY ||
+        process.env.TONAPI_KEY ||
+        ''
+      ).trim();
+
+    const MAI_PAYOUT_WORKER_INTERVAL_MS =
+      Math.max(
+        15000,
+        Number(process.env.MAI_PAYOUT_WORKER_INTERVAL_MS || 30000)
+      );
+
+    const MAI_PAYOUT_ATTACHED_TON =
+      String(
+        process.env.MAI_PAYOUT_ATTACHED_TON ||
+        '0.08'
+      ).trim();
+
+    const MAI_PAYOUT_FORWARD_TON =
+      String(
+        process.env.MAI_PAYOUT_FORWARD_TON ||
+        '0.000000001'
+      ).trim();
+
+    let maiPayoutWorkerTimer = null;
+    let maiPayoutWorkerBusy = false;
+    let maiPayoutContext = null;
 
 
     /* =========================================================
@@ -3473,6 +3564,39 @@ if (
       await pool.query(`
         ALTER TABLE withdrawals
         ADD COLUMN IF NOT EXISTS last_payout_error TEXT;
+      `);
+
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS payout_query_id TEXT;
+      `);
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS payout_wallet TEXT;
+      `);
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS payout_jetton_wallet TEXT;
+      `);
+
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMPTZ;
+      `);
+
+      await pool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_withdrawals_payout_query_id
+        ON withdrawals(payout_query_id)
+        WHERE payout_query_id IS NOT NULL;
+      `);
+
+      await pool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_withdrawals_tx_hash_unique
+        ON withdrawals(tx_hash)
+        WHERE tx_hash IS NOT NULL;
       `);
 
       await pool.query(`
@@ -14104,6 +14228,1085 @@ await pool.query(`
     );
 
 
+
+    /* =========================================================
+       MAI AUTO PAYOUT — W5 / JETTON WORKER
+
+       State flow:
+       approved -> processing -> broadcasted -> completed
+
+       Safety:
+       - one worker at a time per process
+       - DB row locks / SKIP LOCKED
+       - unique payout_query_id
+       - derived signer address must equal configured payout wallet
+       - never automatically resend a processing/broadcasted payment
+       - chain reconciliation uses TON Center v3 jetton transfers
+       ========================================================= */
+
+    function tokenToAtomic(
+      value,
+      decimals = MAI_DECIMALS
+    ) {
+
+      const raw =
+        String(value ?? '0').trim();
+
+      if (!/^\d+(?:\.\d+)?$/.test(raw)) {
+        throw new Error('Invalid token amount');
+      }
+
+      const safeDecimals =
+        Math.max(
+          0,
+          safeInteger(decimals, MAI_DECIMALS)
+        );
+
+      const [
+        wholeRaw,
+        fractionRaw = ''
+      ] = raw.split('.');
+
+      const whole =
+        wholeRaw || '0';
+
+      const fraction =
+        (
+          fractionRaw +
+          '0'.repeat(safeDecimals)
+        ).slice(0, safeDecimals);
+
+      return (
+        BigInt(whole) *
+        (10n ** BigInt(safeDecimals))
+      ) + BigInt(fraction || '0');
+
+    }
+
+
+    function payoutQueryIdFor(
+      withdrawalId
+    ) {
+
+      const hex =
+        crypto
+          .createHash('sha256')
+          .update(
+            `MAI:PAYOUT:${String(withdrawalId)}`
+          )
+          .digest('hex')
+          .slice(0, 16);
+
+      return BigInt(`0x${hex}`).toString();
+
+    }
+
+
+    function sameTonAddress(
+      a,
+      b
+    ) {
+
+      try {
+
+        return (
+          Address.parse(String(a))
+            .equals(
+              Address.parse(String(b))
+            )
+        );
+
+      } catch {
+
+        return false;
+
+      }
+
+    }
+
+
+    async function getMaiPayoutContext() {
+
+      if (maiPayoutContext) {
+        return maiPayoutContext;
+      }
+
+      if (!MAI_PAYOUT_WALLET) {
+        throw new Error(
+          'MAI_PAYOUT_WALLET is not configured'
+        );
+      }
+
+      if (!MAI_PAYOUT_MNEMONIC) {
+        throw new Error(
+          'MAI_PAYOUT_MNEMONIC is not configured'
+        );
+      }
+
+      const words =
+        MAI_PAYOUT_MNEMONIC
+          .split(/\s+/)
+          .map(word => word.trim())
+          .filter(Boolean);
+
+      if (![12, 24].includes(words.length)) {
+        throw new Error(
+          'MAI_PAYOUT_MNEMONIC must contain 12 or 24 words'
+        );
+      }
+
+      const keyPair =
+        await mnemonicToPrivateKey(words);
+
+      const walletContract =
+        WalletContractV5R1.create({
+
+          workchain:
+            0,
+
+          publicKey:
+            keyPair.publicKey,
+
+          walletId: {
+            networkGlobalId:
+              -239
+          }
+
+        });
+
+      if (
+        !sameTonAddress(
+          walletContract.address,
+          MAI_PAYOUT_WALLET
+        )
+      ) {
+
+        throw new Error(
+          'Payout signer does not match MAI_PAYOUT_WALLET'
+        );
+
+      }
+
+      const client =
+        new TonClient({
+
+          endpoint:
+            TON_RPC_ENDPOINT,
+
+          apiKey:
+            TONCENTER_API_KEY || undefined
+
+        });
+
+      const wallet =
+        client.open(
+          walletContract
+        );
+
+      const jettonMaster =
+        client.open(
+          JettonMaster.create(
+            Address.parse(
+              MAI_JETTON_MASTER
+            )
+          )
+        );
+
+      const payoutJettonWallet =
+        await jettonMaster.getWalletAddress(
+          walletContract.address
+        );
+
+      maiPayoutContext = {
+
+        client,
+
+        wallet,
+
+        walletContract,
+
+        keyPair,
+
+        payoutJettonWallet
+
+      };
+
+      return maiPayoutContext;
+
+    }
+
+
+    function buildMaiJettonTransferBody({
+      queryId,
+      amountAtomic,
+      destination,
+      responseDestination
+    }) {
+
+      const forwardPayload =
+        beginCell()
+          .storeUint(0, 32)
+          .storeStringTail('MAI Network withdrawal')
+          .endCell();
+
+      return beginCell()
+        .storeUint(
+          0x0f8a7ea5,
+          32
+        )
+        .storeUint(
+          BigInt(queryId),
+          64
+        )
+        .storeCoins(
+          amountAtomic
+        )
+        .storeAddress(
+          Address.parse(destination)
+        )
+        .storeAddress(
+          Address.parse(responseDestination)
+        )
+        .storeBit(0)
+        .storeCoins(
+          toNano(
+            MAI_PAYOUT_FORWARD_TON
+          )
+        )
+        .storeBit(1)
+        .storeRef(
+          forwardPayload
+        )
+        .endCell();
+
+    }
+
+
+    async function findConfirmedMaiPayout(
+      withdrawal
+    ) {
+
+      const queryId =
+        String(
+          withdrawal.payout_query_id ||
+          ''
+        ).trim();
+
+      if (!queryId) {
+        return null;
+      }
+
+      const startSeconds =
+        Math.max(
+          0,
+          Math.floor(
+            new Date(
+              withdrawal.processing_started_at ||
+              withdrawal.updated_at ||
+              withdrawal.created_at
+            ).getTime() / 1000
+          ) - 120
+        );
+
+      const url =
+        new URL(
+          `${TONCENTER_V3_BASE}/jetton/transfers`
+        );
+
+      url.searchParams.set(
+        'owner_address',
+        MAI_PAYOUT_WALLET
+      );
+
+      url.searchParams.set(
+        'jetton_master',
+        MAI_JETTON_MASTER
+      );
+
+      url.searchParams.set(
+        'direction',
+        'out'
+      );
+
+      url.searchParams.set(
+        'start_utime',
+        String(startSeconds)
+      );
+
+      url.searchParams.set(
+        'limit',
+        '100'
+      );
+
+      url.searchParams.set(
+        'sort',
+        'desc'
+      );
+
+      const headers = {
+        Accept:
+          'application/json'
+      };
+
+      if (TONCENTER_API_KEY) {
+        headers['X-API-Key'] =
+          TONCENTER_API_KEY;
+      }
+
+      const response =
+        await fetch(
+          url,
+          {
+            headers
+          }
+        );
+
+      if (!response.ok) {
+
+        throw new Error(
+          `TON Center v3 HTTP ${response.status}`
+        );
+
+      }
+
+      const data =
+        await response.json();
+
+      const transfers =
+        Array.isArray(
+          data?.jetton_transfers
+        )
+          ? data.jetton_transfers
+          : [];
+
+      const expectedAmount =
+        tokenToAtomic(
+          withdrawal.receive_amount
+        ).toString();
+
+      return transfers.find(
+        transfer => {
+
+          if (
+            String(
+              transfer?.query_id ??
+              ''
+            ) !==
+            queryId
+          ) {
+            return false;
+          }
+
+          if (
+            String(
+              transfer?.amount ??
+              ''
+            ) !==
+            expectedAmount
+          ) {
+            return false;
+          }
+
+          if (
+            !sameTonAddress(
+              transfer?.destination,
+              withdrawal.wallet_address
+            )
+          ) {
+            return false;
+          }
+
+          if (
+            transfer?.transaction_aborted ===
+            true
+          ) {
+            return false;
+          }
+
+          return Boolean(
+            transfer?.transaction_hash
+          );
+
+        }
+      ) || null;
+
+    }
+
+
+    async function finalizeAutoPayout(
+      withdrawalId,
+      chainTransfer
+    ) {
+
+      const client =
+        await pool.connect();
+
+      try {
+
+        await client.query('BEGIN');
+
+        const result =
+          await client.query(
+            `
+            SELECT *
+            FROM withdrawals
+            WHERE id=$1
+            FOR UPDATE
+            `,
+            [
+              withdrawalId
+            ]
+          );
+
+        const withdrawal =
+          result.rows[0];
+
+        if (!withdrawal) {
+
+          await client.query('ROLLBACK');
+          return false;
+
+        }
+
+        if (
+          withdrawal.status ===
+          'completed'
+        ) {
+
+          await client.query('ROLLBACK');
+          return true;
+
+        }
+
+        if (
+          ![
+            'processing',
+            'broadcasted'
+          ].includes(
+            withdrawal.status
+          )
+        ) {
+
+          await client.query('ROLLBACK');
+          return false;
+
+        }
+
+        const txHash =
+          String(
+            chainTransfer.transaction_hash ||
+            ''
+          ).trim();
+
+        if (!txHash) {
+
+          await client.query('ROLLBACK');
+          return false;
+
+        }
+
+        const duplicateTx =
+          await client.query(
+            `
+            SELECT id
+            FROM withdrawals
+            WHERE tx_hash=$1
+              AND id<>$2
+            LIMIT 1
+            `,
+            [
+              txHash,
+              withdrawal.id
+            ]
+          );
+
+        if (duplicateTx.rowCount) {
+
+          await client.query('ROLLBACK');
+
+          throw new Error(
+            'Confirmed transaction hash already belongs to another withdrawal'
+          );
+
+        }
+
+        await client.query(
+          `
+          UPDATE withdrawals
+          SET
+            status='completed',
+            tx_hash=$2,
+            broadcast_at=COALESCE(broadcast_at,NOW()),
+            confirmed_at=NOW(),
+            last_payout_error=NULL,
+            updated_at=NOW()
+          WHERE id=$1
+          `,
+          [
+            withdrawal.id,
+            txHash
+          ]
+        );
+
+        await client.query(
+          `
+          UPDATE users
+          SET
+            locked_balance=
+              GREATEST(
+                0,
+                locked_balance - $2
+              ),
+            updated_at=NOW()
+          WHERE telegram_id=$1
+          `,
+          [
+            withdrawal.telegram_id,
+            withdrawal.amount
+          ]
+        );
+
+        await client.query(
+          `
+          INSERT INTO transactions(
+            telegram_id,
+            type,
+            amount,
+            reference,
+            metadata
+          )
+          SELECT
+            $1,
+            'withdrawal',
+            $2,
+            $3,
+            $4
+          WHERE NOT EXISTS(
+            SELECT 1
+            FROM transactions
+            WHERE type='withdrawal'
+              AND reference=$3
+          )
+          `,
+          [
+            withdrawal.telegram_id,
+            -safeNumber(
+              withdrawal.amount
+            ),
+            withdrawal.id,
+            {
+              txHash,
+              requestedAmount:
+                safeNumber(
+                  withdrawal.amount
+                ),
+              fee:
+                safeNumber(
+                  withdrawal.fee
+                ),
+              receiveAmount:
+                safeNumber(
+                  withdrawal.receive_amount
+                ),
+              payoutMode:
+                'auto_w5',
+              payoutQueryId:
+                String(
+                  withdrawal.payout_query_id ||
+                  ''
+                )
+            }
+          ]
+        );
+
+        await client.query(
+          `
+          INSERT INTO admin_audit_logs(
+            admin_id,
+            action,
+            target_type,
+            target_id,
+            reason,
+            metadata,
+            ip_hash
+          )
+          VALUES(
+            NULL,
+            'withdrawal_auto_confirmed',
+            'withdrawal',
+            $1,
+            NULL,
+            $2,
+            NULL
+          )
+          `,
+          [
+            withdrawal.id,
+            {
+              amount:
+                withdrawal.amount,
+              receiveAmount:
+                withdrawal.receive_amount,
+              wallet:
+                withdrawal.wallet_address,
+              txHash
+            }
+          ]
+        );
+
+        await client.query('COMMIT');
+
+        return true;
+
+      } catch (error) {
+
+        try {
+          await client.query('ROLLBACK');
+        } catch {}
+
+        throw error;
+
+      } finally {
+
+        client.release();
+
+      }
+
+    }
+
+
+    async function reconcileAutoPayout(
+      withdrawal
+    ) {
+
+      const confirmed =
+        await findConfirmedMaiPayout(
+          withdrawal
+        );
+
+      if (!confirmed) {
+        return false;
+      }
+
+      return finalizeAutoPayout(
+        withdrawal.id,
+        confirmed
+      );
+
+    }
+
+
+    async function claimApprovedWithdrawalForPayout() {
+
+      const client =
+        await pool.connect();
+
+      try {
+
+        await client.query('BEGIN');
+
+        const result =
+          await client.query(
+            `
+            SELECT *
+            FROM withdrawals
+            WHERE status='approved'
+            ORDER BY created_at ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1
+            `
+          );
+
+        const withdrawal =
+          result.rows[0];
+
+        if (!withdrawal) {
+
+          await client.query('ROLLBACK');
+          return null;
+
+        }
+
+        const queryId =
+          payoutQueryIdFor(
+            withdrawal.id
+          );
+
+        const context =
+          await getMaiPayoutContext();
+
+        await client.query(
+          `
+          UPDATE withdrawals
+          SET
+            status='processing',
+            payout_mode='auto_w5',
+            payout_attempts=
+              COALESCE(payout_attempts,0) + 1,
+            payout_query_id=$2,
+            payout_wallet=$3,
+            payout_jetton_wallet=$4,
+            processing_started_at=NOW(),
+            last_payout_error=NULL,
+            updated_at=NOW()
+          WHERE id=$1
+          `,
+          [
+            withdrawal.id,
+            queryId,
+            MAI_PAYOUT_WALLET,
+            context.payoutJettonWallet.toString()
+          ]
+        );
+
+        await client.query('COMMIT');
+
+        return {
+          ...withdrawal,
+          status:
+            'processing',
+          payout_mode:
+            'auto_w5',
+          payout_query_id:
+            queryId,
+          payout_wallet:
+            MAI_PAYOUT_WALLET,
+          payout_jetton_wallet:
+            context.payoutJettonWallet.toString(),
+          processing_started_at:
+            new Date().toISOString()
+        };
+
+      } catch (error) {
+
+        try {
+          await client.query('ROLLBACK');
+        } catch {}
+
+        throw error;
+
+      } finally {
+
+        client.release();
+
+      }
+
+    }
+
+
+    async function broadcastMaiPayout(
+      withdrawal
+    ) {
+
+      // Before any send, reconcile by deterministic query_id.
+      // This prevents an automatic resend after a prior uncertain broadcast.
+      const alreadyConfirmed =
+        await reconcileAutoPayout(
+          withdrawal
+        );
+
+      if (alreadyConfirmed) {
+        return;
+      }
+
+      const context =
+        await getMaiPayoutContext();
+
+      const destination =
+        Address.parse(
+          String(
+            withdrawal.wallet_address
+          )
+        );
+
+      const amountAtomic =
+        tokenToAtomic(
+          withdrawal.receive_amount
+        );
+
+      if (amountAtomic <= 0n) {
+        throw new Error(
+          'Withdrawal receive amount must be positive'
+        );
+      }
+
+      const body =
+        buildMaiJettonTransferBody({
+
+          queryId:
+            withdrawal.payout_query_id,
+
+          amountAtomic,
+
+          destination:
+            destination.toString(),
+
+          responseDestination:
+            MAI_PAYOUT_WALLET
+
+        });
+
+      const seqno =
+        await context.wallet.getSeqno();
+
+      await context.wallet.sendTransfer({
+
+        seqno,
+
+        secretKey:
+          context.keyPair.secretKey,
+
+        sendMode:
+          SendMode.PAY_GAS_SEPARATELY,
+
+        messages: [
+
+          internal({
+
+            to:
+              context.payoutJettonWallet,
+
+            value:
+              toNano(
+                MAI_PAYOUT_ATTACHED_TON
+              ),
+
+            bounce:
+              true,
+
+            body
+
+          })
+
+        ]
+
+      });
+
+      await pool.query(
+        `
+        UPDATE withdrawals
+        SET
+          status='broadcasted',
+          broadcast_at=NOW(),
+          last_payout_error=NULL,
+          updated_at=NOW()
+        WHERE id=$1
+          AND status='processing'
+        `,
+        [
+          withdrawal.id
+        ]
+      );
+
+    }
+
+
+    async function reconcileOutstandingAutoPayouts() {
+
+      const result =
+        await pool.query(
+          `
+          SELECT *
+          FROM withdrawals
+          WHERE payout_mode='auto_w5'
+            AND status IN(
+              'processing',
+              'broadcasted'
+            )
+          ORDER BY updated_at ASC
+          LIMIT 20
+          `
+        );
+
+      for (
+        const withdrawal
+        of result.rows
+      ) {
+
+        try {
+
+          await reconcileAutoPayout(
+            withdrawal
+          );
+
+        } catch (error) {
+
+          await pool.query(
+            `
+            UPDATE withdrawals
+            SET
+              last_payout_error=$2,
+              updated_at=NOW()
+            WHERE id=$1
+              AND status IN(
+                'processing',
+                'broadcasted'
+              )
+            `,
+            [
+              withdrawal.id,
+              String(
+                error.message ||
+                'Payout reconciliation failed'
+              ).slice(0, 1000)
+            ]
+          );
+
+        }
+
+      }
+
+    }
+
+
+    async function runMaiPayoutWorkerOnce() {
+
+      if (
+        !MAI_PAYOUT_ENABLED ||
+        maiPayoutWorkerBusy
+      ) {
+        return;
+      }
+
+      maiPayoutWorkerBusy =
+        true;
+
+      try {
+
+        await getMaiPayoutContext();
+
+        await reconcileOutstandingAutoPayouts();
+
+        const withdrawal =
+          await claimApprovedWithdrawalForPayout();
+
+        if (!withdrawal) {
+          return;
+        }
+
+        try {
+
+          await broadcastMaiPayout(
+            withdrawal
+          );
+
+        } catch (error) {
+
+          // IMPORTANT:
+          // Do not auto-retry a processing withdrawal. A send may have
+          // reached the network even if the local request returned an error.
+          // The next worker pass only reconciles it by query_id.
+          await pool.query(
+            `
+            UPDATE withdrawals
+            SET
+              last_payout_error=$2,
+              updated_at=NOW()
+            WHERE id=$1
+              AND status='processing'
+            `,
+            [
+              withdrawal.id,
+              String(
+                error.message ||
+                'Payout broadcast failed or outcome is unknown'
+              ).slice(0, 1000)
+            ]
+          );
+
+          console.error(
+            '[MAI PAYOUT] broadcast uncertain:',
+            withdrawal.id,
+            error.message
+          );
+
+        }
+
+      } catch (error) {
+
+        console.error(
+          '[MAI PAYOUT] worker error:',
+          error.message
+        );
+
+      } finally {
+
+        maiPayoutWorkerBusy =
+          false;
+
+      }
+
+    }
+
+
+    function startMaiPayoutWorker() {
+
+      if (!MAI_PAYOUT_ENABLED) {
+
+        console.log(
+          'MAI auto payout worker: disabled'
+        );
+
+        return;
+
+      }
+
+      // Validate signer/address before the interval starts.
+      getMaiPayoutContext()
+        .then(context => {
+
+          console.log(
+            'MAI auto payout worker: enabled'
+          );
+
+          console.log(
+            'MAI payout wallet:',
+            context.walletContract.address.toString()
+          );
+
+          console.log(
+            'MAI payout jetton wallet:',
+            context.payoutJettonWallet.toString()
+          );
+
+          runMaiPayoutWorkerOnce()
+            .catch(error =>
+              console.error(
+                '[MAI PAYOUT] initial run failed:',
+                error.message
+              )
+            );
+
+          maiPayoutWorkerTimer =
+            setInterval(
+              () => {
+                runMaiPayoutWorkerOnce()
+                  .catch(error =>
+                    console.error(
+                      '[MAI PAYOUT] scheduled run failed:',
+                      error.message
+                    )
+                  );
+              },
+              MAI_PAYOUT_WORKER_INTERVAL_MS
+            );
+
+          maiPayoutWorkerTimer.unref();
+
+        })
+        .catch(error => {
+
+          // Fail closed: API stays online, payout worker stays OFF.
+          console.error(
+            '[MAI PAYOUT] disabled because configuration validation failed:',
+            error.message
+          );
+
+        });
+
+    }
+
+
     /* =========================================================
        ADMIN APPROVE WITHDRAWAL
        ========================================================= */
@@ -14131,6 +15334,10 @@ await pool.query(`
 
                 status='approved',
 
+                payout_mode=$2,
+
+                last_payout_error=NULL,
+
                 updated_at=NOW()
 
               WHERE
@@ -14145,7 +15352,10 @@ await pool.query(`
               RETURNING *
               `,
               [
-                req.params.id
+                req.params.id,
+                MAI_PAYOUT_ENABLED
+                  ? 'auto_w5'
+                  : 'manual'
               ]
             );
 
@@ -14464,6 +15674,32 @@ await pool.query(`
 
                 message:
                   'Withdrawal is not approved'
+
+              });
+
+          }
+
+
+          if (
+            String(
+              withdrawal.payout_mode ||
+              'manual'
+            ) === 'auto_w5'
+          ) {
+
+            await client.query(
+              'ROLLBACK'
+            );
+
+            return res
+              .status(409)
+              .json({
+
+                success:
+                  false,
+
+                message:
+                  'Automatic payout must be confirmed on-chain by the payout worker'
 
               });
 
@@ -16199,6 +17435,13 @@ app.post(
 
       try {
 
+        if (maiPayoutWorkerTimer) {
+          clearInterval(
+            maiPayoutWorkerTimer
+          );
+          maiPayoutWorkerTimer = null;
+        }
+
         await pool.end();
 
       } catch (
@@ -16318,6 +17561,12 @@ app.post(
                 );
 
               }
+
+
+
+              // Start only after DB initialization and HTTP server startup.
+              // The worker itself fails closed if its signer configuration is invalid.
+              startMaiPayoutWorker();
 
             }
 
