@@ -20,6 +20,8 @@ import {
 
 import './App.css';
 import AdminPanel from './Admin/AdminPanel';
+import Tasks from './Tasks';
+import Friends from './Friends/Friends';
 
 /* =========================================================
    MAI NETWORK
@@ -4428,6 +4430,18 @@ function App() {
             )
 
                     : view ===
+            'giveaway'
+            ? (
+
+              <GiveawayPage
+                back={closeView}
+                toast={setToast}
+                playClick={playClick}
+              />
+
+            )
+
+                    : view ===
             'admin'
             ? (
 
@@ -4503,50 +4517,15 @@ function App() {
             'task'
             ? (
 
-              <TasksPage
-
-                tasks={
-                  tasks
-                }
-
-                setTasks={
-                  setTasks
-                }
-
-                user={
-                  user
-                }
-
-                setBoot={
-                  setBoot
-                }
-
-                openPromote={() =>
-                  openView(
-                    'promote'
-                  )
-                }
-
-                toast={
-                  setToast
-                }
-
-                action={
-                  action
-                }
-
-                t={
-                  t
-                }
-
-                playClick={
-                  playClick
-                }
-
-                playReward={
-                  playReward
-                }
-
+              <Tasks
+                initData={tg()?.initData || ''}
+                onUserUpdate={nextUser => {
+                  if (!nextUser) return;
+                  setBoot(old => ({
+                    ...old,
+                    user: nextUser
+                  }));
+                }}
               />
 
             )
@@ -4556,36 +4535,10 @@ function App() {
             'friends'
             ? (
 
-              <FriendsPage
-
-                data={
-                  referrals
-                }
-
-                setData={
-                  setReferrals
-                }
-
-                toast={
-                  setToast
-                }
-
-                setBoot={
-                  setBoot
-                }
-
-                t={
-                  t
-                }
-
-                playClick={
-                  playClick
-                }
-
-                playReward={
-                  playReward
-                }
-
+              <Friends
+                user={user}
+                initData={tg()?.initData || ''}
+                apiUrl={API}
               />
 
             )
@@ -4666,8 +4619,37 @@ function App() {
       {
         view ===
         'main' && (
+          <>
+            <AnnouncementLayer
+              onNavigate={cta => {
+                const action = String(cta.action || '').toLowerCase();
 
-          <BottomNav
+                if (action === 'open_giveaway') {
+                  openView('giveaway');
+                } else if (
+                  action === 'open_tasks' ||
+                  action === 'open_missions'
+                ) {
+                  go('task');
+                } else if (action === 'open_withdrawal') {
+                  openView('withdraw');
+                } else if (action === 'open_profile') {
+                  go('profile');
+                } else if (action === 'open_external' && cta.url) {
+                  if (tg()?.openLink) {
+                    tg().openLink(cta.url);
+                  } else {
+                    window.open(
+                      cta.url,
+                      '_blank',
+                      'noopener,noreferrer'
+                    );
+                  }
+                }
+              }}
+            />
+
+            <BottomNav
 
             tab={
               tab
@@ -4681,8 +4663,8 @@ function App() {
               t
             }
 
-          />
-
+            />
+          </>
         )
       }
 
@@ -4735,6 +4717,9 @@ function Home({
   const [displayLevel, setDisplayLevel] = useState(Number(user?.farm?.level ?? user?.level ?? 1));
   const [livePending, setLivePending] = useState(Number(user?.farm?.pending || 0));
   const [claimRemain, setClaimRemain] = useState(Number(user?.farm?.remaining || 0));
+  const [homeGiveaway, setHomeGiveaway] = useState(null);
+  const [showGiveawayGift, setShowGiveawayGift] = useState(false);
+  const [giveawayUnseen, setGiveawayUnseen] = useState(false);
 
   useEffect(() => {
     setWalletHolding(Number(user?.walletHolding || 0));
@@ -4756,6 +4741,47 @@ function Home({
   const miningMultiplier = Number(user?.farm?.multiplier ?? 1);
   const miningMode = String(user?.farm?.mode || 'test').toUpperCase();
   const miningPhase = String(user?.farm?.phase || 'test').replaceAll('_', ' ').toUpperCase();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    api('/api/giveaways')
+      .then(data => {
+        if (cancelled) return;
+
+        const featured =
+          data.featured ||
+          data.items?.[0] ||
+          null;
+
+        setHomeGiveaway(featured);
+        setShowGiveawayGift(
+          Boolean(data.showHomeGift && featured)
+        );
+
+        if (featured?.id) {
+          let seen = false;
+          try {
+            seen =
+              localStorage.getItem(
+                `mai_giveaway_seen_${featured.id}`
+              ) === '1';
+          } catch {}
+          setGiveawayUnseen(!seen);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setHomeGiveaway(null);
+          setShowGiveawayGift(false);
+          setGiveawayUnseen(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Re-sync from the server whenever Home is mounted again.
   // This prevents the display-only counter from restarting from stale parent data
@@ -5019,6 +5045,30 @@ function Home({
           <span className="coinShineSecond" />
           <span ref={coinParticlesRef} className="maiTapParticleLayer" aria-hidden="true" />
         </button>
+        {showGiveawayGift && homeGiveaway && (
+          <button
+            type="button"
+            className="homeGiveawayGift"
+            aria-label="Open Giveaway"
+            onClick={() => {
+              playClick();
+              try {
+                localStorage.setItem(
+                  `mai_giveaway_seen_${homeGiveaway.id}`,
+                  '1'
+                );
+              } catch {}
+              setGiveawayUnseen(false);
+              setView('giveaway');
+            }}
+          >
+            <Icon name="gift" />
+            {giveawayUnseen && (
+              <span className="homeGiveawayDot" />
+            )}
+          </button>
+        )}
+
         <div className="coinTapHint"><span>{t('tapCoin')}</span><small>{t('tapHint')}</small></div>
       </section>
 
@@ -13184,6 +13234,180 @@ function WithdrawPage({
         </div>
       )}
     </PageShell>
+  );
+}
+
+
+
+/* =========================================================
+   GIVEAWAY PAGE
+   ========================================================= */
+
+function GiveawayPage({ back, toast, playClick }) {
+  const [items, setItems] = useState([]);
+  const [featured, setFeatured] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await api('/api/giveaways');
+      const nextItems = Array.isArray(data.items) ? data.items : [];
+      setItems(nextItems);
+      setFeatured(data.featured || nextItems[0] || null);
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const join = async giveaway => {
+    if (!giveaway || busy) return;
+    setBusy(String(giveaway.id));
+    playClick();
+    try {
+      const data = await api(`/api/giveaways/${giveaway.id}/join`, {
+        method: 'POST',
+        body: {}
+      });
+      if (data.joined) toast('Giveaway entry confirmed.');
+      await load();
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const renderCard = giveaway => {
+    const config = giveaway.config || {};
+    return (
+      <article className={`giveawayCampaignCard ${giveaway.featured ? 'featured' : ''}`} key={giveaway.id}>
+        {giveaway.image_url && (
+          <img className="giveawayCampaignImage" src={giveaway.image_url} alt="" />
+        )}
+        <div className="giveawayCampaignBody">
+          <div className="giveawayCampaignTop">
+            <span>{giveaway.featured ? 'FEATURED GIVEAWAY' : 'ACTIVE GIVEAWAY'}</span>
+            <em>{String(giveaway.giveaway_type || 'giveaway').replaceAll('_', ' ')}</em>
+          </div>
+          <h2>{giveaway.title}</h2>
+          {giveaway.description && <p>{giveaway.description}</p>}
+          <div className="giveawayCampaignStats">
+            <div><span>Prize Pool</span><b>{Number(config.prizePool || config.prizePerWinner || 0).toLocaleString()} MAI</b></div>
+            <div><span>Winners</span><b>{Number(config.winnerCount || 1).toLocaleString()}</b></div>
+            <div><span>Ends</span><b>{giveaway.ends_at ? new Date(giveaway.ends_at).toLocaleDateString() : 'Open'}</b></div>
+          </div>
+          <button
+            type="button"
+            className="goldBtn full"
+            disabled={giveaway.joined || busy === String(giveaway.id)}
+            onClick={() => join(giveaway)}
+          >
+            {giveaway.joined ? 'JOINED ✓' : busy === String(giveaway.id) ? 'VERIFYING…' : 'JOIN GIVEAWAY'}
+          </button>
+        </div>
+      </article>
+    );
+  };
+
+  return (
+    <PageShell title="Giveaway" back={back} playClick={playClick}>
+      <section className="giveawayHub">
+        <div className="giveawayHubHead">
+          <span>MAI REWARDS</span>
+          <h1>Giveaway</h1>
+          <p>Eligibility and entries are verified by the MAI backend.</p>
+        </div>
+        {loading ? (
+          <div className="empty glass">Loading giveaways...</div>
+        ) : (
+          <>
+            {featured && renderCard(featured)}
+            {items.filter(item => !featured || String(item.id) !== String(featured.id)).length > 0 && (
+              <div className="giveawayActiveTitle">Active Giveaways</div>
+            )}
+            {items
+              .filter(item => !featured || String(item.id) !== String(featured.id))
+              .map(renderCard)}
+            {!items.length && <div className="empty glass">No live giveaway right now.</div>}
+          </>
+        )}
+      </section>
+    </PageShell>
+  );
+}
+
+
+/* =========================================================
+   MINI APP ANNOUNCEMENTS
+   ========================================================= */
+
+function AnnouncementLayer({ onNavigate }) {
+  const [item, setItem] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    api('/api/announcements')
+      .then(data => {
+        if (cancelled) return;
+        const unread = (data.items || []).find(row =>
+          !row.viewed_at &&
+          ['important', 'critical'].includes(
+            String(row.priority || '').toLowerCase()
+          )
+        );
+        if (unread) setItem(unread);
+      })
+      .catch(() => {});
+
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!item) return null;
+
+  const close = async () => {
+    const current = item;
+    setItem(null);
+    try {
+      await api(`/api/announcements/${current.id}/view`, {
+        method: 'POST',
+        body: {}
+      });
+    } catch {}
+  };
+
+  const cta = item.cta || {};
+
+  return (
+    <div className="announcementOverlay" role="dialog" aria-modal="true">
+      <div className="announcementModal glass">
+        {item.image_url && <img src={item.image_url} alt="" />}
+        <span>{String(item.priority || 'important').toUpperCase()}</span>
+        <h3>{item.title}</h3>
+        <p>{item.message}</p>
+        <div className="announcementActions">
+          <button type="button" onClick={close}>Close</button>
+          {cta.action && (
+            <button
+              type="button"
+              className="goldBtn"
+              onClick={async () => {
+                await close();
+                onNavigate?.(cta);
+              }}
+            >
+              {cta.label || 'OPEN'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

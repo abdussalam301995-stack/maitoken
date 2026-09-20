@@ -2713,6 +2713,8 @@ if (
 
           referred_by BIGINT,
 
+          referral_assigned_at TIMESTAMPTZ,
+
           referral_qualified BOOLEAN
             NOT NULL
             DEFAULT FALSE,
@@ -2807,6 +2809,9 @@ if (
 
         ALTER TABLE users
           ADD COLUMN IF NOT EXISTS referred_by BIGINT;
+
+        ALTER TABLE users
+          ADD COLUMN IF NOT EXISTS referral_assigned_at TIMESTAMPTZ;
 
         ALTER TABLE users
           ADD COLUMN IF NOT EXISTS referral_qualified BOOLEAN
@@ -3759,6 +3764,78 @@ if (
 
         );
       `);
+
+
+    /* =========================================================
+       DYNAMIC TASKS & MISSIONS — ADMIN CONTROLLED
+       Existing daily tasks remain intact and continue to use
+       daily_task_progress. These tables power the new module.
+       ========================================================= */
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS managed_tasks(
+        id BIGSERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        icon TEXT NOT NULL DEFAULT '✦',
+        task_type TEXT NOT NULL,
+        reward NUMERIC(30,8) NOT NULL DEFAULT 0 CHECK (reward >= 0),
+        target_url TEXT,
+        telegram_chat_id TEXT,
+        rule_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+        recurrence TEXT NOT NULL DEFAULT 'once' CHECK (recurrence IN ('once','daily')),
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','active','paused','ended')),
+        starts_at TIMESTAMPTZ,
+        ends_at TIMESTAMPTZ,
+        created_by BIGINT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_managed_tasks_status ON managed_tasks(status, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS managed_task_completions(
+        id BIGSERIAL PRIMARY KEY,
+        telegram_id BIGINT NOT NULL,
+        task_id BIGINT NOT NULL REFERENCES managed_tasks(id) ON DELETE CASCADE,
+        period_key TEXT NOT NULL DEFAULT 'once',
+        reward_snapshot NUMERIC(30,8) NOT NULL DEFAULT 0,
+        verified_at TIMESTAMPTZ,
+        claimed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(telegram_id, task_id, period_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_managed_task_completion_user ON managed_task_completions(telegram_id, claimed_at DESC);
+
+      CREATE TABLE IF NOT EXISTS managed_missions(
+        id BIGSERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        icon TEXT NOT NULL DEFAULT '◆',
+        completion_bonus NUMERIC(30,8) NOT NULL DEFAULT 0 CHECK (completion_bonus >= 0),
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','active','paused','ended')),
+        featured BOOLEAN NOT NULL DEFAULT FALSE,
+        starts_at TIMESTAMPTZ,
+        ends_at TIMESTAMPTZ,
+        created_by BIGINT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS managed_mission_tasks(
+        mission_id BIGINT NOT NULL REFERENCES managed_missions(id) ON DELETE CASCADE,
+        task_id BIGINT NOT NULL REFERENCES managed_tasks(id) ON DELETE CASCADE,
+        sort_order INT NOT NULL DEFAULT 0,
+        PRIMARY KEY(mission_id, task_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS managed_mission_completions(
+        telegram_id BIGINT NOT NULL,
+        mission_id BIGINT NOT NULL REFERENCES managed_missions(id) ON DELETE CASCADE,
+        bonus_snapshot NUMERIC(30,8) NOT NULL DEFAULT 0,
+        claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY(telegram_id, mission_id)
+      );
+    `);
+
      /* =========================================================
    ADMIN AUDIT LOGS
 
@@ -4217,6 +4294,72 @@ await pool.query(`
     }
 
     /* =========================================================
+       NETWORK SIGNAL IP
+       =========================================================
+       This value is used only as a low-confidence abuse/risk signal.
+       It is NOT authentication and is NOT proof of multi-accounting.
+
+       Render terminates inbound traffic before forwarding it to this
+       service. When an upstream such as Vercel is also present, req.ip
+       can represent that intermediary. For network-overlap analytics we
+       therefore preserve the first X-Forwarded-For address when present.
+
+       Because forwarded headers can be influenced by upstream topology,
+       all v2 IP matches remain advisory only. Old IP hashes are excluded
+       from v2 overlap checks so historical proxy-contaminated records do
+       not create new false positives.
+       ========================================================= */
+
+    function normalizeNetworkSignalIp(value) {
+      let ip = String(value || '').trim();
+      if (!ip) return '';
+
+      if (ip.startsWith('"') && ip.endsWith('"')) {
+        ip = ip.slice(1, -1).trim();
+      }
+
+      if (ip.startsWith('::ffff:')) {
+        ip = ip.slice(7);
+      }
+
+      if (ip.startsWith('[')) {
+        const close = ip.indexOf(']');
+        if (close > 0) ip = ip.slice(1, close);
+      } else if (/^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(ip)) {
+        ip = ip.replace(/:\d+$/, '');
+      }
+
+      const zone = ip.indexOf('%');
+      if (zone > 0) ip = ip.slice(0, zone);
+
+      return ip.slice(0, 128);
+    }
+
+    function networkSignalIp(req) {
+      const forwarded = String(req.get('x-forwarded-for') || '')
+        .split(',')
+        .map(normalizeNetworkSignalIp)
+        .filter(Boolean);
+
+      if (forwarded.length) {
+        return forwarded[0];
+      }
+
+      return normalizeNetworkSignalIp(
+        req.ip ||
+        req.socket?.remoteAddress ||
+        ''
+      );
+    }
+
+    function networkSignalHash(req) {
+      const ip = networkSignalIp(req);
+      return ip
+        ? hash(ip).slice(0, 32)
+        : null;
+    }
+
+    /* =========================================================
        SECURITY LOG
        ========================================================= */
 
@@ -4262,12 +4405,7 @@ await pool.query(`
 
             severity,
 
-            hash(
-              req.ip
-            ).slice(
-              0,
-              32
-            ),
+            networkSignalHash(req),
 
             req.deviceHash ||
             null,
@@ -4282,7 +4420,10 @@ await pool.query(`
               32
             ),
 
-            metadata
+            {
+              ...(metadata && typeof metadata === 'object' ? metadata : {}),
+              network_signal_version: 2
+            }
 
           ]
         );
@@ -4460,6 +4601,16 @@ await pool.query(`
            UPSERT USER
            ------------------------------------------------------- */
 
+        // Official-launch referral epoch:
+        // after launch, an existing account whose referral was reset may bind
+        // exactly once to a new inviter. Pre-launch behavior remains unchanged.
+        await ensureMaiV5Schema();
+        const launchStateForReferral = await getOfficialLaunchState();
+        const officialReferralEpoch =
+          launchStateForReferral?.launched && launchStateForReferral?.officialLaunchAt
+            ? new Date(launchStateForReferral.officialLaunchAt)
+            : null;
+
         await pool.query(
           `
           INSERT INTO users(
@@ -4474,12 +4625,15 @@ await pool.query(`
 
             balance,
 
-            referred_by
+            referred_by,
+
+            referral_assigned_at
 
           )
 
           VALUES(
-            $1,$2,$3,$4,$5,$6
+            $1,$2,$3,$4,$5,$6,
+            CASE WHEN $6::bigint IS NOT NULL THEN NOW() ELSE NULL END
           )
 
           ON CONFLICT(
@@ -4500,6 +4654,24 @@ await pool.query(`
                 users.photo_url
               ),
 
+            referred_by=
+              CASE
+                WHEN $7::boolean
+                 AND users.referred_by IS NULL
+                 AND EXCLUDED.referred_by IS NOT NULL
+                THEN EXCLUDED.referred_by
+                ELSE users.referred_by
+              END,
+
+            referral_assigned_at=
+              CASE
+                WHEN $7::boolean
+                 AND users.referred_by IS NULL
+                 AND EXCLUDED.referred_by IS NOT NULL
+                THEN NOW()
+                ELSE users.referral_assigned_at
+              END,
+
             updated_at=
               NOW()
           `,
@@ -4515,10 +4687,35 @@ await pool.query(`
 
             cfg.initialBalance,
 
-            referredBy
+            referredBy,
+
+            Boolean(officialReferralEpoch)
 
           ]
         );
+
+
+        /* -------------------------------------------------------
+           REFERRAL RE-QUALIFICATION TRIGGER
+
+           When a genuinely referred user C reaches the backend via
+           B's Telegram start parameter, C has already been upserted
+           above with referred_by=B. Re-check B immediately so an
+           already-completed required activity + this new invite can
+           qualify A -> B without waiting for B to farm, claim a
+           daily bonus, complete another task, or watch another ad.
+
+           qualifyReferral() remains the single authoritative place
+           that enforces both requirements and creates the separate
+           50 MAI successful-invite reward idempotently.
+           ------------------------------------------------------- */
+
+        if (referredBy) {
+          await qualifyReferral(
+            pool,
+            referredBy
+          );
+        }
 
 
         /* -------------------------------------------------------
@@ -4735,12 +4932,7 @@ await pool.query(`
 
 
       const ipHash =
-        hash(
-          req.ip
-        ).slice(
-          0,
-          32
-        );
+        networkSignalHash(req);
 
 
       const ipResult =
@@ -4757,6 +4949,10 @@ await pool.query(`
           WHERE
 
             ip_hash=$1
+
+            AND
+
+            metadata->>'network_signal_version'='2'
 
             AND
 
@@ -5146,138 +5342,139 @@ await pool.query(`
       userId
     ) {
 
+      await ensureMaiV5Schema();
+
+      /*
+       * MAI OFFICIAL REFERRAL RULE
+       * --------------------------
+       * The invited user does not receive a direct invite reward.
+       * A referral becomes successful only after the invited user:
+       *   1) has at least one verified/completed task record, and
+       *   2) has invited at least one genuinely new MAI user.
+       *
+       * The inviter's 50 MAI reward is accrued into a separate,
+       * claimable referral bucket by the V5 referral ledger below.
+       * It is NOT credited directly to the main balance here.
+       */
+
       const result =
         await client.query(
           `
           SELECT
-
+            telegram_id,
             referred_by,
-
-            referral_qualified
-
+            referral_qualified,
+            created_at
           FROM users
-
-          WHERE
-            telegram_id=$1
-
+          WHERE telegram_id=$1
           FOR UPDATE
           `,
-          [
-            userId
-          ]
+          [userId]
         );
 
-
-      const user =
-        result.rows[0];
-
+      const user = result.rows[0];
 
       if (
         !user ||
         !user.referred_by ||
         user.referral_qualified
       ) {
-
         return;
-
       }
 
+      const launchState = await getOfficialLaunchState();
+      const officialLaunchAt =
+        launchState?.launched && launchState?.officialLaunchAt
+          ? new Date(launchState.officialLaunchAt)
+          : null;
+
+      const childResult =
+        await client.query(
+          `
+          SELECT COUNT(*)::int AS c
+          FROM users
+          WHERE referred_by=$1
+            AND telegram_id <> $1
+            AND ($2::timestamptz IS NULL OR referral_assigned_at >= $2)
+          `,
+          [userId, officialLaunchAt]
+        );
+
+      const hasValidInvite =
+        Number(childResult.rows[0]?.c || 0) >= 1;
+
+      // A successful referral must complete ALL official required tasks
+      // at least once. Do not treat one arbitrary task as sufficient.
+      const requiredTaskKeys = ['news','payout','chat'];
+
+      const taskResult =
+        await client.query(
+          `
+          SELECT COUNT(DISTINCT task_key)::int AS completed
+          FROM daily_task_completions
+          WHERE telegram_id=$1
+            AND task_key=ANY($2::text[])
+            AND ($3::timestamptz IS NULL OR created_at >= $3)
+          `,
+          [userId, requiredTaskKeys, officialLaunchAt]
+        );
+
+      const hasRequiredActivity =
+        Number(taskResult.rows[0]?.completed || 0) === requiredTaskKeys.length;
+
+      if (
+        !hasValidInvite ||
+        !hasRequiredActivity
+      ) {
+        return;
+      }
+
+      const updated =
+        await client.query(
+          `
+          UPDATE users
+          SET
+            referral_qualified=TRUE,
+            updated_at=NOW()
+          WHERE telegram_id=$1
+            AND referral_qualified=FALSE
+          RETURNING telegram_id
+          `,
+          [userId]
+        );
+
+      if (!updated.rowCount) {
+        return;
+      }
 
       await client.query(
         `
-        UPDATE users
-
-        SET
-
-          referral_qualified=
-            TRUE,
-
-          balance=
-            balance + $2,
-
-          updated_at=
-            NOW()
-
-        WHERE
-          telegram_id=$1
-        `,
-        [
-
-          userId,
-
-          cfg.referredReward
-
-        ]
-      );
-
-
-      await client.query(
-        `
-        UPDATE users
-
-        SET
-
-          balance=
-            balance + $2,
-
-          updated_at=
-            NOW()
-
-        WHERE
-          telegram_id=$1
-        `,
-        [
-
-          user.referred_by,
-
-          cfg.referrerReward
-
-        ]
-      );
-
-
-      await client.query(
-        `
-        INSERT INTO transactions(
-
-          telegram_id,
-
-          type,
-
+        INSERT INTO mai_referral_reward_events(
+          inviter_id,
+          referred_user_id,
+          reward_type,
           amount,
-
-          reference
-
+          source_reference,
+          status
         )
-
-        VALUES
-
-          (
-            $1,
-            'referral_welcome',
-            $2,
-            $3
-          ),
-
-          (
-            $3,
-            'referral_reward',
-            $4,
-            $1
-          )
+        VALUES(
+          $1,
+          $2,
+          'successful_invite',
+          50,
+          $2,
+          'available'
+        )
+        ON CONFLICT(
+          inviter_id,
+          reward_type,
+          source_reference
+        )
+        DO NOTHING
         `,
         [
-
-          userId,
-
-          cfg.referredReward,
-
-          String(
-            user.referred_by
-          ),
-
-          cfg.referrerReward
-
+          String(user.referred_by),
+          String(userId)
         ]
       );
 
@@ -6463,6 +6660,238 @@ await pool.query(`
     }
 
 
+
+
+    /* =========================================================
+       MANAGED TASKS & MISSIONS API
+       Server/database are authoritative for verification/rewards.
+       ========================================================= */
+    const MANAGED_TASK_TYPES = new Set([
+      'telegram_join','telegram_bot','visit_link','invite_friends',
+      'hold_mai','mining_mission','daily_mission','custom'
+    ]);
+
+    function managedPeriodKey(task) {
+      return String(task?.recurrence || 'once') === 'daily' ? utcDay() : 'once';
+    }
+
+    function managedTaskIsLive(task) {
+      const now = Date.now();
+      if (String(task?.status) !== 'active') return false;
+      if (task?.starts_at && new Date(task.starts_at).getTime() > now) return false;
+      if (task?.ends_at && new Date(task.ends_at).getTime() <= now) return false;
+      return true;
+    }
+
+    async function managedTaskVerification(task, userId) {
+      const rules = task?.rule_config || {};
+      const type = String(task?.task_type || '');
+
+      if (type === 'telegram_join') {
+        if (!task.telegram_chat_id) return { verified:false, message:'Telegram chat is not configured.' };
+        const ok = await verifyTelegramMembership({ chatId:task.telegram_chat_id }, userId);
+        return { verified:ok, message:ok ? 'Telegram membership verified.' : 'Join the Telegram channel/group first.' };
+      }
+
+      if (type === 'telegram_bot') {
+        // Telegram Bot API cannot prove that an arbitrary third-party bot was started.
+        // Only MAI-owned bot activity can be verified when an explicit server event is configured.
+        const eventType = String(rules.eventType || '').trim();
+        if (!eventType) return { verified:false, message:'This bot task needs a verifiable MAI server event before it can be claimed.' };
+        const q = await pool.query(`SELECT 1 FROM transactions WHERE telegram_id=$1 AND type=$2 LIMIT 1`, [userId,eventType]);
+        return { verified:q.rowCount > 0, message:q.rowCount ? 'Bot activity verified.' : 'Required bot activity is not recorded yet.' };
+      }
+
+      if (type === 'visit_link') {
+        return { verified:false, message:'External page visits cannot be securely verified yet. This task is view-only until a verification integration is configured.' };
+      }
+
+      if (type === 'invite_friends') {
+        const required = Math.max(1, safeInteger(rules.count, 1));
+        const q = await pool.query(`SELECT COUNT(*)::int AS c FROM users WHERE referred_by=$1`, [userId]);
+        const count = safeInteger(q.rows[0]?.c, 0);
+        return { verified:count >= required, progress:count, required, message:`${count}/${required} referred users recorded.` };
+      }
+
+      if (type === 'hold_mai') {
+        const required = Math.max(0, safeNumber(rules.amount));
+        const q = await pool.query(`SELECT balance,wallet_address FROM users WHERE telegram_id=$1 LIMIT 1`, [userId]);
+        if (!q.rowCount) return { verified:false, message:'User not found.' };
+        const holding = await getUserHoldingSnapshot(q.rows[0]);
+        return { verified:safeNumber(holding.total) >= required, progress:safeNumber(holding.total), required, message:`Holding ${safeNumber(holding.total).toFixed(2)} / ${required.toFixed(2)} MAI.` };
+      }
+
+      if (type === 'mining_mission' || type === 'daily_mission') {
+        const required = Math.max(1, safeInteger(rules.claims, 1));
+        const params = [userId];
+        let dateClause = '';
+        if (type === 'daily_mission') { dateClause = ` AND created_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')`; }
+        const q = await pool.query(`SELECT COUNT(*)::int AS c FROM transactions WHERE telegram_id=$1 AND type='farm_claim' ${dateClause}`, params);
+        const count = safeInteger(q.rows[0]?.c, 0);
+        return { verified:count >= required, progress:count, required, message:`${count}/${required} mining claims recorded.` };
+      }
+
+      return { verified:false, message:'Custom missions require a supported structured verification rule.' };
+    }
+
+    async function managedTaskListForUser(userId) {
+      const result = await pool.query(`
+        SELECT t.*,
+          c.verified_at, c.claimed_at, c.reward_snapshot
+        FROM managed_tasks t
+        LEFT JOIN managed_task_completions c
+          ON c.task_id=t.id AND c.telegram_id=$1
+          AND c.period_key=(CASE WHEN t.recurrence='daily' THEN $2 ELSE 'once' END)
+        WHERE t.status='active'
+          AND (t.starts_at IS NULL OR t.starts_at <= NOW())
+          AND (t.ends_at IS NULL OR t.ends_at > NOW())
+        ORDER BY t.created_at DESC
+      `,[userId,utcDay()]);
+      return result.rows.map(t => ({
+        id:String(t.id), title:t.title, description:t.description, icon:t.icon,
+        type:t.task_type, reward:safeNumber(t.reward), link:t.target_url,
+        recurrence:t.recurrence, startsAt:t.starts_at, endsAt:t.ends_at,
+        verified:!!t.verified_at, completed:!!t.claimed_at,
+        state:t.claimed_at ? 'claimed' : t.verified_at ? 'claim' : 'verify'
+      }));
+    }
+
+    async function managedMissionListForUser(userId) {
+      const missions = (await pool.query(`
+        SELECT m.* FROM managed_missions m
+        WHERE m.status='active'
+          AND (m.starts_at IS NULL OR m.starts_at <= NOW())
+          AND (m.ends_at IS NULL OR m.ends_at > NOW())
+        ORDER BY m.featured DESC, m.created_at DESC
+      `)).rows;
+      const out=[];
+      for (const m of missions) {
+        const rows=(await pool.query(`
+          SELECT t.id,t.title,t.reward,t.recurrence,
+            c.claimed_at
+          FROM managed_mission_tasks mt
+          JOIN managed_tasks t ON t.id=mt.task_id
+          LEFT JOIN managed_task_completions c ON c.task_id=t.id AND c.telegram_id=$2
+            AND c.period_key=(CASE WHEN t.recurrence='daily' THEN $3 ELSE 'once' END)
+          WHERE mt.mission_id=$1
+          ORDER BY mt.sort_order,t.id
+        `,[m.id,userId,utcDay()])).rows;
+        const done=rows.filter(x=>x.claimed_at).length;
+        const claimed=(await pool.query(`SELECT 1 FROM managed_mission_completions WHERE telegram_id=$1 AND mission_id=$2`,[userId,m.id])).rowCount>0;
+        out.push({ id:String(m.id), title:m.title, description:m.description, icon:m.icon, featured:m.featured,
+          completionBonus:safeNumber(m.completion_bonus), progress:done, total:rows.length, completed:rows.length>0 && done===rows.length,
+          bonusClaimed:claimed, tasks:rows.map(x=>({id:String(x.id),title:x.title,reward:safeNumber(x.reward),completed:!!x.claimed_at})) });
+      }
+      return out;
+    }
+
+    app.get('/api/managed-tasks', authenticate, async (req,res,next)=>{
+      try { res.json({success:true,tasks:await managedTaskListForUser(req.auth.id)}); } catch(e){ next(e); }
+    });
+    app.get('/api/missions', authenticate, async (req,res,next)=>{
+      try { res.json({success:true,missions:await managedMissionListForUser(req.auth.id)}); } catch(e){ next(e); }
+    });
+
+    app.post('/api/managed-tasks/:id/verify', authenticate, rateLimit(20,60000), async (req,res,next)=>{
+      try {
+        const q=await pool.query(`SELECT * FROM managed_tasks WHERE id=$1 LIMIT 1`,[req.params.id]);
+        const task=q.rows[0];
+        if(!task || !managedTaskIsLive(task)) return res.status(404).json({success:false,message:'Task is not active.'});
+        const check=await managedTaskVerification(task,req.auth.id);
+        if(!check.verified) return res.status(409).json({success:false,verified:false,...check});
+        const period=managedPeriodKey(task);
+        await pool.query(`INSERT INTO managed_task_completions(telegram_id,task_id,period_key,reward_snapshot,verified_at)
+          VALUES($1,$2,$3,$4,NOW()) ON CONFLICT(telegram_id,task_id,period_key) DO UPDATE SET verified_at=COALESCE(managed_task_completions.verified_at,NOW())`,
+          [req.auth.id,task.id,period,safeNumber(task.reward)]);
+        res.json({success:true,verified:true,reward:safeNumber(task.reward),message:'Verified. Reward is ready to claim.'});
+      } catch(e){ next(e); }
+    });
+
+    app.post('/api/managed-tasks/:id/claim', authenticate, rateLimit(20,60000), async (req,res,next)=>{
+      const client=await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const q=await client.query(`SELECT * FROM managed_tasks WHERE id=$1 FOR UPDATE`,[req.params.id]);
+        const task=q.rows[0];
+        if(!task || !managedTaskIsLive(task)){ await client.query('ROLLBACK'); return res.status(404).json({success:false,message:'Task is not active.'}); }
+        const period=managedPeriodKey(task);
+        const c=(await client.query(`SELECT * FROM managed_task_completions WHERE telegram_id=$1 AND task_id=$2 AND period_key=$3 FOR UPDATE`,[req.auth.id,task.id,period])).rows[0];
+        if(!c?.verified_at){ await client.query('ROLLBACK'); return res.status(409).json({success:false,message:'Verify the task first.'}); }
+        if(c.claimed_at){ await client.query('ROLLBACK'); return res.json({success:true,reward:safeNumber(c.reward_snapshot),alreadyClaimed:true,user:await buildUser(req.auth.id)}); }
+        const reward=safeNumber(c.reward_snapshot);
+        await client.query(`UPDATE users SET balance=balance+$2,updated_at=NOW() WHERE telegram_id=$1`,[req.auth.id,reward]);
+        await client.query(`UPDATE managed_task_completions SET claimed_at=NOW() WHERE id=$1`,[c.id]);
+        await client.query(`INSERT INTO transactions(telegram_id,type,amount,reference,metadata) VALUES($1,'managed_task',$2,$3,$4)`,[req.auth.id,reward,`task:${task.id}:${period}`,{taskId:String(task.id),title:task.title,period}]);
+        await client.query('COMMIT');
+        res.json({success:true,reward,user:await buildUser(req.auth.id),tasks:await managedTaskListForUser(req.auth.id)});
+      } catch(e){ try{await client.query('ROLLBACK')}catch{}; next(e); } finally { client.release(); }
+    });
+
+    app.post('/api/missions/:id/claim', authenticate, rateLimit(10,60000), async (req,res,next)=>{
+      const client=await pool.connect();
+      try{
+        await client.query('BEGIN');
+        const m=(await client.query(`SELECT * FROM managed_missions WHERE id=$1 AND status='active' FOR UPDATE`,[req.params.id])).rows[0];
+        if(!m){await client.query('ROLLBACK');return res.status(404).json({success:false,message:'Mission is not active.'});}
+        const rows=(await client.query(`SELECT t.id,t.recurrence,c.claimed_at FROM managed_mission_tasks mt JOIN managed_tasks t ON t.id=mt.task_id LEFT JOIN managed_task_completions c ON c.task_id=t.id AND c.telegram_id=$2 AND c.period_key=(CASE WHEN t.recurrence='daily' THEN $3 ELSE 'once' END) WHERE mt.mission_id=$1`,[m.id,req.auth.id,utcDay()])).rows;
+        if(!rows.length || rows.some(x=>!x.claimed_at)){await client.query('ROLLBACK');return res.status(409).json({success:false,message:'Complete every mission task first.'});}
+        const ins=await client.query(`INSERT INTO managed_mission_completions(telegram_id,mission_id,bonus_snapshot) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING mission_id`,[req.auth.id,m.id,safeNumber(m.completion_bonus)]);
+        if(!ins.rowCount){await client.query('ROLLBACK');return res.json({success:true,alreadyClaimed:true,user:await buildUser(req.auth.id)});}
+        const bonus=safeNumber(m.completion_bonus);
+        await client.query(`UPDATE users SET balance=balance+$2,updated_at=NOW() WHERE telegram_id=$1`,[req.auth.id,bonus]);
+        await client.query(`INSERT INTO transactions(telegram_id,type,amount,reference,metadata) VALUES($1,'mission_bonus',$2,$3,$4)`,[req.auth.id,bonus,`mission:${m.id}`,{missionId:String(m.id),title:m.title}]);
+        await client.query('COMMIT');
+        res.json({success:true,reward:bonus,user:await buildUser(req.auth.id),missions:await managedMissionListForUser(req.auth.id)});
+      }catch(e){try{await client.query('ROLLBACK')}catch{};next(e);}finally{client.release();}
+    });
+
+    /* ---------------- ADMIN TASKS & MISSIONS ---------------- */
+    app.get('/admin/tasks', authenticate, admin, async (req,res,next)=>{try{
+      const items=(await pool.query(`SELECT t.*, (SELECT COUNT(*)::int FROM managed_task_completions c WHERE c.task_id=t.id AND c.claimed_at IS NOT NULL) AS completion_count FROM managed_tasks t ORDER BY t.created_at DESC`)).rows;
+      res.json({success:true,items});
+    }catch(e){next(e)}});
+
+    app.post('/admin/tasks', authenticate, admin, async (req,res,next)=>{try{
+      const b=req.body||{}; const type=String(b.taskType||'').trim();
+      if(!MANAGED_TASK_TYPES.has(type)) return res.status(400).json({success:false,message:'Unsupported task type.'});
+      const title=String(b.title||'').trim().slice(0,120); if(!title) return res.status(400).json({success:false,message:'Title is required.'});
+      const reward=Math.max(0,safeNumber(b.reward)); const recurrence=b.recurrence==='daily'?'daily':'once';
+      const status=['draft','active','paused'].includes(b.status)?b.status:'draft';
+      const r=await pool.query(`INSERT INTO managed_tasks(title,description,icon,task_type,reward,target_url,telegram_chat_id,rule_config,recurrence,status,starts_at,ends_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,[title,String(b.description||'').slice(0,1000),String(b.icon||'✦').slice(0,16),type,reward,b.targetUrl||null,b.telegramChatId||null,b.ruleConfig||{},recurrence,status,b.startsAt||null,b.endsAt||null,req.admin?.telegramId||null]);
+      await pool.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,metadata,ip_hash) VALUES($1,'task_created','managed_task',$2,$3,$4)`,[req.admin?.telegramId||null,String(r.rows[0].id),{title,type,reward,status},hash(req.ip).slice(0,32)]);
+      res.json({success:true,item:r.rows[0]});
+    }catch(e){next(e)}});
+
+    app.post('/admin/tasks/:id/status', authenticate, admin, async (req,res,next)=>{try{
+      const status=String(req.body?.status||''); if(!['active','paused','ended'].includes(status)) return res.status(400).json({success:false,message:'Invalid status.'});
+      const r=await pool.query(`UPDATE managed_tasks SET status=$2,updated_at=NOW() WHERE id=$1 RETURNING *`,[req.params.id,status]); if(!r.rowCount)return res.status(404).json({success:false,message:'Task not found.'});
+      await pool.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,metadata,ip_hash) VALUES($1,'task_status_changed','managed_task',$2,$3,$4)`,[req.admin?.telegramId||null,String(req.params.id),{status},hash(req.ip).slice(0,32)]);
+      res.json({success:true,item:r.rows[0]});
+    }catch(e){next(e)}});
+
+    app.get('/admin/missions', authenticate, admin, async (req,res,next)=>{try{
+      const items=(await pool.query(`SELECT m.*, COALESCE(json_agg(json_build_object('id',t.id,'title',t.title,'reward',t.reward) ORDER BY mt.sort_order) FILTER (WHERE t.id IS NOT NULL),'[]') AS tasks FROM managed_missions m LEFT JOIN managed_mission_tasks mt ON mt.mission_id=m.id LEFT JOIN managed_tasks t ON t.id=mt.task_id GROUP BY m.id ORDER BY m.created_at DESC`)).rows;
+      res.json({success:true,items});
+    }catch(e){next(e)}});
+
+    app.post('/admin/missions', authenticate, admin, async (req,res,next)=>{const client=await pool.connect();try{
+      await client.query('BEGIN'); const b=req.body||{}; const title=String(b.title||'').trim().slice(0,120); if(!title){await client.query('ROLLBACK');return res.status(400).json({success:false,message:'Title is required.'});}
+      const status=['draft','active','paused'].includes(b.status)?b.status:'draft';
+      const r=await client.query(`INSERT INTO managed_missions(title,description,icon,completion_bonus,status,featured,starts_at,ends_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,[title,String(b.description||'').slice(0,1000),String(b.icon||'◆').slice(0,16),Math.max(0,safeNumber(b.completionBonus)),status,!!b.featured,b.startsAt||null,b.endsAt||null,req.admin?.telegramId||null]);
+      const ids=Array.isArray(b.taskIds)?[...new Set(b.taskIds.map(x=>String(x)).filter(x=>/^\d+$/.test(x)))]:[];
+      for(let i=0;i<ids.length;i++) await client.query(`INSERT INTO managed_mission_tasks(mission_id,task_id,sort_order) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,[r.rows[0].id,ids[i],i]);
+      await client.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,metadata,ip_hash) VALUES($1,'mission_created','managed_mission',$2,$3,$4)`,[req.admin?.telegramId||null,String(r.rows[0].id),{title,status,taskIds:ids},hash(req.ip).slice(0,32)]);
+      await client.query('COMMIT'); res.json({success:true,item:r.rows[0]});
+    }catch(e){try{await client.query('ROLLBACK')}catch{};next(e)}finally{client.release()}});
+
+    app.post('/admin/missions/:id/status', authenticate, admin, async (req,res,next)=>{try{
+      const status=String(req.body?.status||''); if(!['active','paused','ended'].includes(status)) return res.status(400).json({success:false,message:'Invalid status.'});
+      const r=await pool.query(`UPDATE managed_missions SET status=$2,updated_at=NOW() WHERE id=$1 RETURNING *`,[req.params.id,status]); if(!r.rowCount)return res.status(404).json({success:false,message:'Mission not found.'});
+      await pool.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,metadata,ip_hash) VALUES($1,'mission_status_changed','managed_mission',$2,$3,$4)`,[req.admin?.telegramId||null,String(req.params.id),{status},hash(req.ip).slice(0,32)]);
+      res.json({success:true,item:r.rows[0]});
+    }catch(e){next(e)}});
+
+
     /* =========================================================
        HEALTH
        ========================================================= */
@@ -7373,6 +7802,12 @@ await pool.query(`
             ]
           );
 
+          // One stable reference ties the authoritative farm claim to the
+          // inviter's 5% reward event. Both writes happen in this same
+          // database transaction, so they commit or roll back together.
+          const farmClaimReference =
+            crypto.randomUUID();
+
           await client.query(
             `
             INSERT INTO transactions(
@@ -7393,8 +7828,7 @@ await pool.query(`
             [
               req.auth.id,
               reward,
-              crypto
-                .randomUUID(),
+              farmClaimReference,
               {
                 level:
                   holding.level,
@@ -7425,6 +7859,18 @@ await pool.query(`
           await qualifyReferral(
             client,
             req.auth.id
+          );
+
+          // SECURITY / ACCOUNTING: accrue the inviter's 5% only from the
+          // authoritative farm_claim that was just written above.
+          // accrueReferralFarmReward() requires this farmer to already be a
+          // successful referral and its unique source constraint prevents
+          // duplicate rewards if reconciliation is ever run later.
+          await accrueReferralFarmReward(
+            client,
+            req.auth.id,
+            farmClaimReference,
+            reward
           );
 
           await client.query(
@@ -13454,32 +13900,24 @@ await pool.query(`
           }
 
 
+          /*
+           * SECURITY / FAIRNESS:
+           * Shared device/IP evidence is a risk signal, not proof of abuse.
+           * Never reject a withdrawal solely because one of these heuristic
+           * signals fired. The request is still routed to security_check
+           * below, preserving admin review before any payout can be approved.
+           */
           if (
-
-            cfg.devicePolicy ===
-              'hard' &&
-
+            cfg.devicePolicy === 'hard' &&
             cfg.blockWithdrawOnRisk &&
-
             risk.length
-
           ) {
-
-            return res
-              .status(403)
-              .json({
-
-                success:
-                  false,
-
-                message:
-                  'Withdrawal requires security review',
-
-                riskFlags:
-                  risk
-
-              });
-
+            await logSecurity(
+              req,
+              'withdrawal_manual_review_required',
+              'warn',
+              { risk }
+            );
           }
 
 
@@ -16418,7 +16856,7 @@ app.get(
         );
 
       const sharedIpAccounts = await pool.query(
-        `SELECT u.telegram_id,u.username,u.first_name,COUNT(DISTINCT sl.ip_hash)::int AS shared_ip_count,MAX(sl.created_at) AS last_seen FROM security_logs mine JOIN security_logs sl ON sl.ip_hash=mine.ip_hash JOIN users u ON u.telegram_id=sl.telegram_id WHERE mine.telegram_id=$1 AND mine.ip_hash IS NOT NULL AND sl.telegram_id IS NOT NULL AND sl.telegram_id<>$1 GROUP BY u.telegram_id,u.username,u.first_name ORDER BY MAX(sl.created_at) DESC LIMIT 200`,[telegramId]);
+        `SELECT u.telegram_id,u.username,u.first_name,COUNT(DISTINCT sl.ip_hash)::int AS shared_ip_count,MAX(sl.created_at) AS last_seen FROM security_logs mine JOIN security_logs sl ON sl.ip_hash=mine.ip_hash JOIN users u ON u.telegram_id=sl.telegram_id WHERE mine.telegram_id=$1 AND mine.ip_hash IS NOT NULL AND mine.metadata->>'network_signal_version'='2' AND sl.metadata->>'network_signal_version'='2' AND sl.telegram_id IS NOT NULL AND sl.telegram_id<>$1 GROUP BY u.telegram_id,u.username,u.first_name ORDER BY MAX(sl.created_at) DESC LIMIT 200`,[telegramId]);
 
       res.json({
         success: true,
@@ -17559,6 +17997,2145 @@ app.post(
     );
 
 
+
+    /* =========================================================
+       MAI NETWORK — OFFICIAL MODULES V5
+       Tasks/Missions integration companion
+       Giveaway
+       Broadcast
+       Referral Control Center
+       Launch Control
+       ========================================================= */
+
+    let maiV5SchemaReady = false;
+
+    async function ensureMaiV5Schema() {
+      if (maiV5SchemaReady) return;
+
+      // Referral epoch marker used by the one-time official launch reset.
+      // NULL is valid for legacy/pre-launch relationships.
+      await pool.query(`
+        ALTER TABLE users
+          ADD COLUMN IF NOT EXISTS referral_assigned_at TIMESTAMPTZ
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS mai_referral_reward_events(
+          id BIGSERIAL PRIMARY KEY,
+          inviter_id TEXT NOT NULL,
+          referred_user_id TEXT,
+          reward_type TEXT NOT NULL,
+          amount NUMERIC(30,8) NOT NULL DEFAULT 0,
+          source_reference TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'available',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          claimed_at TIMESTAMPTZ,
+          claim_reference TEXT
+        )
+      `);
+
+      await pool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS
+          mai_referral_reward_events_unique_source
+        ON mai_referral_reward_events(
+          inviter_id,
+          reward_type,
+          source_reference
+        )
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS mai_giveaways(
+          id BIGSERIAL PRIMARY KEY,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          image_url TEXT,
+          giveaway_type TEXT NOT NULL,
+          config JSONB NOT NULL DEFAULT '{}'::jsonb,
+          show_on_home BOOLEAN NOT NULL DEFAULT FALSE,
+          featured BOOLEAN NOT NULL DEFAULT FALSE,
+          allow_multiple_entries BOOLEAN NOT NULL DEFAULT FALSE,
+          status TEXT NOT NULL DEFAULT 'draft',
+          starts_at TIMESTAMPTZ,
+          ends_at TIMESTAMPTZ,
+          created_by TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS mai_giveaway_entries(
+          id BIGSERIAL PRIMARY KEY,
+          giveaway_id BIGINT NOT NULL REFERENCES mai_giveaways(id) ON DELETE CASCADE,
+          telegram_id TEXT NOT NULL,
+          entry_key TEXT NOT NULL DEFAULT 'primary',
+          metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(giveaway_id, telegram_id, entry_key)
+        )
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS mai_giveaway_winners(
+          id BIGSERIAL PRIMARY KEY,
+          giveaway_id BIGINT NOT NULL REFERENCES mai_giveaways(id) ON DELETE CASCADE,
+          telegram_id TEXT NOT NULL,
+          prize NUMERIC(30,8) NOT NULL DEFAULT 0,
+          selection_method TEXT NOT NULL,
+          payment_status TEXT NOT NULL DEFAULT 'pending',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(giveaway_id, telegram_id)
+        )
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS mai_broadcasts(
+          id BIGSERIAL PRIMARY KEY,
+          title TEXT NOT NULL,
+          message TEXT NOT NULL,
+          image_url TEXT,
+          destination TEXT NOT NULL DEFAULT 'mini_app',
+          audience_type TEXT NOT NULL DEFAULT 'all',
+          audience_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+          cta JSONB NOT NULL DEFAULT '{}'::jsonb,
+          priority TEXT NOT NULL DEFAULT 'normal',
+          status TEXT NOT NULL DEFAULT 'draft',
+          scheduled_at TIMESTAMPTZ,
+          sent_at TIMESTAMPTZ,
+          targeted_count INTEGER NOT NULL DEFAULT 0,
+          delivered_count INTEGER NOT NULL DEFAULT 0,
+          failed_count INTEGER NOT NULL DEFAULT 0,
+          created_by TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS mai_broadcast_receipts(
+          broadcast_id BIGINT NOT NULL REFERENCES mai_broadcasts(id) ON DELETE CASCADE,
+          telegram_id TEXT NOT NULL,
+          viewed_at TIMESTAMPTZ,
+          clicked_at TIMESTAMPTZ,
+          PRIMARY KEY(broadcast_id, telegram_id)
+        )
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS mai_system_state(
+          key TEXT PRIMARY KEY,
+          value JSONB NOT NULL DEFAULT '{}'::jsonb,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS mai_launch_snapshots(
+          id BIGSERIAL PRIMARY KEY,
+          snapshot_key TEXT NOT NULL UNIQUE,
+          created_by TEXT,
+          summary JSONB NOT NULL,
+          users_snapshot JSONB NOT NULL,
+          referrals_snapshot JSONB NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      /*
+       * Production-safe launch archives.
+       *
+       * Do not pack the entire user base into one JSONB value. These
+       * normalized tables let PostgreSQL archive rows with INSERT ... SELECT
+       * inside the launch transaction, avoiding a large Node.js memory spike
+       * and preserving exact pre-launch accounting records.
+       *
+       * The two legacy JSONB columns above remain for backward compatibility
+       * and contain only small storage metadata for new snapshots.
+       */
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS mai_launch_snapshot_users(
+          snapshot_key TEXT NOT NULL REFERENCES mai_launch_snapshots(snapshot_key) ON DELETE CASCADE,
+          telegram_id BIGINT NOT NULL,
+          balance NUMERIC(30,8) NOT NULL DEFAULT 0,
+          locked_balance NUMERIC(30,8) NOT NULL DEFAULT 0,
+          referred_by BIGINT,
+          referral_assigned_at TIMESTAMPTZ,
+          referral_qualified BOOLEAN NOT NULL DEFAULT FALSE,
+          wallet_address TEXT,
+          account_status TEXT,
+          suspended_until TIMESTAMPTZ,
+          admin_note TEXT,
+          PRIMARY KEY(snapshot_key, telegram_id)
+        )
+      `);
+
+      await pool.query(`
+        ALTER TABLE mai_launch_snapshot_users
+          ADD COLUMN IF NOT EXISTS referral_assigned_at TIMESTAMPTZ
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS mai_launch_snapshot_referral_events(
+          snapshot_key TEXT NOT NULL REFERENCES mai_launch_snapshots(snapshot_key) ON DELETE CASCADE,
+          event_id BIGINT NOT NULL,
+          inviter_id TEXT NOT NULL,
+          referred_user_id TEXT,
+          reward_type TEXT NOT NULL,
+          amount NUMERIC(30,8) NOT NULL,
+          source_reference TEXT NOT NULL,
+          status TEXT NOT NULL,
+          claim_reference TEXT,
+          claimed_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ,
+          PRIMARY KEY(snapshot_key, event_id)
+        )
+      `);
+
+      maiV5SchemaReady = true;
+    }
+
+    function adminActor(req) {
+      return String(
+        req.admin?.telegramId ||
+        req.auth?.id ||
+        'server-admin'
+      );
+    }
+
+    async function getOfficialLaunchState() {
+      await ensureMaiV5Schema();
+
+      const row = (
+        await pool.query(
+          `SELECT value FROM mai_system_state WHERE key='official_launch'`
+        )
+      ).rows[0];
+
+      return row?.value || {
+        launched: false,
+        officialLaunchAt: null
+      };
+    }
+
+    async function referralRewardSummary(telegramId, client = pool) {
+      await ensureMaiV5Schema();
+
+      const rows = (
+        await client.query(
+          `
+          SELECT
+            reward_type,
+            COALESCE(SUM(amount),0)::numeric AS amount
+          FROM mai_referral_reward_events
+          WHERE inviter_id=$1
+            AND status='available'
+          GROUP BY reward_type
+          `,
+          [String(telegramId)]
+        )
+      ).rows;
+
+      const map = Object.fromEntries(
+        rows.map(row => [
+          row.reward_type,
+          safeNumber(row.amount)
+        ])
+      );
+
+      return {
+        successfulInviteRewards:
+          safeNumber(map.successful_invite),
+        referralFarmingRewards:
+          safeNumber(map.farming_5_percent)
+      };
+    }
+
+    /* -------------------------
+       REFERRAL FARMING 5%
+       ------------------------- */
+
+    async function accrueReferralFarmReward(
+      client,
+      farmerId,
+      claimReference,
+      claimAmount
+    ) {
+      const farmer = (
+        await client.query(
+          `
+          SELECT referred_by, referral_qualified
+          FROM users
+          WHERE telegram_id=$1
+          `,
+          [String(farmerId)]
+        )
+      ).rows[0];
+
+      if (
+        !farmer?.referred_by ||
+        !farmer.referral_qualified
+      ) {
+        return;
+      }
+
+      const amount =
+        Number(
+          (
+            safeNumber(claimAmount) *
+            0.05
+          ).toFixed(8)
+        );
+
+      if (amount <= 0) return;
+
+      await client.query(
+        `
+        INSERT INTO mai_referral_reward_events(
+          inviter_id,
+          referred_user_id,
+          reward_type,
+          amount,
+          source_reference,
+          status
+        )
+        VALUES($1,$2,'farming_5_percent',$3,$4,'available')
+        ON CONFLICT(
+          inviter_id,
+          reward_type,
+          source_reference
+        )
+        DO NOTHING
+        `,
+        [
+          String(farmer.referred_by),
+          String(farmerId),
+          amount,
+          String(claimReference)
+        ]
+      );
+    }
+
+    /*
+     * Farm claims already write one authoritative 'farm_claim'
+     * transaction. This reconciler converts any not-yet-accounted
+     * successful-referral farm claims into the separate 5% bucket.
+     * The unique source constraint makes it idempotent.
+     */
+    async function reconcileReferralFarmRewardsFor(
+      telegramId
+    ) {
+      await ensureMaiV5Schema();
+
+      const referrals = (
+        await pool.query(
+          `
+          SELECT telegram_id
+          FROM users
+          WHERE referred_by=$1
+            AND referral_qualified=TRUE
+          `,
+          [String(telegramId)]
+        )
+      ).rows;
+
+      for (const referral of referrals) {
+        const claims = (
+          await pool.query(
+            `
+            SELECT
+              telegram_id,
+              amount,
+              COALESCE(
+                NULLIF(reference,''),
+                'tx:' || id::text
+              ) AS source_reference
+            FROM transactions
+            WHERE telegram_id=$1
+              AND type='farm_claim'
+            ORDER BY created_at ASC
+            LIMIT 5000
+            `,
+            [String(referral.telegram_id)]
+          )
+        ).rows;
+
+        const client = await pool.connect();
+
+        try {
+          await client.query('BEGIN');
+
+          for (const claim of claims) {
+            await accrueReferralFarmReward(
+              client,
+              claim.telegram_id,
+              claim.source_reference,
+              claim.amount
+            );
+          }
+
+          await client.query('COMMIT');
+        } catch (error) {
+          try { await client.query('ROLLBACK'); } catch {}
+          throw error;
+        } finally {
+          client.release();
+        }
+      }
+    }
+
+    app.get(
+      '/api/referrals/v2',
+      authenticate,
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+          await reconcileReferralFarmRewardsFor(req.auth.id);
+          const launchState = await getOfficialLaunchState();
+          const officialLaunchAt =
+            launchState?.launched && launchState?.officialLaunchAt
+              ? new Date(launchState.officialLaunchAt)
+              : null;
+
+          const rows = (
+            await pool.query(
+              `
+              SELECT
+                u.telegram_id,
+                u.first_name,
+                u.username,
+                u.photo_url,
+                u.referral_qualified,
+                u.created_at,
+                (
+                  SELECT COUNT(DISTINCT d.task_key)::int
+                  FROM daily_task_completions d
+                  WHERE d.telegram_id=u.telegram_id
+                    AND d.task_key=ANY(ARRAY['news','payout','chat']::text[])
+                    AND ($2::timestamptz IS NULL OR d.created_at >= $2)
+                ) = 3 AS required_activity_done,
+                (
+                  SELECT COUNT(*)::int
+                  FROM users child
+                  WHERE child.referred_by=u.telegram_id
+                    AND ($2::timestamptz IS NULL OR child.referral_assigned_at >= $2)
+                ) AS invited_users
+              FROM users u
+              WHERE u.referred_by=$1
+                AND ($2::timestamptz IS NULL OR u.referral_assigned_at >= $2)
+              ORDER BY u.created_at DESC
+              LIMIT 250
+              `,
+              [String(req.auth.id), officialLaunchAt]
+            )
+          ).rows;
+
+          const rewards =
+            await referralRewardSummary(
+              req.auth.id
+            );
+
+          const successful =
+            rows.filter(
+              row => row.referral_qualified
+            ).length;
+
+          const items =
+            rows.map(row => ({
+              ...row,
+              status:
+                row.referral_qualified
+                  ? 'successful'
+                  : 'pending',
+              requirements: {
+                requiredTasks:
+                  Boolean(row.required_activity_done),
+                inviteOneUser:
+                  Number(row.invited_users || 0) >= 1
+              }
+            }));
+
+          res.json({
+            success: true,
+            link: referralLink(req.auth.id),
+            total: rows.length,
+            successful,
+            pending: rows.length - successful,
+            rewards,
+            items
+          });
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+    app.post(
+      '/api/referrals/rewards/:type/claim',
+      authenticate,
+      rateLimit(10,60000),
+      async (req,res,next) => {
+        const type =
+          req.params.type === 'successful'
+            ? 'successful_invite'
+            : req.params.type === 'farming'
+              ? 'farming_5_percent'
+              : null;
+
+        if (!type) {
+          return res.status(404).json({
+            success:false,
+            message:'Unknown referral reward type'
+          });
+        }
+
+        const client = await pool.connect();
+
+        try {
+          await ensureMaiV5Schema();
+          await client.query('BEGIN');
+
+          await client.query(
+            `
+            SELECT telegram_id
+            FROM users
+            WHERE telegram_id=$1
+            FOR UPDATE
+            `,
+            [String(req.auth.id)]
+          );
+
+          const events = (
+            await client.query(
+              `
+              SELECT id, amount
+              FROM mai_referral_reward_events
+              WHERE inviter_id=$1
+                AND reward_type=$2
+                AND status='available'
+              FOR UPDATE
+              `,
+              [String(req.auth.id),type]
+            )
+          ).rows;
+
+          const total =
+            Number(
+              events
+                .reduce(
+                  (sum,row) =>
+                    sum + safeNumber(row.amount),
+                  0
+                )
+                .toFixed(8)
+            );
+
+          if (total <= 0) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+              success:false,
+              message:'No referral rewards are available'
+            });
+          }
+
+          const claimReference =
+            `refclaim:${type}:${crypto.randomUUID()}`;
+
+          await client.query(
+            `
+            UPDATE users
+            SET
+              balance=balance+$2,
+              updated_at=NOW()
+            WHERE telegram_id=$1
+            `,
+            [String(req.auth.id),total]
+          );
+
+          await client.query(
+            `
+            UPDATE mai_referral_reward_events
+            SET
+              status='claimed',
+              claimed_at=NOW(),
+              claim_reference=$3
+            WHERE inviter_id=$1
+              AND reward_type=$2
+              AND status='available'
+            `,
+            [
+              String(req.auth.id),
+              type,
+              claimReference
+            ]
+          );
+
+          await client.query(
+            `
+            INSERT INTO transactions(
+              telegram_id,
+              type,
+              amount,
+              reference,
+              metadata
+            )
+            VALUES($1,$2,$3,$4,$5)
+            `,
+            [
+              String(req.auth.id),
+              type === 'successful_invite'
+                ? 'successful_invite_claim'
+                : 'referral_farming_claim',
+              total,
+              claimReference,
+              JSON.stringify({
+                rewardType:type,
+                eventCount:events.length
+              })
+            ]
+          );
+
+          await client.query('COMMIT');
+
+          res.json({
+            success:true,
+            claimed:total,
+            rewards:
+              await referralRewardSummary(
+                req.auth.id
+              ),
+            user:
+              await buildUser(req.auth.id)
+          });
+        } catch (error) {
+          try { await client.query('ROLLBACK'); } catch {}
+          next(error);
+        } finally {
+          client.release();
+        }
+      }
+    );
+
+    /* -------------------------
+       GIVEAWAY — USER
+       ------------------------- */
+
+    async function giveawayEligibility(
+      giveaway,
+      telegramId
+    ) {
+      const type =
+        String(
+          giveaway.giveaway_type ||
+          ''
+        ).toLowerCase();
+
+      const config =
+        giveaway.config || {};
+
+      if (type === 'holding') {
+        const user = (
+          await pool.query(
+            `SELECT * FROM users WHERE telegram_id=$1`,
+            [String(telegramId)]
+          )
+        ).rows[0];
+
+        if (!user) {
+          return {eligible:false,reason:'User not found'};
+        }
+
+        const holding =
+          await getUserHoldingSnapshot(
+            user,
+            pool,
+            {forceWallet:true}
+          );
+
+        const minimum =
+          safeNumber(config.minimumMai);
+
+        return {
+          eligible:
+            holding.total >= minimum,
+          reason:
+            holding.total >= minimum
+              ? null
+              : `Minimum ${minimum} MAI holding required`
+        };
+      }
+
+      if (type === 'referral') {
+        const count = (
+          await pool.query(
+            `
+            SELECT COUNT(*)::int AS c
+            FROM users
+            WHERE referred_by=$1
+              AND referral_qualified=TRUE
+            `,
+            [String(telegramId)]
+          )
+        ).rows[0]?.c || 0;
+
+        const required =
+          Math.max(
+            1,
+            Number(config.successfulInvites || 1)
+          );
+
+        return {
+          eligible:
+            Number(count) >= required,
+          reason:
+            Number(count) >= required
+              ? null
+              : `${required} successful invites required`
+        };
+      }
+
+      if (type === 'task') {
+        const requiredKeys =
+          Array.isArray(config.taskKeys)
+            ? config.taskKeys
+            : [];
+
+        if (!requiredKeys.length) {
+          return {eligible:true,reason:null};
+        }
+
+        const count = (
+          await pool.query(
+            `
+            SELECT COUNT(DISTINCT task_key)::int AS c
+            FROM daily_task_completions
+            WHERE telegram_id=$1
+              AND task_key=ANY($2::text[])
+            `,
+            [String(telegramId),requiredKeys]
+          )
+        ).rows[0]?.c || 0;
+
+        return {
+          eligible:
+            Number(count) >= requiredKeys.length,
+          reason:
+            Number(count) >= requiredKeys.length
+              ? null
+              : 'Complete the required tasks first'
+        };
+      }
+
+      /*
+       * Lucky draw itself has no extra eligibility rule.
+       * Social/quiz/purchase/custom rules must only be published
+       * when their real authoritative verifier exists.
+       */
+      if (
+        ['lucky_draw','leaderboard'].includes(type)
+      ) {
+        return {eligible:true,reason:null};
+      }
+
+      return {
+        eligible:false,
+        reason:
+          'This giveaway type requires an authoritative verifier before it can accept entries'
+      };
+    }
+
+    app.get(
+      '/api/giveaways',
+      authenticate,
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+
+          const rows = (
+            await pool.query(
+              `
+              SELECT *
+              FROM mai_giveaways
+              WHERE status='live'
+                AND (starts_at IS NULL OR starts_at<=NOW())
+                AND (ends_at IS NULL OR ends_at>NOW())
+              ORDER BY featured DESC, created_at DESC
+              `
+            )
+          ).rows;
+
+          const entries = (
+            await pool.query(
+              `
+              SELECT giveaway_id
+              FROM mai_giveaway_entries
+              WHERE telegram_id=$1
+              `,
+              [String(req.auth.id)]
+            )
+          ).rows;
+
+          const joined =
+            new Set(
+              entries.map(
+                row => String(row.giveaway_id)
+              )
+            );
+
+          res.json({
+            success:true,
+            featured:
+              rows.find(row => row.featured) ||
+              rows[0] ||
+              null,
+            showHomeGift:
+              rows.some(row => row.show_on_home),
+            items:
+              rows.map(row => ({
+                ...row,
+                joined:
+                  joined.has(String(row.id))
+              }))
+          });
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+    app.post(
+      '/api/giveaways/:id/join',
+      authenticate,
+      rateLimit(20,60000),
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+
+          const giveaway = (
+            await pool.query(
+              `
+              SELECT *
+              FROM mai_giveaways
+              WHERE id=$1
+                AND status='live'
+                AND (starts_at IS NULL OR starts_at<=NOW())
+                AND (ends_at IS NULL OR ends_at>NOW())
+              `,
+              [req.params.id]
+            )
+          ).rows[0];
+
+          if (!giveaway) {
+            return res.status(404).json({
+              success:false,
+              message:'Giveaway is not active'
+            });
+          }
+
+          const eligibility =
+            await giveawayEligibility(
+              giveaway,
+              req.auth.id
+            );
+
+          if (!eligibility.eligible) {
+            return res.status(409).json({
+              success:false,
+              message:eligibility.reason
+            });
+          }
+
+          const entryKey =
+            giveaway.allow_multiple_entries
+              ? String(
+                  req.get('X-Idempotency-Key') ||
+                  crypto.randomUUID()
+                )
+              : 'primary';
+
+          await pool.query(
+            `
+            INSERT INTO mai_giveaway_entries(
+              giveaway_id,
+              telegram_id,
+              entry_key
+            )
+            VALUES($1,$2,$3)
+            ON CONFLICT DO NOTHING
+            `,
+            [
+              giveaway.id,
+              String(req.auth.id),
+              entryKey
+            ]
+          );
+
+          res.json({
+            success:true,
+            joined:true
+          });
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+    /* -------------------------
+       GIVEAWAY — ADMIN
+       ------------------------- */
+
+    app.get(
+      '/admin/giveaways',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+
+          const rows = (
+            await pool.query(
+              `
+              SELECT
+                g.*,
+                (
+                  SELECT COUNT(*)::int
+                  FROM mai_giveaway_entries e
+                  WHERE e.giveaway_id=g.id
+                ) AS entries
+              FROM mai_giveaways g
+              ORDER BY g.created_at DESC
+              `
+            )
+          ).rows;
+
+          res.json({
+            success:true,
+            items:rows
+          });
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+    app.post(
+      '/admin/giveaways',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+
+          const body = req.body || {};
+          const title =
+            String(body.title || '').trim();
+          const type =
+            String(body.giveawayType || '').trim().toLowerCase();
+
+          const allowed = new Set([
+            'task',
+            'referral',
+            'lucky_draw',
+            'leaderboard',
+            'social',
+            'quiz',
+            'holding',
+            'purchase',
+            'custom'
+          ]);
+
+          if (!title || !allowed.has(type)) {
+            return res.status(400).json({
+              success:false,
+              message:'Valid title and giveaway type are required'
+            });
+          }
+
+          /*
+           * Types without an authoritative verifier may be saved
+           * as draft, but cannot be published live.
+           */
+          const verifierReady =
+            ['task','referral','lucky_draw','leaderboard','holding']
+              .includes(type);
+
+          let status =
+            String(body.status || 'draft').toLowerCase();
+
+          if (
+            ['live','scheduled'].includes(status) &&
+            !verifierReady
+          ) {
+            status='draft';
+          }
+
+          const row = (
+            await pool.query(
+              `
+              INSERT INTO mai_giveaways(
+                title,
+                description,
+                image_url,
+                giveaway_type,
+                config,
+                show_on_home,
+                featured,
+                allow_multiple_entries,
+                status,
+                starts_at,
+                ends_at,
+                created_by
+              )
+              VALUES(
+                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+              )
+              RETURNING *
+              `,
+              [
+                title,
+                String(body.description || ''),
+                body.imageUrl
+                  ? String(body.imageUrl)
+                  : null,
+                type,
+                JSON.stringify(body.config || {}),
+                Boolean(body.showOnHome),
+                Boolean(body.featured),
+                Boolean(body.allowMultipleEntries),
+                status,
+                body.startsAt || null,
+                body.endsAt || null,
+                adminActor(req)
+              ]
+            )
+          ).rows[0];
+
+          await logSecurity(
+            req,
+            'admin_giveaway_created',
+            'info',
+            {
+              giveawayId:row.id,
+              type,
+              status
+            }
+          );
+
+          res.json({
+            success:true,
+            item:row,
+            verifierReady
+          });
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+    app.post(
+      '/admin/giveaways/:id/status',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+
+          const requested =
+            String(req.body?.status || '')
+              .toLowerCase();
+
+          if (
+            !['draft','scheduled','live','paused','ended','completed']
+              .includes(requested)
+          ) {
+            return res.status(400).json({
+              success:false,
+              message:'Invalid giveaway status'
+            });
+          }
+
+          const current = (
+            await pool.query(
+              `SELECT * FROM mai_giveaways WHERE id=$1`,
+              [req.params.id]
+            )
+          ).rows[0];
+
+          if (!current) {
+            return res.status(404).json({
+              success:false,
+              message:'Giveaway not found'
+            });
+          }
+
+          const verifierReady =
+            ['task','referral','lucky_draw','leaderboard','holding']
+              .includes(current.giveaway_type);
+
+          if (
+            ['live','scheduled'].includes(requested) &&
+            !verifierReady
+          ) {
+            return res.status(409).json({
+              success:false,
+              message:'This giveaway type has no authoritative verifier yet'
+            });
+          }
+
+          const row = (
+            await pool.query(
+              `
+              UPDATE mai_giveaways
+              SET
+                status=$2,
+                updated_at=NOW()
+              WHERE id=$1
+              RETURNING *
+              `,
+              [req.params.id,requested]
+            )
+          ).rows[0];
+
+          res.json({
+            success:true,
+            item:row
+          });
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+    app.post(
+      '/admin/giveaways/:id/draw',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        const client = await pool.connect();
+
+        try {
+          await ensureMaiV5Schema();
+          await client.query('BEGIN');
+
+          const giveaway = (
+            await client.query(
+              `
+              SELECT *
+              FROM mai_giveaways
+              WHERE id=$1
+              FOR UPDATE
+              `,
+              [req.params.id]
+            )
+          ).rows[0];
+
+          if (!giveaway) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({
+              success:false,
+              message:'Giveaway not found'
+            });
+          }
+
+          const winnerCount =
+            Math.max(
+              1,
+              Math.min(
+                Number(req.body?.winnerCount || 1),
+                100
+              )
+            );
+
+          const entries = (
+            await client.query(
+              `
+              SELECT DISTINCT telegram_id
+              FROM mai_giveaway_entries
+              WHERE giveaway_id=$1
+              ORDER BY telegram_id
+              `,
+              [giveaway.id]
+            )
+          ).rows;
+
+          if (!entries.length) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+              success:false,
+              message:'No eligible entries'
+            });
+          }
+
+          /*
+           * Cryptographically secure server-side draw.
+           * We intentionally do not use browser Math.random().
+           */
+          const poolRows = [...entries];
+          const selected = [];
+
+          while (
+            selected.length < winnerCount &&
+            poolRows.length
+          ) {
+            const index =
+              crypto.randomInt(0,poolRows.length);
+            selected.push(
+              poolRows.splice(index,1)[0]
+            );
+          }
+
+          const prize =
+            safeNumber(
+              giveaway.config?.prizePerWinner
+            );
+
+          for (const winner of selected) {
+            await client.query(
+              `
+              INSERT INTO mai_giveaway_winners(
+                giveaway_id,
+                telegram_id,
+                prize,
+                selection_method
+              )
+              VALUES($1,$2,$3,'crypto_random')
+              ON CONFLICT DO NOTHING
+              `,
+              [
+                giveaway.id,
+                winner.telegram_id,
+                prize
+              ]
+            );
+          }
+
+          await client.query(
+            `
+            UPDATE mai_giveaways
+            SET
+              status='completed',
+              updated_at=NOW()
+            WHERE id=$1
+            `,
+            [giveaway.id]
+          );
+
+          await client.query('COMMIT');
+
+          res.json({
+            success:true,
+            winners:selected
+          });
+        } catch (error) {
+          try { await client.query('ROLLBACK'); } catch {}
+          next(error);
+        } finally {
+          client.release();
+        }
+      }
+    );
+
+    app.get(
+      '/admin/giveaway-winners',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+
+          const rows = (
+            await pool.query(
+              `
+              SELECT
+                w.*,
+                u.username,
+                u.wallet_address,
+                g.title AS giveaway_title
+              FROM mai_giveaway_winners w
+              JOIN mai_giveaways g
+                ON g.id=w.giveaway_id
+              LEFT JOIN users u
+                ON u.telegram_id=w.telegram_id
+              ORDER BY w.created_at DESC
+              LIMIT 1000
+              `
+            )
+          ).rows;
+
+          res.json({
+            success:true,
+            items:rows
+          });
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+    /* -------------------------
+       BROADCAST
+       ------------------------- */
+
+    app.get(
+      '/api/announcements',
+      authenticate,
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+
+          const rows = (
+            await pool.query(
+              `
+              SELECT
+                b.id,
+                b.title,
+                b.message,
+                b.image_url,
+                b.cta,
+                b.priority,
+                b.sent_at,
+                r.viewed_at,
+                r.clicked_at
+              FROM mai_broadcasts b
+              JOIN mai_broadcast_receipts r
+                ON r.broadcast_id=b.id
+               AND r.telegram_id=$1
+              WHERE b.status='sent'
+                AND b.destination IN('mini_app','both')
+              ORDER BY b.sent_at DESC NULLS LAST
+              LIMIT 30
+              `,
+              [String(req.auth.id)]
+            )
+          ).rows;
+
+          res.json({
+            success:true,
+            items:rows
+          });
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+    app.post(
+      '/api/announcements/:id/view',
+      authenticate,
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+
+          await pool.query(
+            `
+            INSERT INTO mai_broadcast_receipts(
+              broadcast_id,
+              telegram_id,
+              viewed_at
+            )
+            VALUES($1,$2,NOW())
+            ON CONFLICT(broadcast_id,telegram_id)
+            DO UPDATE SET
+              viewed_at=COALESCE(
+                mai_broadcast_receipts.viewed_at,
+                NOW()
+              )
+            `,
+            [req.params.id,String(req.auth.id)]
+          );
+
+          res.json({success:true});
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+    app.get(
+      '/admin/broadcasts',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+
+          const rows = (
+            await pool.query(
+              `
+              SELECT *
+              FROM mai_broadcasts
+              ORDER BY created_at DESC
+              LIMIT 500
+              `
+            )
+          ).rows;
+
+          res.json({
+            success:true,
+            items:rows
+          });
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+    app.post(
+      '/admin/broadcasts',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+
+          const body=req.body || {};
+          const title=String(body.title || '').trim();
+          const message=String(body.message || '').trim();
+
+          if (!title || !message) {
+            return res.status(400).json({
+              success:false,
+              message:'Title and message are required'
+            });
+          }
+
+          const audienceType = String(body.audienceType || 'all');
+          if (!BROADCAST_AUDIENCE_TYPES.has(audienceType)) {
+            return res.status(400).json({success:false,message:'Unsupported broadcast audience type'});
+          }
+
+          const status =
+            body.scheduledAt
+              ? 'scheduled'
+              : 'draft';
+
+          const row = (
+            await pool.query(
+              `
+              INSERT INTO mai_broadcasts(
+                title,
+                message,
+                image_url,
+                destination,
+                audience_type,
+                audience_config,
+                cta,
+                priority,
+                status,
+                scheduled_at,
+                created_by
+              )
+              VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+              RETURNING *
+              `,
+              [
+                title,
+                message,
+                body.imageUrl || null,
+                ['mini_app','telegram','both'].includes(body.destination)
+                  ? body.destination
+                  : 'mini_app',
+                audienceType,
+                JSON.stringify(body.audienceConfig || {}),
+                JSON.stringify(body.cta || {}),
+                ['normal','important','critical'].includes(body.priority)
+                  ? body.priority
+                  : 'normal',
+                status,
+                body.scheduledAt || null,
+                adminActor(req)
+              ]
+            )
+          ).rows[0];
+
+          res.json({
+            success:true,
+            item:row
+          });
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+    const BROADCAST_AUDIENCE_TYPES = new Set([
+      'all',
+      'active',
+      'mai_holders',
+      'minimum_level',
+      'giveaway_participants',
+      'task_participants',
+      'mission_participants',
+      'specific'
+    ]);
+
+    async function resolveBroadcastAudience(broadcast) {
+      const type = String(broadcast.audience_type || 'all');
+      const config = broadcast.audience_config || {};
+
+      // SECURITY: an unknown audience must fail closed. Never silently
+      // fall back to all users, because that could mass-message users.
+      if (!BROADCAST_AUDIENCE_TYPES.has(type)) {
+        throw new Error(`Unsupported broadcast audience type: ${type}`);
+      }
+
+      if (type === 'specific') {
+        const ids = Array.isArray(config.telegramIds)
+          ? [...new Set(config.telegramIds.map(String).filter(id => /^\d+$/.test(id)))]
+          : [];
+        if (!ids.length) return [];
+        return (await pool.query(
+          `SELECT telegram_id FROM users WHERE telegram_id::text=ANY($1::text[])`,
+          [ids]
+        )).rows;
+      }
+
+      if (type === 'mai_holders') {
+        return (await pool.query(
+          `SELECT telegram_id FROM users WHERE COALESCE(balance,0)>0`
+        )).rows;
+      }
+
+      if (type === 'active') {
+        return (await pool.query(
+          `SELECT telegram_id FROM users WHERE updated_at > NOW() - INTERVAL '30 days'`
+        )).rows;
+      }
+
+      if (type === 'minimum_level') {
+        const minimumLevel = Math.max(1, safeInteger(config.minimumLevel ?? config.level, 1));
+        return (await pool.query(
+          `SELECT telegram_id FROM users
+           WHERE COALESCE(mining_checkpoint_level,mining_highest_level,1) >= $1`,
+          [minimumLevel]
+        )).rows;
+      }
+
+      if (type === 'giveaway_participants') {
+        const giveawayId = String(config.giveawayId || '').trim();
+        if (!/^\d+$/.test(giveawayId)) return [];
+        return (await pool.query(
+          `SELECT DISTINCT u.telegram_id
+           FROM mai_giveaway_entries e
+           JOIN users u ON u.telegram_id::text=e.telegram_id
+           WHERE e.giveaway_id=$1`,
+          [giveawayId]
+        )).rows;
+      }
+
+      if (type === 'task_participants') {
+        const taskId = String(config.taskId || '').trim();
+        if (!/^\d+$/.test(taskId)) return [];
+        return (await pool.query(
+          `SELECT DISTINCT u.telegram_id
+           FROM managed_task_completions c
+           JOIN users u ON u.telegram_id=c.telegram_id
+           WHERE c.task_id=$1 AND c.claimed_at IS NOT NULL`,
+          [taskId]
+        )).rows;
+      }
+
+      if (type === 'mission_participants') {
+        const missionId = String(config.missionId || '').trim();
+        if (!/^\d+$/.test(missionId)) return [];
+        return (await pool.query(
+          `SELECT DISTINCT u.telegram_id
+           FROM managed_mission_completions c
+           JOIN users u ON u.telegram_id=c.telegram_id
+           WHERE c.mission_id=$1`,
+          [missionId]
+        )).rows;
+      }
+
+      return (await pool.query(`SELECT telegram_id FROM users`)).rows;
+    }
+
+    async function sendTelegramBroadcastMessage(targetTelegramId, broadcast) {
+      let lastError = null;
+      for (let attempt=1; attempt<=3; attempt++) {
+        try {
+          return await telegram('sendMessage', {
+            chat_id:targetTelegramId,
+            text:`${broadcast.title}\n\n${broadcast.message}`,
+            disable_web_page_preview:true
+          });
+        } catch (error) {
+          lastError = error;
+          if (attempt < 3) {
+            await new Promise(resolve => setTimeout(resolve, 350 * attempt));
+          }
+        }
+      }
+      throw lastError || new Error('Telegram broadcast delivery failed');
+    }
+
+    async function deliverBroadcast(broadcast) {
+      const audience = await resolveBroadcastAudience(broadcast);
+
+      // These rows are both the Mini App target list and read-state records.
+      // This prevents a targeted Mini App broadcast from leaking to all users.
+      for (const target of audience) {
+        await pool.query(
+          `INSERT INTO mai_broadcast_receipts(broadcast_id,telegram_id)
+           VALUES($1,$2)
+           ON CONFLICT(broadcast_id,telegram_id) DO NOTHING`,
+          [broadcast.id,String(target.telegram_id)]
+        );
+      }
+
+      let delivered = 0;
+      let failed = 0;
+
+      if (['telegram','both'].includes(broadcast.destination)) {
+        for (const target of audience) {
+          try {
+            await sendTelegramBroadcastMessage(target.telegram_id,broadcast);
+            delivered += 1;
+          } catch (error) {
+            failed += 1;
+            console.error('[MAI BROADCAST] Telegram delivery failed:', broadcast.id, target.telegram_id, error.message);
+          }
+          await new Promise(resolve => setTimeout(resolve,35));
+        }
+      } else {
+        delivered = audience.length;
+      }
+
+      await pool.query(
+        `UPDATE mai_broadcasts
+         SET status='sent',sent_at=NOW(),targeted_count=$2,
+             delivered_count=$3,failed_count=$4,updated_at=NOW()
+         WHERE id=$1`,
+        [broadcast.id,audience.length,delivered,failed]
+      );
+
+      return {targeted:audience.length,delivered,failed};
+    }
+
+    app.post(
+      '/admin/broadcasts/:id/send',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+          const confirmation = String(req.body?.confirmation || '');
+          if (confirmation !== 'SEND MAI BROADCAST') {
+            return res.status(409).json({success:false,message:'Type SEND MAI BROADCAST to confirm'});
+          }
+
+          const claimed = (await pool.query(
+            `UPDATE mai_broadcasts
+             SET status='sending',updated_at=NOW()
+             WHERE id=$1 AND status NOT IN('sent','sending')
+             RETURNING *`,
+            [req.params.id]
+          )).rows[0];
+
+          if (!claimed) {
+            const existing=(await pool.query(`SELECT status FROM mai_broadcasts WHERE id=$1`,[req.params.id])).rows[0];
+            if (!existing) return res.status(404).json({success:false,message:'Broadcast not found'});
+            return res.status(409).json({success:false,message:`Broadcast is already ${existing.status}`});
+          }
+
+          try {
+            const result=await deliverBroadcast(claimed);
+            res.json({success:true,...result});
+          } catch (error) {
+            await pool.query(
+              `UPDATE mai_broadcasts SET status='failed',updated_at=NOW() WHERE id=$1 AND status='sending'`,
+              [claimed.id]
+            );
+            throw error;
+          }
+        } catch (error) { next(error); }
+      }
+    );
+
+    let broadcastSchedulerStarted = false;
+    function startMaiBroadcastScheduler() {
+      if (broadcastSchedulerStarted) return;
+      broadcastSchedulerStarted = true;
+
+      const tick = async () => {
+        try {
+          await ensureMaiV5Schema();
+          const due=(await pool.query(
+            `SELECT id FROM mai_broadcasts
+             WHERE status='scheduled' AND scheduled_at IS NOT NULL AND scheduled_at<=NOW()
+             ORDER BY scheduled_at ASC LIMIT 10`
+          )).rows;
+
+          for (const row of due) {
+            const claimed=(await pool.query(
+              `UPDATE mai_broadcasts SET status='sending',updated_at=NOW()
+               WHERE id=$1 AND status='scheduled'
+               RETURNING *`,
+              [row.id]
+            )).rows[0];
+            if (!claimed) continue;
+            try {
+              await deliverBroadcast(claimed);
+            } catch (error) {
+              console.error('[MAI BROADCAST] scheduled send failed:', claimed.id, error.message);
+              await pool.query(
+                `UPDATE mai_broadcasts SET status='failed',updated_at=NOW() WHERE id=$1 AND status='sending'`,
+                [claimed.id]
+              );
+            }
+          }
+        } catch (error) {
+          console.error('[MAI BROADCAST] scheduler tick failed:', error.message);
+        }
+      };
+
+      setInterval(tick,60000).unref?.();
+      setTimeout(tick,5000).unref?.();
+    }
+
+    /* -------------------------
+       REFERRAL ADMIN
+       ------------------------- */
+
+    app.get(
+      '/admin/referrals',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+
+          const overview = (
+            await pool.query(
+              `
+              SELECT
+                COUNT(*) FILTER(
+                  WHERE referred_by IS NOT NULL
+                )::int AS total_invited,
+                COUNT(*) FILTER(
+                  WHERE referred_by IS NOT NULL
+                    AND referral_qualified=TRUE
+                )::int AS successful,
+                COUNT(*) FILTER(
+                  WHERE referred_by IS NOT NULL
+                    AND referral_qualified=FALSE
+                )::int AS pending
+              FROM users
+              `
+            )
+          ).rows[0];
+
+          const users = (
+            await pool.query(
+              `
+              SELECT
+                u.telegram_id,
+                u.username,
+                u.referred_by,
+                u.referral_qualified,
+                u.created_at,
+                (
+                  SELECT COUNT(*)::int
+                  FROM users c
+                  WHERE c.referred_by=u.telegram_id
+                ) AS total_invites,
+                (
+                  SELECT COUNT(*)::int
+                  FROM users c
+                  WHERE c.referred_by=u.telegram_id
+                    AND c.referral_qualified=TRUE
+                ) AS successful_invites
+              FROM users u
+              WHERE u.referred_by IS NOT NULL
+              ORDER BY u.created_at DESC
+              LIMIT 1000
+              `
+            )
+          ).rows;
+
+          const rewardTotals = (
+            await pool.query(
+              `
+              SELECT
+                reward_type,
+                status,
+                COALESCE(SUM(amount),0) AS amount
+              FROM mai_referral_reward_events
+              GROUP BY reward_type,status
+              `
+            )
+          ).rows;
+
+          res.json({
+            success:true,
+            overview,
+            users,
+            rewardTotals
+          });
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+    /* -------------------------
+       LAUNCH CONTROL
+       ------------------------- */
+
+    app.get(
+      '/admin/launch-control',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+
+          const state =
+            await getOfficialLaunchState();
+
+          const summary = (
+            await pool.query(
+              `
+              SELECT
+                COUNT(*)::int AS users,
+                COALESCE(SUM(balance),0) AS game_balance,
+                COUNT(*) FILTER(
+                  WHERE referred_by IS NOT NULL
+                )::int AS referral_links,
+                COUNT(*) FILTER(
+                  WHERE referral_qualified=TRUE
+                )::int AS successful_referrals
+              FROM users
+              `
+            )
+          ).rows[0];
+
+          const rewards = (
+            await pool.query(
+              `
+              SELECT
+                COALESCE(SUM(amount),0) AS amount
+              FROM mai_referral_reward_events
+              WHERE status='available'
+              `
+            )
+          ).rows[0];
+
+          res.json({
+            success:true,
+            state,
+            preview:{
+              ...summary,
+              unclaimedReferralRewards:
+                safeNumber(rewards.amount),
+              hardProtected:[
+                'Telegram identity',
+                'bound wallet',
+                'security/risk history',
+                'ban/suspension state',
+                'audit logs',
+                'withdrawal/payout history',
+                'transaction hashes',
+                'blockchain balances/assets'
+              ]
+            }
+          });
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+    app.post(
+      '/admin/launch-control/execute',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        const confirmation =
+          String(req.body?.confirmation || '');
+
+        if (
+          confirmation !==
+          'LAUNCH MAI NETWORK'
+        ) {
+          return res.status(409).json({
+            success:false,
+            message:'Type LAUNCH MAI NETWORK exactly to confirm'
+          });
+        }
+
+        const client =
+          await pool.connect();
+
+        try {
+          await ensureMaiV5Schema();
+          await client.query('BEGIN');
+
+          const existing = (
+            await client.query(
+              `
+              SELECT value
+              FROM mai_system_state
+              WHERE key='official_launch'
+              FOR UPDATE
+              `
+            )
+          ).rows[0];
+
+          if (existing?.value?.launched) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+              success:false,
+              message:'MAI Network official launch has already been executed'
+            });
+          }
+
+          // Build only compact aggregate metadata in Node.js. The full
+          // pre-launch records are archived row-by-row by PostgreSQL below.
+          const userSummary = (
+            await client.query(
+              `
+              SELECT
+                COUNT(*)::int AS users,
+                COALESCE(SUM(balance),0)::numeric AS game_balance
+              FROM users
+              `
+            )
+          ).rows[0];
+
+          const referralSummary = (
+            await client.query(
+              `
+              SELECT COUNT(*)::int AS referral_events
+              FROM mai_referral_reward_events
+              `
+            )
+          ).rows[0];
+
+          const snapshotKey =
+            `official-launch:${Date.now()}`;
+
+          const summary = {
+            users:safeInteger(userSummary?.users,0),
+            gameBalance:safeNumber(userSummary?.game_balance),
+            referralEvents:safeInteger(referralSummary?.referral_events,0),
+            storage:'normalized_v1'
+          };
+
+          await client.query(
+            `
+            INSERT INTO mai_launch_snapshots(
+              snapshot_key,
+              created_by,
+              summary,
+              users_snapshot,
+              referrals_snapshot
+            )
+            VALUES($1,$2,$3,$4,$5)
+            `,
+            [
+              snapshotKey,
+              adminActor(req),
+              JSON.stringify(summary),
+              JSON.stringify({storage:'mai_launch_snapshot_users'}),
+              JSON.stringify({storage:'mai_launch_snapshot_referral_events'})
+            ]
+          );
+
+          await client.query(
+            `
+            INSERT INTO mai_launch_snapshot_users(
+              snapshot_key,
+              telegram_id,
+              balance,
+              locked_balance,
+              referred_by,
+              referral_assigned_at,
+              referral_qualified,
+              wallet_address,
+              account_status,
+              suspended_until,
+              admin_note
+            )
+            SELECT
+              $1,
+              telegram_id,
+              balance,
+              locked_balance,
+              referred_by,
+              referral_assigned_at,
+              referral_qualified,
+              wallet_address,
+              account_status,
+              suspended_until,
+              admin_note
+            FROM users
+            `,
+            [snapshotKey]
+          );
+
+          await client.query(
+            `
+            INSERT INTO mai_launch_snapshot_referral_events(
+              snapshot_key,
+              event_id,
+              inviter_id,
+              referred_user_id,
+              reward_type,
+              amount,
+              source_reference,
+              status,
+              claim_reference,
+              claimed_at,
+              created_at
+            )
+            SELECT
+              $1,
+              id,
+              inviter_id,
+              referred_user_id,
+              reward_type,
+              amount,
+              source_reference,
+              status,
+              claim_reference,
+              claimed_at,
+              created_at
+            FROM mai_referral_reward_events
+            `,
+            [snapshotKey]
+          );
+
+          /*
+           * Official launch reset:
+           * - main in-game balance -> 0
+           * - referral relationships/progress -> fresh
+           * - referral reward buckets -> archived
+           *
+           * HARD PROTECTED:
+           * wallet/security/bans/audit/withdrawals/tx hashes/
+           * blockchain assets are not touched.
+           *
+           * locked_balance is intentionally NOT reset here.
+           * A non-zero lock belongs to the protected withdrawal
+           * accounting domain and must never be erased by launch.
+           */
+          await client.query(
+            `
+            UPDATE users
+            SET
+              balance=0,
+              referred_by=NULL,
+              referral_assigned_at=NULL,
+              referral_qualified=FALSE,
+              updated_at=NOW()
+            `
+          );
+
+          await client.query(
+            `
+            UPDATE mai_referral_reward_events
+            SET status='archived_prelaunch'
+            WHERE status='available'
+            `
+          );
+
+          const officialLaunchAt =
+            new Date().toISOString();
+
+          await client.query(
+            `
+            INSERT INTO mai_system_state(
+              key,
+              value,
+              updated_at
+            )
+            VALUES(
+              'official_launch',
+              $1,
+              NOW()
+            )
+            ON CONFLICT(key)
+            DO UPDATE SET
+              value=EXCLUDED.value,
+              updated_at=NOW()
+            `,
+            [
+              JSON.stringify({
+                launched:true,
+                officialLaunchAt,
+                snapshotKey,
+                executedBy:adminActor(req)
+              })
+            ]
+          );
+
+          await client.query('COMMIT');
+
+          await logSecurity(
+            req,
+            'official_launch_executed',
+            'warn',
+            {
+              snapshotKey,
+              officialLaunchAt,
+              users:summary.users
+            }
+          );
+
+          res.json({
+            success:true,
+            launched:true,
+            officialLaunchAt,
+            snapshotKey,
+            summary
+          });
+        } catch (error) {
+          try { await client.query('ROLLBACK'); } catch {}
+          next(error);
+        } finally {
+          client.release();
+        }
+      }
+    );
+
+    /* -------------------------
+       V5 HEALTH / CAPABILITIES
+       ------------------------- */
+
+    app.get(
+      '/admin/modules/status',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+
+          res.json({
+            success:true,
+            modules:{
+              tasksMissions:true,
+              giveaway:true,
+              broadcast:true,
+              referrals:true,
+              launchControl:true,
+              autoPayout:
+                Boolean(MAI_PAYOUT_ENABLED)
+            },
+            payout:{
+              auto:
+                Boolean(MAI_PAYOUT_ENABLED),
+              manualMarkPaidRecommended:false
+            }
+          });
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+
+
     /* =========================================================
        NOT FOUND
        Keep this below every route.
@@ -17811,6 +20388,9 @@ app.post(
               // Start only after DB initialization and HTTP server startup.
               // The worker itself fails closed if its signer configuration is invalid.
               startMaiPayoutWorker();
+
+              // Scheduled broadcasts are processed only after DB/server startup.
+              startMaiBroadcastScheduler();
 
             }
 

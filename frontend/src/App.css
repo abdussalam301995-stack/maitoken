@@ -11418,3 +11418,528 @@ body.maiAdminOpen .adminPanel.adminV4 {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* =========================================================
+   MAI V5 — GIVEAWAY + BROADCAST MINI APP INTEGRATION
+   Additive only: preserves the existing desktop/admin styles.
+   ========================================================= */
+
+/* ---------- Home giveaway launcher ---------- */
+
+.homeGiveawayGift {
+  position: absolute;
+  z-index: 8;
+  top: 50%;
+  right: 18px;
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 213, 86, 0.38);
+  border-radius: 16px;
+  padding: 0;
+  background:
+    radial-gradient(
+      circle at 32% 24%,
+      rgba(255, 246, 178, 0.28),
+      transparent 36%
+    ),
+    linear-gradient(
+      145deg,
+      rgba(255, 202, 57, 0.2),
+      rgba(117, 76, 255, 0.17)
+    );
+  color: #ffe99b;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.11),
+    0 10px 28px rgba(0, 0, 0, 0.25),
+    0 0 24px rgba(255, 198, 50, 0.1);
+  cursor: pointer;
+  transform: translateY(-50%);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.homeGiveawayGift svg {
+  width: 23px;
+  height: 23px;
+}
+
+.homeGiveawayGift:active {
+  transform:
+    translateY(-50%)
+    scale(0.95);
+}
+
+.homeGiveawayDot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid #10172b;
+  border-radius: 50%;
+  background: #ff4e67;
+  box-shadow:
+    0 0 12px rgba(255, 78, 103, 0.7);
+}
+
+
+/* ---------- Giveaway hub ---------- */
+
+.giveawayHub {
+  width: 100%;
+  display: grid;
+  gap: 14px;
+  padding:
+    4px
+    0
+    calc(
+      26px +
+      env(safe-area-inset-bottom, 0px)
+    );
+  box-sizing: border-box;
+}
+
+.giveawayHubHead {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(98, 205, 255, 0.17);
+  border-radius: 22px;
+  padding: 19px 18px;
+  background:
+    radial-gradient(
+      circle at 90% 0%,
+      rgba(116, 89, 255, 0.2),
+      transparent 42%
+    ),
+    radial-gradient(
+      circle at 0% 100%,
+      rgba(34, 205, 255, 0.12),
+      transparent 38%
+    ),
+    linear-gradient(
+      145deg,
+      rgba(13, 25, 50, 0.96),
+      rgba(7, 12, 28, 0.98)
+    );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 15px 36px rgba(0, 0, 0, 0.18);
+}
+
+.giveawayHubHead > span {
+  display: block;
+  color: #75dcff;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.13em;
+}
+
+.giveawayHubHead h1 {
+  margin: 6px 0 0;
+  color: #f7fbff;
+  font-size: 25px;
+  line-height: 1.15;
+}
+
+.giveawayHubHead p {
+  max-width: 500px;
+  margin: 8px 0 0;
+  color: rgba(218, 229, 255, 0.6);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.giveawayCampaignCard {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(95, 204, 255, 0.17);
+  border-radius: 21px;
+  background:
+    linear-gradient(
+      145deg,
+      rgba(12, 23, 45, 0.97),
+      rgba(7, 13, 28, 0.98)
+    );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 14px 32px rgba(0, 0, 0, 0.18);
+}
+
+.giveawayCampaignCard.featured {
+  border-color: rgba(255, 210, 82, 0.3);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 16px 38px rgba(0, 0, 0, 0.22),
+    0 0 28px rgba(255, 195, 50, 0.06);
+}
+
+.giveawayCampaignImage {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1200 / 628;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.giveawayCampaignBody {
+  padding: 15px;
+}
+
+.giveawayCampaignTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+}
+
+.giveawayCampaignTop > span {
+  color: #7edfff;
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: 0.09em;
+}
+
+.giveawayCampaignCard.featured
+.giveawayCampaignTop > span {
+  color: #ffe28b;
+}
+
+.giveawayCampaignTop em {
+  max-width: 50%;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 4px 7px;
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(218, 228, 255, 0.56);
+  font-size: 7px;
+  font-style: normal;
+  font-weight: 850;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.giveawayCampaignBody h2 {
+  margin: 9px 0 0;
+  color: #f7fbff;
+  font-size: 20px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.giveawayCampaignBody > p {
+  margin: 7px 0 0;
+  color: rgba(216, 228, 255, 0.59);
+  font-size: 10px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.giveawayCampaignStats {
+  display: grid;
+  grid-template-columns:
+    repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin: 13px 0;
+}
+
+.giveawayCampaignStats > div {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 12px;
+  padding: 9px 7px;
+  background: rgba(255, 255, 255, 0.025);
+  text-align: center;
+}
+
+.giveawayCampaignStats span {
+  display: block;
+  color: rgba(205, 219, 249, 0.47);
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.giveawayCampaignStats b {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: #edf7ff;
+  font-size: 10px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+}
+
+.giveawayCampaignBody .goldBtn.full {
+  width: 100%;
+  min-height: 42px;
+  margin: 0;
+}
+
+.giveawayCampaignBody .goldBtn.full:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.giveawayActiveTitle {
+  margin:
+    3px
+    2px
+    -3px;
+  color: rgba(220, 231, 255, 0.66);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+
+/* ---------- Important / Critical broadcast modal ---------- */
+
+.announcementOverlay {
+  position: fixed;
+  z-index: 12000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding:
+    max(
+      18px,
+      env(safe-area-inset-top, 0px)
+    )
+    16px
+    max(
+      18px,
+      env(safe-area-inset-bottom, 0px)
+    );
+  background: rgba(1, 5, 14, 0.76);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  overscroll-behavior: contain;
+  box-sizing: border-box;
+}
+
+.announcementModal {
+  width: min(100%, 430px);
+  max-height: min(78dvh, 650px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid rgba(104, 211, 255, 0.24);
+  border-radius: 22px;
+  padding: 16px;
+  background:
+    radial-gradient(
+      circle at 90% 0%,
+      rgba(101, 82, 255, 0.18),
+      transparent 42%
+    ),
+    linear-gradient(
+      145deg,
+      rgba(12, 23, 46, 0.985),
+      rgba(6, 11, 25, 0.99)
+    );
+  box-shadow:
+    0 30px 90px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-sizing: border-box;
+  -webkit-overflow-scrolling: touch;
+}
+
+.announcementModal > img {
+  display: block;
+  width: 100%;
+  max-height: 240px;
+  margin-bottom: 13px;
+  border-radius: 15px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.announcementModal > span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 23px;
+  border: 1px solid rgba(255, 199, 76, 0.25);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: rgba(191, 125, 26, 0.1);
+  color: #ffdd91;
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: 0.075em;
+}
+
+.announcementModal h3 {
+  margin: 10px 0 0;
+  color: #f7fbff;
+  font-size: 21px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.announcementModal > p {
+  margin: 8px 0 0;
+  color: rgba(220, 230, 255, 0.66);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.announcementActions {
+  display: grid;
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 16px;
+}
+
+.announcementActions > button {
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #e7efff;
+  font-size: 10px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.announcementActions > .goldBtn {
+  border-color: rgba(255, 208, 78, 0.32);
+  background:
+    linear-gradient(
+      135deg,
+      rgba(255, 198, 48, 0.22),
+      rgba(118, 81, 255, 0.17)
+    );
+  color: #fff1b5;
+}
+
+
+/* =========================================================
+   TELEGRAM MOBILE — additive only
+   Existing Android safe-area rules remain authoritative.
+   ========================================================= */
+
+@media (max-width: 600px) {
+  .homeGiveawayGift {
+    right: 12px;
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+  }
+
+  .homeGiveawayGift svg {
+    width: 21px;
+    height: 21px;
+  }
+
+  .giveawayHub {
+    gap: 11px;
+  }
+
+  .giveawayHubHead {
+    border-radius: 18px;
+    padding: 16px 14px;
+  }
+
+  .giveawayHubHead h1 {
+    font-size: 22px;
+  }
+
+  .giveawayCampaignCard {
+    border-radius: 18px;
+  }
+
+  .giveawayCampaignBody {
+    padding: 13px;
+  }
+
+  .giveawayCampaignBody h2 {
+    font-size: 18px;
+  }
+
+  .announcementOverlay {
+    align-items: end;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .announcementModal {
+    width: 100%;
+    max-height: min(82dvh, 650px);
+    border-radius: 21px 21px 16px 16px;
+    padding: 14px;
+  }
+}
+
+@media (max-width: 390px) {
+  .homeGiveawayGift {
+    right: 9px;
+    width: 41px;
+    height: 41px;
+    border-radius: 13px;
+  }
+
+  .giveawayCampaignStats {
+    gap: 5px;
+  }
+
+  .giveawayCampaignStats > div {
+    padding:
+      8px
+      5px;
+  }
+
+  .giveawayCampaignStats span {
+    font-size: 6.5px;
+  }
+
+  .giveawayCampaignStats b {
+    font-size: 9px;
+  }
+
+  .announcementModal h3 {
+    font-size: 19px;
+  }
+
+  .announcementActions {
+    gap: 7px;
+  }
+}
+
+@media (max-width: 350px) {
+  .giveawayCampaignStats {
+    grid-template-columns: 1fr;
+  }
+
+  .giveawayCampaignStats > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    text-align: left;
+  }
+
+  .giveawayCampaignStats b {
+    margin-top: 0;
+    text-align: right;
+  }
+
+  .announcementActions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .homeGiveawayGift {
+    transition: none;
+  }
+}

@@ -3,14 +3,47 @@ import './Tasks.css';
 
 const API_URL = (process.env.REACT_APP_API_URL || 'https://maitoken.onrender.com').replace(/\/$/, '');
 
+function taskDeviceId() {
+  try {
+    const key = 'mai_device_id';
+    let value = localStorage.getItem(key);
+
+    if (!value) {
+      value =
+        window.crypto?.randomUUID?.() ||
+        `mai-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      localStorage.setItem(key, value);
+    }
+
+    return value;
+  } catch {
+    return '';
+  }
+}
+
 async function api(path, { method = 'GET', body, initData } = {}) {
   const headers = { 'Content-Type': 'application/json' };
-  if (initData) headers['X-Telegram-Init-Data'] = initData;
+
+  const telegramInitData =
+    initData ||
+    window.Telegram?.WebApp?.initData ||
+    '';
+
+  if (telegramInitData) {
+    headers['X-Telegram-Init-Data'] = telegramInitData;
+  } else if (process.env.REACT_APP_DEV_USER_ID) {
+    headers['X-Dev-User'] = process.env.REACT_APP_DEV_USER_ID;
+  }
+
+  const device = taskDeviceId();
+  if (device) headers['X-MAI-Device-ID'] = device;
+
   const res = await fetch(`${API_URL}${path}`, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined
   });
+
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || 'Request failed');
   return data;
@@ -33,16 +66,22 @@ export default function Tasks({ initData, onUserUpdate }) {
   const [adSession, setAdSession] = useState(null);
   const [adSeconds, setAdSeconds] = useState(0);
   const [adOpened, setAdOpened] = useState(false);
+  const [adUrl, setAdUrl] = useState('');
   const [adCount, setAdCount] = useState(0);
   const [payMethod, setPayMethod] = useState('MAI');
   const [category, setCategory] = useState('Channel');
   const [selectedTier, setSelectedTier] = useState(null);
   const [targetUrl, setTargetUrl] = useState('');
+  const [managedTasks, setManagedTasks] = useState([]);
+  const [missions, setMissions] = useState([]);
+  const [managedLoading, setManagedLoading] = useState(false);
 
   const loadTasks = async () => {
     try {
       const data = await api('/api/tasks', { initData });
-      setTasks(data.tasks || []);
+      const overview = data.tasks || {};
+      setTasks(Array.isArray(overview) ? overview : (overview.joins || []));
+      setAdCount(Number(overview?.ads?.completed || 0));
     } catch (e) { setMessage(e.message); }
   };
 
@@ -59,7 +98,10 @@ export default function Tasks({ initData, onUserUpdate }) {
     try {
       const data = await api('/api/ads/start', { method: 'POST', initData });
       setAdSession(data.sessionId);
-      setAdSeconds(data.watchSeconds);
+      setAdUrl(String(data.url || ''));
+      // Countdown is UI guidance only. The backend/provider completion status
+      // remains authoritative for whether the reward can be claimed.
+      setAdSeconds(10);
       setAdOpened(false);
     } catch (e) { setMessage(e.message); }
   };
@@ -67,22 +109,30 @@ export default function Tasks({ initData, onUserUpdate }) {
   const openAd = async () => {
     if (!adSession) return;
     try {
-      window.open('https://t.me/MAICommunityChat', '_blank');
-      await api('/api/ads/open', { method: 'POST', initData, body: { sessionId: adSession } });
+      if (!adUrl) throw new Error('Ad provider URL is not available.');
+      const webApp = window.Telegram?.WebApp;
+      if (webApp?.openLink) webApp.openLink(adUrl);
+      else window.open(adUrl, '_blank', 'noopener,noreferrer');
       setAdOpened(true);
     } catch (e) { setMessage(e.message); }
   };
 
   const claimAd = async () => {
-    if (adSeconds > 0 || !adOpened) return;
+    if (adSeconds > 0 || !adOpened || !adSession) return;
     setBusy('ad');
     try {
-      const data = await api('/api/ads/claim', { method: 'POST', initData, body: { sessionId: adSession } });
+      const status = await api(`/api/ads/status/${adSession}`, { initData });
+      if (String(status.status || '').toLowerCase() !== 'completed') {
+        throw new Error('The ad provider has not verified completion yet. Please finish the ad and try again.');
+      }
+      const data = await api(`/api/ads/claim/${adSession}`, { method: 'POST', initData });
       onUserUpdate?.(data.user);
       setAdCount(c => c + 1);
       setAdSession(null);
+      setAdUrl('');
       setAdOpened(false);
-      setMessage(`+${data.reward.toFixed(4)} MAI received.`);
+      setMessage(`+${Number(data.reward || 0).toFixed(4)} MAI received.`);
+      await loadTasks();
     } catch (e) { setMessage(e.message); }
     finally { setBusy(''); }
   };
@@ -92,15 +142,25 @@ export default function Tasks({ initData, onUserUpdate }) {
     setBusy(task.key);
     setMessage('');
     try {
-      const webApp = window.Telegram?.WebApp;
-      if (webApp?.openTelegramLink) webApp.openTelegramLink(task.link);
-      else window.open(task.link, '_blank');
+      const state = String(task.state || (task.completed ? 'claimed' : 'join')).toLowerCase();
 
-      const data = await api(`/api/tasks/${task.key}/verify`, { method: 'POST', initData });
-      if (!data.verified) throw new Error(data.message || 'Please join the task and try again.');
-      onUserUpdate?.(data.user);
-      setTasks(prev => prev.map(t => t.key === task.key ? { ...t, completed: true } : t));
-      setMessage(`+${data.reward.toFixed(4)} MAI received.`);
+      if (state === 'join') {
+        await api(`/api/tasks/join/${task.key}`, { method: 'POST', initData });
+        const webApp = window.Telegram?.WebApp;
+        if (webApp?.openTelegramLink) webApp.openTelegramLink(task.link);
+        else window.open(task.link, '_blank', 'noopener,noreferrer');
+        setMessage('Task opened. Join it, then tap CHECK.');
+      } else if (state === 'check') {
+        const data = await api(`/api/tasks/check/${task.key}`, { method: 'POST', initData });
+        if (data.verified === false) throw new Error(data.message || 'Task is not verified yet.');
+        setMessage(data.message || 'Verified. Reward is ready to claim.');
+      } else if (state === 'claim') {
+        const data = await api(`/api/tasks/claim/${task.key}`, { method: 'POST', initData });
+        onUserUpdate?.(data.user);
+        setMessage(`+${Number(data.reward || task.reward || 0).toFixed(4)} MAI received.`);
+      }
+
+      await loadTasks();
     } catch (e) { setMessage(e.message); }
     finally { setBusy(''); }
   };
@@ -127,10 +187,147 @@ export default function Tasks({ initData, onUserUpdate }) {
     finally { setBusy(''); }
   };
 
+  const loadManagedTasks = async () => {
+    setManagedLoading(true);
+    try {
+      const data = await api('/api/managed-tasks', { initData });
+      setManagedTasks((data.tasks || []).map(task => ({
+        ...task,
+        user_state: task.state,
+        target_url: task.link,
+        task_type: task.type
+      })));
+    } catch (e) {
+      setMessage(e.message);
+    } finally {
+      setManagedLoading(false);
+    }
+  };
+
+  const loadMissions = async () => {
+    setManagedLoading(true);
+    try {
+      const data = await api('/api/missions', { initData });
+      setMissions((data.missions || []).map(mission => ({
+        ...mission,
+        completed_tasks: mission.progress,
+        total_tasks: mission.total,
+        claimed: mission.bonusClaimed,
+        completion_bonus: mission.completionBonus
+      })));
+    } catch (e) {
+      setMessage(e.message);
+    } finally {
+      setManagedLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === 'Tasks') loadManagedTasks();
+    if (tab === 'Missions') loadMissions();
+  }, [tab]);
+
+  const managedTaskAction = async task => {
+    if (busy) return;
+
+    const state = String(task.user_state || 'go').toLowerCase();
+
+    if (state === 'claimed') return;
+
+    setBusy(`managed-${task.id}`);
+    setMessage('');
+
+    try {
+      if (
+        state !== 'claim' &&
+        task.target_url
+      ) {
+        const webApp = window.Telegram?.WebApp;
+
+        if (
+          task.task_type === 'telegram_join' &&
+          webApp?.openTelegramLink
+        ) {
+          webApp.openTelegramLink(task.target_url);
+        } else if (webApp?.openLink) {
+          webApp.openLink(task.target_url);
+        } else {
+          window.open(
+            task.target_url,
+            '_blank',
+            'noopener,noreferrer'
+          );
+        }
+      }
+
+      const endpoint =
+        state === 'claim'
+          ? `/api/managed-tasks/${task.id}/claim`
+          : `/api/managed-tasks/${task.id}/verify`;
+
+      const data = await api(endpoint, {
+        method: 'POST',
+        initData
+      });
+
+      if (data.user) {
+        onUserUpdate?.(data.user);
+      }
+
+      setMessage(
+        data.message ||
+        (
+          state === 'claim'
+            ? `+${Number(data.reward || task.reward || 0).toFixed(4)} MAI received.`
+            : 'Task verified. Claim your reward.'
+        )
+      );
+
+      await loadManagedTasks();
+    } catch (e) {
+      setMessage(e.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const claimMission = async mission => {
+    if (busy) return;
+
+    setBusy(`mission-${mission.id}`);
+    setMessage('');
+
+    try {
+      const data = await api(
+        `/api/missions/${mission.id}/claim`,
+        {
+          method: 'POST',
+          initData
+        }
+      );
+
+      if (data.user) {
+        onUserUpdate?.(data.user);
+      }
+
+      setMessage(
+        data.message ||
+        `+${Number(data.reward || mission.completion_bonus || 0).toFixed(4)} MAI mission bonus received.`
+      );
+
+      await loadMissions();
+    } catch (e) {
+      setMessage(e.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+
   return (
     <section className="tasks-page">
       <div className="task-tabs">
-        {['Daily', 'Partner', 'Exclusive'].map(t => (
+        {['Daily', 'Tasks', 'Missions', 'Promote'].map(t => (
           <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>
         ))}
       </div>
@@ -157,7 +354,15 @@ export default function Tasks({ initData, onUserUpdate }) {
               <div className="task-icon">✦</div>
               <div className="task-info"><b>{task.title}</b><span>Reward +{task.reward} MAI</span></div>
               <button className={`task-btn ${task.completed ? 'done' : ''}`} onClick={() => verifyTask(task)} disabled={task.completed || busy === task.key}>
-                {task.completed ? 'CLAIMED ✓' : busy === task.key ? 'VERIFY…' : 'JOIN'}
+                {task.completed
+                  ? 'CLAIMED ✓'
+                  : busy === task.key
+                    ? 'WORKING…'
+                    : String(task.state || 'join').toLowerCase() === 'claim'
+                      ? 'CLAIM'
+                      : String(task.state || 'join').toLowerCase() === 'check'
+                        ? 'CHECK'
+                        : 'JOIN'}
               </button>
             </div>
           ))}
@@ -178,7 +383,7 @@ export default function Tasks({ initData, onUserUpdate }) {
         </>
       )}
 
-      {tab === 'Partner' && (
+      {tab === 'Promote' && (
         <div className="partner-box">
           <div className="task-hero"><span>MARKETING MARKETPLACE</span><h2>Promote</h2><p>Submit a campaign for review.</p></div>
 
@@ -218,12 +423,179 @@ export default function Tasks({ initData, onUserUpdate }) {
         </div>
       )}
 
-      {tab === 'Exclusive' && (
-        <div className="exclusive-box">
-          <div className="exclusive-glow">✦</div>
-          <h2>Exclusive</h2>
-          <p>Exclusive missions can be enabled later without changing the security architecture.</p>
-          <span>COMING SOON</span>
+      {tab === 'Tasks' && (
+        <div className="managed-task-area">
+          <div className="task-hero">
+            <span>MAI TASK CENTER</span>
+            <h2>Tasks</h2>
+            <p>Complete verified tasks and claim server-controlled rewards.</p>
+          </div>
+
+          {managedLoading && (
+            <div className="task-empty-card">
+              Loading tasks...
+            </div>
+          )}
+
+          {!managedLoading && managedTasks.map(task => {
+            const state =
+              String(task.user_state || 'go').toLowerCase();
+
+            const label =
+              state === 'claimed'
+                ? 'COMPLETED ✓'
+                : state === 'claim'
+                  ? 'CLAIM'
+                  : busy === `managed-${task.id}`
+                    ? 'CHECKING…'
+                    : 'GO / VERIFY';
+
+            return (
+              <div
+                className="task-card managed-task-card"
+                key={task.id}
+              >
+                <div className="task-icon">
+                  {task.icon || '✓'}
+                </div>
+
+                <div className="task-info">
+                  <b>{task.title}</b>
+                  <span>
+                    Reward +{Number(task.reward || 0).toLocaleString()} MAI
+                    {' · '}
+                    {task.recurrence || 'once'}
+                  </span>
+                  {task.description && (
+                    <small>{task.description}</small>
+                  )}
+                </div>
+
+                <button
+                  className={`task-btn ${state === 'claimed' ? 'done' : ''}`}
+                  disabled={
+                    state === 'claimed' ||
+                    busy === `managed-${task.id}`
+                  }
+                  onClick={() => managedTaskAction(task)}
+                >
+                  {label}
+                </button>
+              </div>
+            );
+          })}
+
+          {!managedLoading && !managedTasks.length && (
+            <div className="task-empty-card">
+              No active tasks right now.
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'Missions' && (
+        <div className="managed-mission-area">
+          <div className="task-hero">
+            <span>MAI MISSION CENTER</span>
+            <h2>Missions</h2>
+            <p>Finish every required task to unlock the completion bonus.</p>
+          </div>
+
+          {managedLoading && (
+            <div className="task-empty-card">
+              Loading missions...
+            </div>
+          )}
+
+          {!managedLoading && missions.map(mission => {
+            const done =
+              Number(mission.completed_tasks || 0);
+            const total =
+              Number(mission.total_tasks || 0);
+            const claimed =
+              Boolean(mission.claimed);
+            const ready =
+              total > 0 &&
+              done >= total &&
+              !claimed;
+            const progress =
+              total > 0
+                ? Math.min(100, (done / total) * 100)
+                : 0;
+
+            return (
+              <article
+                className={`managed-mission-card ${mission.featured ? 'featured' : ''}`}
+                key={mission.id}
+              >
+                <div className="managed-mission-head">
+                  <div className="task-icon">
+                    {mission.icon || '◆'}
+                  </div>
+                  <div>
+                    <b>{mission.title}</b>
+                    {mission.featured && (
+                      <span className="mission-featured">
+                        FEATURED
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {mission.description && (
+                  <p>{mission.description}</p>
+                )}
+
+                <div className="mission-progress-row">
+                  <span>Progress</span>
+                  <b>{done}/{total}</b>
+                </div>
+
+                <div className="mission-progress-track">
+                  <i
+                    style={{
+                      width: `${progress}%`
+                    }}
+                  />
+                </div>
+
+                <div className="mission-bottom">
+                  <span>
+                    Completion Bonus
+                    <b>
+                      +{Number(
+                        mission.completion_bonus || 0
+                      ).toLocaleString()} MAI
+                    </b>
+                  </span>
+
+                  <button
+                    className="gold-btn"
+                    disabled={
+                      claimed ||
+                      !ready ||
+                      busy === `mission-${mission.id}`
+                    }
+                    onClick={() => claimMission(mission)}
+                  >
+                    {claimed
+                      ? 'COMPLETED ✓'
+                      : busy === `mission-${mission.id}`
+                        ? 'CLAIMING…'
+                        : ready
+                          ? 'CLAIM BONUS'
+                          : 'IN PROGRESS'}
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+
+          {!managedLoading && !missions.length && (
+            <div className="task-empty-card">
+              No active missions right now.
+            </div>
+          )}
         </div>
       )}
     </section>

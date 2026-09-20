@@ -64,7 +64,7 @@
       ['settings', '⚙', 'System Settings']
     ];
 
-    const LOCKED_NAV = [
+    const MODULE_NAV = [
       ['tasks', '✓', 'Tasks & Missions'],
       ['giveaway', '🎁', 'Giveaway'],
       ['broadcast', '📣', 'Broadcast Message'],
@@ -138,6 +138,19 @@
       const [notice, setNotice] = useState('');
       const [menuOpen, setMenuOpen] = useState(false);
 
+      // MAI V5 server modules
+      const [managedTasks, setManagedTasks] = useState([]);
+      const [managedMissions, setManagedMissions] = useState([]);
+      const [giveaways, setGiveaways] = useState([]);
+      const [giveawayWinners, setGiveawayWinners] = useState([]);
+      const [broadcasts, setBroadcasts] = useState([]);
+      const [referralAdmin, setReferralAdmin] = useState(null);
+      const [launchControl, setLaunchControl] = useState(null);
+      const [moduleStatus, setModuleStatus] = useState(null);
+      const [taskMode, setTaskMode] = useState('tasks');
+      const [giveawayMode, setGiveawayMode] = useState('campaigns');
+      const [broadcastMode, setBroadcastMode] = useState('create');
+
       const loadAll = useCallback(async (silent = false) => {
         if (!silent) setLoading(true);
         setError('');
@@ -148,7 +161,15 @@
           ['withdrawals', adminApi('/admin/withdrawals')],
           ['campaigns', adminApi('/admin/campaigns')],
           ['audit', adminApi('/admin/audit-logs?limit=150')],
-          ['security', adminApi('/admin/security/config')]
+          ['security', adminApi('/admin/security/config')],
+          ['managedTasks', adminApi('/admin/tasks')],
+          ['managedMissions', adminApi('/admin/missions')],
+          ['giveaways', adminApi('/admin/giveaways')],
+          ['giveawayWinners', adminApi('/admin/giveaway-winners')],
+          ['broadcasts', adminApi('/admin/broadcasts')],
+          ['referrals', adminApi('/admin/referrals')],
+          ['launch', adminApi('/admin/launch-control')],
+          ['moduleStatus', adminApi('/admin/modules/status')]
         ];
 
         try {
@@ -164,6 +185,14 @@
             if (key === 'campaigns') setCampaigns(data.items || []);
             if (key === 'audit') setAudit(data.items || []);
             if (key === 'security') setSecurityConfig(data.config || {});
+            if (key === 'managedTasks') setManagedTasks(data.items || []);
+            if (key === 'managedMissions') setManagedMissions(data.items || []);
+            if (key === 'giveaways') setGiveaways(data.items || []);
+            if (key === 'giveawayWinners') setGiveawayWinners(data.items || []);
+            if (key === 'broadcasts') setBroadcasts(data.items || []);
+            if (key === 'referrals') setReferralAdmin(data || null);
+            if (key === 'launch') setLaunchControl(data || null);
+            if (key === 'moduleStatus') setModuleStatus(data || null);
           });
           if (failed.length) setError(`Some admin data could not be loaded — ${failed.join(' | ')}`);
         } finally {
@@ -720,7 +749,15 @@
       );
 
       const renderWithdrawals = () => (
-        <div className="adminList">
+        <>
+          {moduleStatus?.payout?.auto && (
+            <section className="adminSection">
+              <p className="adminFootnote">
+                Auto payout is enabled. After Admin approval, the server-side payout worker broadcasts and confirms the transfer. Manual “Mark Paid” is intentionally not available for auto-payout rows.
+              </p>
+            </section>
+          )}
+          <div className="adminList">
           {withdrawals.map(item => (
             <article className="adminListCard" key={item.id}>
               <div className="adminListTop">
@@ -774,30 +811,11 @@
                   </button>
                 </div>
               )}
-
-              {['approved', 'processing'].includes(item.status) && (
-                <div className="adminActions">
-                  <button
-                    className="good"
-                    disabled={!!busy}
-                    onClick={() => {
-                      const txHash = String(window.prompt('Paid transaction hash:', '') || '').trim();
-                      if (!txHash) return;
-                      runAction(
-                        `withdraw-complete-${item.id}`,
-                        `/admin/withdrawals/${item.id}/complete`,
-                        { txHash }
-                      );
-                    }}
-                  >
-                    Mark Paid
-                  </button>
-                </div>
-              )}
             </article>
           ))}
           {!withdrawals.length && <Empty text="No pending withdrawal work." />}
-        </div>
+          </div>
+        </>
       );
 
       const renderPayments = () => (
@@ -1004,6 +1022,269 @@
         );
       };
 
+
+      const promptValue = (label, fallback = '') =>
+        String(window.prompt(label, fallback) || '').trim();
+
+      const renderTasksMissions = () => {
+        const createTask = async () => {
+          const title = promptValue('Task title:');
+          if (!title) return;
+          const taskType = promptValue(
+            'Task type: telegram_join, telegram_bot, invite_friends, hold_mai, mining_mission, daily_mission, visit_link, custom',
+            'telegram_join'
+          );
+          const reward = Number(promptValue('Reward MAI:', '0'));
+          const targetUrl = promptValue('Target URL (optional):');
+          const telegramChatId = promptValue('Telegram chat ID / @username (optional):');
+          await runAction('create-task','/admin/tasks',{
+            title,
+            taskType,
+            reward: Number.isFinite(reward) ? reward : 0,
+            targetUrl: targetUrl || null,
+            telegramChatId: telegramChatId || null,
+            recurrence: taskType === 'daily_mission' ? 'daily' : 'once',
+            status: 'draft'
+          });
+        };
+
+        const createMission = async () => {
+          const title = promptValue('Mission title:');
+          if (!title) return;
+          const ids = promptValue(
+            'Task IDs separated by commas:',
+            managedTasks.map(x => x.id).slice(0,3).join(',')
+          ).split(',').map(x => x.trim()).filter(Boolean);
+          const completionBonus = Number(promptValue('Completion bonus MAI:', '0'));
+          await runAction('create-mission','/admin/missions',{
+            title,
+            taskIds: ids,
+            completionBonus: Number.isFinite(completionBonus) ? completionBonus : 0,
+            status: 'draft'
+          });
+        };
+
+        return (
+          <>
+            <section className="adminSection">
+              <div className="adminSectionHead">
+                <div><span>TASK ENGINE</span><h3>Tasks & Missions</h3></div>
+                <div className="adminActions">
+                  <button onClick={createTask} disabled={!!busy}>Create Task</button>
+                  <button onClick={createMission} disabled={!!busy}>Create Mission</button>
+                </div>
+              </div>
+              <div className="adminMiniStats">
+                <div><span>Tasks</span><b>{managedTasks.length}</b></div>
+                <div><span>Active Tasks</span><b>{managedTasks.filter(x=>x.status==='active').length}</b></div>
+                <div><span>Missions</span><b>{managedMissions.length}</b></div>
+              </div>
+              <div className="adminActions">
+                <button className={taskMode==='tasks'?'good':''} onClick={()=>setTaskMode('tasks')}>Active Tasks</button>
+                <button className={taskMode==='missions'?'good':''} onClick={()=>setTaskMode('missions')}>Missions</button>
+                <button className={taskMode==='history'?'good':''} onClick={()=>setTaskMode('history')}>History</button>
+              </div>
+            </section>
+
+            {taskMode === 'tasks' && (
+              <div className="adminList">
+                {managedTasks.map(item => (
+                  <article className="adminListCard" key={item.id}>
+                    <div className="adminListTop">
+                      <div className="adminBadgeIcon">{item.icon || '✓'}</div>
+                      <div className="adminGrow"><b>{item.title}</b><span>#{item.id} · {item.task_type}</span></div>
+                      <Status>{item.status}</Status>
+                    </div>
+                    <div className="adminDataGrid">
+                      <div><span>Reward</span><b>{fmt(item.reward)} MAI</b></div>
+                      <div><span>Completed</span><b>{fmt(item.completion_count)}</b></div>
+                      <div><span>Recurrence</span><b>{item.recurrence || 'once'}</b></div>
+                      <div><span>Created</span><b>{when(item.created_at)}</b></div>
+                    </div>
+                    <div className="adminActions">
+                      {item.status !== 'active' && <button className="good" onClick={()=>runAction(`task-active-${item.id}`,`/admin/tasks/${item.id}/status`,{status:'active'})}>Activate</button>}
+                      {item.status === 'active' && <button className="warn" onClick={()=>runAction(`task-pause-${item.id}`,`/admin/tasks/${item.id}/status`,{status:'paused'})}>Pause</button>}
+                      {item.status !== 'ended' && <button className="danger" onClick={()=>runAction(`task-end-${item.id}`,`/admin/tasks/${item.id}/status`,{status:'ended'})}>End</button>}
+                    </div>
+                  </article>
+                ))}
+                {!managedTasks.length && <Empty text="No managed tasks yet." />}
+              </div>
+            )}
+
+            {taskMode === 'missions' && (
+              <div className="adminList">
+                {managedMissions.map(item => (
+                  <article className="adminListCard" key={item.id}>
+                    <div className="adminListTop">
+                      <div className="adminBadgeIcon">{item.icon || '◆'}</div>
+                      <div className="adminGrow"><b>{item.title}</b><span>#{item.id} · {(item.tasks || []).length} tasks</span></div>
+                      <Status>{item.status}</Status>
+                    </div>
+                    <div className="adminDataGrid">
+                      <div><span>Bonus</span><b>{fmt(item.completion_bonus)} MAI</b></div>
+                      <div><span>Featured</span><b>{item.featured ? 'YES' : 'NO'}</b></div>
+                      <div><span>Starts</span><b>{when(item.starts_at)}</b></div>
+                      <div><span>Ends</span><b>{when(item.ends_at)}</b></div>
+                    </div>
+                    <div className="adminActions">
+                      {item.status !== 'active' && <button className="good" onClick={()=>runAction(`mission-active-${item.id}`,`/admin/missions/${item.id}/status`,{status:'active'})}>Activate</button>}
+                      {item.status === 'active' && <button className="warn" onClick={()=>runAction(`mission-pause-${item.id}`,`/admin/missions/${item.id}/status`,{status:'paused'})}>Pause</button>}
+                      {item.status !== 'ended' && <button className="danger" onClick={()=>runAction(`mission-end-${item.id}`,`/admin/missions/${item.id}/status`,{status:'ended'})}>End</button>}
+                    </div>
+                  </article>
+                ))}
+                {!managedMissions.length && <Empty text="No missions yet." />}
+              </div>
+            )}
+
+            {taskMode === 'history' && (
+              <div className="adminList">
+                {[...managedTasks.filter(x=>x.status==='ended'),...managedMissions.filter(x=>x.status==='ended')].map((item,index)=>(
+                  <article className="adminListCard" key={`${item.id}-${index}`}>
+                    <div className="adminListTop"><div className="adminBadgeIcon">☷</div><div className="adminGrow"><b>{item.title}</b><span>Ended module #{item.id}</span></div><Status>ended</Status></div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </>
+        );
+      };
+
+      const renderGiveaway = () => {
+        const createGiveaway = async () => {
+          const title = promptValue('Giveaway title:');
+          if (!title) return;
+          const giveawayType = promptValue('Type: task, referral, lucky_draw, leaderboard, holding, social, quiz, purchase, custom','lucky_draw');
+          const description = promptValue('Description:');
+          const imageUrl = promptValue('Campaign image URL (optional):');
+          await runAction('create-giveaway','/admin/giveaways',{
+            title, giveawayType, description, imageUrl: imageUrl || null,
+            status:'draft', showOnHome:false, featured:false, allowMultipleEntries:false,
+            config:{}
+          });
+        };
+        return (
+          <>
+            <section className="adminSection">
+              <div className="adminSectionHead">
+                <div><span>CAMPAIGN ENGINE</span><h3>Giveaway</h3></div>
+                <button onClick={createGiveaway} disabled={!!busy}>Create Giveaway</button>
+              </div>
+              <div className="adminActions">
+                <button className={giveawayMode==='campaigns'?'good':''} onClick={()=>setGiveawayMode('campaigns')}>All Campaigns</button>
+                <button className={giveawayMode==='winners'?'good':''} onClick={()=>setGiveawayMode('winners')}>Winners</button>
+                <button className={giveawayMode==='settings'?'good':''} onClick={()=>setGiveawayMode('settings')}>Settings</button>
+              </div>
+            </section>
+            {giveawayMode==='campaigns' && <div className="adminList">
+              {giveaways.map(item=>(
+                <article className="adminListCard" key={item.id}>
+                  <div className="adminListTop"><div className="adminBadgeIcon">🎁</div><div className="adminGrow"><b>{item.title}</b><span>{item.giveaway_type} · {fmt(item.entries)} entries</span></div><Status>{item.status}</Status></div>
+                  <div className="adminDataGrid"><div><span>Home Gift</span><b>{item.show_on_home?'ON':'OFF'}</b></div><div><span>Featured</span><b>{item.featured?'YES':'NO'}</b></div><div><span>Start</span><b>{when(item.starts_at)}</b></div><div><span>End</span><b>{when(item.ends_at)}</b></div></div>
+                  <div className="adminActions">
+                    {item.status!=='live' && <button className="good" onClick={()=>runAction(`give-live-${item.id}`,`/admin/giveaways/${item.id}/status`,{status:'live'})}>Publish</button>}
+                    {item.status==='live' && <button className="warn" onClick={()=>runAction(`give-pause-${item.id}`,`/admin/giveaways/${item.id}/status`,{status:'paused'})}>Pause</button>}
+                    {!['ended','completed'].includes(item.status) && <button className="danger" onClick={()=>runAction(`give-end-${item.id}`,`/admin/giveaways/${item.id}/status`,{status:'ended'})}>End</button>}
+                    {item.status==='ended' && <button onClick={()=>{const n=Number(promptValue('Number of winners:','1')); if(n>0)runAction(`give-draw-${item.id}`,`/admin/giveaways/${item.id}/draw`,{winnerCount:n});}}>Draw Winners</button>}
+                  </div>
+                </article>
+              ))}
+              {!giveaways.length && <Empty text="No giveaway campaigns." />}
+            </div>}
+            {giveawayMode==='winners' && <div className="adminList">
+              {giveawayWinners.map(item=><article className="adminListCard" key={item.id}><div className="adminListTop"><div className="adminBadgeIcon">🏆</div><div className="adminGrow"><b>{item.giveaway_title}</b><span>UID {item.telegram_id} · @{item.username || 'unknown'}</span></div><Status>{item.payment_status}</Status></div><div className="adminDataGrid"><div><span>Prize</span><b>{fmt(item.prize)} MAI</b></div><div><span>Method</span><b>{item.selection_method}</b></div></div></article>)}
+              {!giveawayWinners.length && <Empty text="No winners selected yet." />}
+            </div>}
+            {giveawayMode==='settings' && <section className="adminSection"><p className="adminFootnote">Global giveaway visibility is controlled by published campaigns. Unsupported social/quiz/purchase/custom verification types remain draft until a real authoritative verifier exists.</p></section>}
+          </>
+        );
+      };
+
+      const renderBroadcast = () => {
+        const createBroadcast = async () => {
+          const title=promptValue('Broadcast title:'); if(!title)return;
+          const message=promptValue('Message:'); if(!message)return;
+          const destination=promptValue('Destination: mini_app, telegram, both','mini_app');
+          const audienceType=promptValue('Audience: all, active, mai_holders, specific','all');
+          let audienceConfig={};
+          if(audienceType==='specific') audienceConfig.telegramIds=promptValue('Telegram IDs separated by commas:').split(',').map(x=>x.trim()).filter(Boolean);
+          await runAction('create-broadcast','/admin/broadcasts',{title,message,destination,audienceType,audienceConfig,priority:'normal'});
+        };
+        return (
+          <>
+            <section className="adminSection">
+              <div className="adminSectionHead"><div><span>MESSAGE CENTER</span><h3>Broadcast Message</h3></div><button onClick={createBroadcast} disabled={!!busy}>Create Broadcast</button></div>
+              <div className="adminActions"><button className={broadcastMode==='create'?'good':''} onClick={()=>setBroadcastMode('create')}>Create / Drafts</button><button className={broadcastMode==='scheduled'?'good':''} onClick={()=>setBroadcastMode('scheduled')}>Scheduled</button><button className={broadcastMode==='sent'?'good':''} onClick={()=>setBroadcastMode('sent')}>Sent History</button></div>
+            </section>
+            <div className="adminList">
+              {broadcasts.filter(x=>broadcastMode==='sent'?x.status==='sent':broadcastMode==='scheduled'?x.status==='scheduled':x.status!=='sent'&&x.status!=='scheduled').map(item=>(
+                <article className="adminListCard" key={item.id}>
+                  <div className="adminListTop"><div className="adminBadgeIcon">📣</div><div className="adminGrow"><b>{item.title}</b><span>{item.destination} · {item.audience_type}</span></div><Status>{item.status}</Status></div>
+                  <p className="adminFootnote">{item.message}</p>
+                  <div className="adminDataGrid"><div><span>Targeted</span><b>{fmt(item.targeted_count)}</b></div><div><span>Delivered</span><b>{fmt(item.delivered_count)}</b></div><div><span>Failed</span><b>{fmt(item.failed_count)}</b></div><div><span>Sent</span><b>{when(item.sent_at)}</b></div></div>
+                  {item.status!=='sent' && <div className="adminActions"><button className="good" onClick={()=>{const c=promptValue('Type SEND MAI BROADCAST to confirm:'); if(c==='SEND MAI BROADCAST')runAction(`broadcast-send-${item.id}`,`/admin/broadcasts/${item.id}/send`,{confirmation:c});}}>Preview / Confirm / Send</button></div>}
+                </article>
+              ))}
+              {!broadcasts.length && <Empty text="No broadcasts yet." />}
+            </div>
+          </>
+        );
+      };
+
+      const renderInvites = () => {
+        const o=referralAdmin?.overview || {};
+        const rewardTotals=referralAdmin?.rewardTotals || [];
+        return (
+          <>
+            <section className="adminSection">
+              <div className="adminSectionHead"><div><span>REFERRAL CONTROL CENTER</span><h3>Active Invites</h3></div></div>
+              <div className="adminMiniStats">
+                <div><span>Total Invited</span><b>{fmt(o.total_invited)}</b></div>
+                <div><span>Successful</span><b>{fmt(o.successful)}</b></div>
+                <div><span>Pending</span><b>{fmt(o.pending)}</b></div>
+              </div>
+              <p className="adminFootnote">Successful invite = required activity completed + the invitee has invited at least one valid new user. Network/device overlap is a review signal only, never proof of fraud.</p>
+            </section>
+            <div className="adminList">
+              {(referralAdmin?.users || []).map(item=>(
+                <article className="adminListCard" key={item.telegram_id}>
+                  <div className="adminListTop"><div className="adminBadgeIcon">👥</div><div className="adminGrow"><b>@{item.username || 'unknown'}</b><span>UID {item.telegram_id} · invited by {item.referred_by}</span></div><Status>{item.referral_qualified?'successful':'pending'}</Status></div>
+                  <div className="adminDataGrid"><div><span>Total Invites</span><b>{fmt(item.total_invites)}</b></div><div><span>Successful</span><b>{fmt(item.successful_invites)}</b></div><div><span>Joined</span><b>{when(item.created_at)}</b></div></div>
+                </article>
+              ))}
+              {!(referralAdmin?.users || []).length && <Empty text="No referral records yet." />}
+            </div>
+            <section className="adminSection">
+              <div className="adminSectionHead"><div><span>REWARD LEDGER</span><h3>Referral Rewards</h3></div></div>
+              <div className="adminMiniStats">
+                {rewardTotals.map((x,i)=><div key={`${x.reward_type}-${x.status}-${i}`}><span>{x.reward_type} · {x.status}</span><b>{fmt(x.amount)} MAI</b></div>)}
+              </div>
+            </section>
+          </>
+        );
+      };
+
+      const renderLaunch = () => {
+        const preview=launchControl?.preview || {};
+        const state=launchControl?.state || {};
+        const execute=async()=>{
+          const c=promptValue('DANGER: Type LAUNCH MAI NETWORK exactly to archive pre-launch state and execute the one-time official reset:');
+          if(c!=='LAUNCH MAI NETWORK')return;
+          await runAction('official-launch','/admin/launch-control/execute',{confirmation:c});
+        };
+        return (
+          <>
+            <section className="adminSection">
+              <div className="adminSectionHead"><div><span>OFFICIAL LAUNCH</span><h3>Launch Control</h3></div><Status>{state.launched?'completed':'pending'}</Status></div>
+              <div className="adminMiniStats"><div><span>Users Affected</span><b>{fmt(preview.users)}</b></div><div><span>In-game MAI Reset</span><b>{fmt(preview.game_balance)} MAI</b></div><div><span>Referral Links</span><b>{fmt(preview.referral_links)}</b></div><div><span>Unclaimed Referral Rewards</span><b>{fmt(preview.unclaimedReferralRewards)} MAI</b></div></div>
+              {state.launched ? <p className="adminFootnote">MAI NETWORK — OFFICIALLY LAUNCHED · {when(state.officialLaunchAt)}. The destructive launch action is permanently disabled.</p> : <div className="adminActions"><button className="danger" disabled={!!busy} onClick={execute}>Execute Official Launch</button></div>}
+            </section>
+            <section className="adminSection"><div className="adminSectionHead"><div><span>HARD PROTECTED</span><h3>Never reset by Launch Control</h3></div></div><div className="adminRiskFlags">{(preview.hardProtected || []).map(x=><span key={x}>{x}</span>)}</div></section>
+          </>
+        );
+      };
+
       const renderCurrent = () => {
         if (tab === 'dashboard') return renderDashboard();
         if (tab === 'users') return renderUsers();
@@ -1014,11 +1295,16 @@
         if (tab === 'fraud') return renderFraudCheck();
         if (tab === 'payments') return renderPayments();
         if (tab === 'audit') return renderAudit();
+        if (tab === 'tasks') return renderTasksMissions();
+        if (tab === 'giveaway') return renderGiveaway();
+        if (tab === 'broadcast') return renderBroadcast();
+        if (tab === 'invites') return renderInvites();
+        if (tab === 'launch') return renderLaunch();
         return renderSettings();
       };
 
       const currentLabel =
-        NAV.find(([key]) => key === tab)?.[2] || 'Dashboard';
+        [...NAV, ...MODULE_NAV].find(([key]) => key === tab)?.[2] || 'Dashboard';
 
       const closeMenuAndOpen = key => {
         setTab(key);
@@ -1069,16 +1355,16 @@
                 <span>SERVER MODULES</span>
               </div>
 
-              {LOCKED_NAV.map(([key, icon, label]) => (
+              {MODULE_NAV.map(([key, icon, label]) => (
                 <button
                   key={key}
-                  className="adminLockedNav"
-                  disabled
-                  title="Backend module not enabled yet"
+                  className={tab === key ? 'active' : ''}
+                  onClick={() => closeMenuAndOpen(key)}
                 >
                   <i>{icon}</i>
                   <span>{label}</span>
-                  <small>LOCKED</small>
+                  {key === 'tasks' && managedTasks.filter(x => x.status === 'active').length > 0 && <em>{managedTasks.filter(x => x.status === 'active').length}</em>}
+                  {key === 'giveaway' && giveaways.filter(x => x.status === 'live').length > 0 && <em>{giveaways.filter(x => x.status === 'live').length}</em>}
                 </button>
               ))}
             </div>
