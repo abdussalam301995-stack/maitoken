@@ -15045,10 +15045,17 @@ await pool.query(`
             MAI_PAYOUT_WALLET
 
         });
-
+      console.log(
+     '[MAI PAYOUT] requesting seqno:',
+     withdrawal.id
+       );
       const seqno =
         await context.wallet.getSeqno();
-
+      console.log(
+         '[MAI PAYOUT] seqno received:',
+           withdrawal.id,
+           seqno
+           );
       await context.wallet.sendTransfer({
 
         seqno,
@@ -15081,7 +15088,10 @@ await pool.query(`
         ]
 
       });
-
+       console.log(
+           '[MAI PAYOUT] sendTransfer returned:',
+          withdrawal.id
+          );
       await pool.query(
         `
         UPDATE withdrawals
