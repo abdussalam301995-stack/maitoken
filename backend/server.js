@@ -14961,6 +14961,13 @@ await pool.query(`
 
         await client.query('COMMIT');
 
+        console.log(
+          '[MAI PAYOUT] claimed approved withdrawal:',
+          withdrawal.id,
+          `query_id=${queryId}`,
+          `receive=${withdrawal.receive_amount}`
+        );
+
         return {
           ...withdrawal,
           status:
@@ -15235,6 +15242,12 @@ await pool.query(`
         ]
       );
 
+      console.log(
+        '[MAI PAYOUT] marked broadcasted:',
+        withdrawal.id,
+        `query_id=${withdrawal.payout_query_id}`
+      );
+
     }
 
 
@@ -15262,6 +15275,13 @@ await pool.query(`
 
         try {
 
+          console.log(
+            '[MAI PAYOUT] reconciling:',
+            withdrawal.id,
+            `status=${withdrawal.status}`,
+            `query_id=${withdrawal.payout_query_id || 'none'}`
+          );
+
           const reconciled =
             await reconcileAutoPayout(
               withdrawal
@@ -15271,6 +15291,12 @@ await pool.query(`
             console.log(
               '[MAI PAYOUT] reconciled and completed:',
               withdrawal.id
+            );
+          } else {
+            console.log(
+              '[MAI PAYOUT] no confirmed chain transfer yet:',
+              withdrawal.id,
+              `query_id=${withdrawal.payout_query_id || 'none'}`
             );
           }
 
