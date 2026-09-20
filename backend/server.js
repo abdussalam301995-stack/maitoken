@@ -15241,11 +15241,70 @@ await pool.query(`
 
     function startMaiPayoutWorker() {
 
+      // SAFE VERIFY MODE:
+      // Validate the mnemonic-derived W5 address even while automatic
+      // payouts are disabled. This path never sends a transaction.
+      const hasPayoutVerificationConfig =
+        Boolean(
+          MAI_PAYOUT_WALLET &&
+          MAI_PAYOUT_MNEMONIC
+        );
+
       if (!MAI_PAYOUT_ENABLED) {
 
-        console.log(
-          'MAI auto payout worker: disabled'
-        );
+        if (!hasPayoutVerificationConfig) {
+
+          console.log(
+            'MAI payout signer verification: skipped (configuration incomplete)'
+          );
+
+          console.log(
+            'MAI auto payout worker: disabled'
+          );
+
+          return;
+
+        }
+
+        getMaiPayoutContext()
+          .then(context => {
+
+            console.log(
+              'MAI payout signer verified: true'
+            );
+
+            console.log(
+              'MAI payout wallet:',
+              context.walletContract.address.toString()
+            );
+
+            console.log(
+              'MAI payout jetton wallet:',
+              context.payoutJettonWallet.toString()
+            );
+
+            console.log(
+              'MAI auto payout worker: disabled'
+            );
+
+          })
+          .catch(error => {
+
+            // Fail closed: verification failure never starts the worker.
+            console.error(
+              'MAI payout signer verified: false'
+            );
+
+            console.error(
+              '[MAI PAYOUT] safe verification failed:',
+              error.message
+            );
+
+            console.log(
+              'MAI auto payout worker: disabled'
+            );
+
+          });
 
         return;
 
@@ -15254,6 +15313,10 @@ await pool.query(`
       // Validate signer/address before the interval starts.
       getMaiPayoutContext()
         .then(context => {
+
+          console.log(
+            'MAI payout signer verified: true'
+          );
 
           console.log(
             'MAI auto payout worker: enabled'
@@ -15297,6 +15360,10 @@ await pool.query(`
         .catch(error => {
 
           // Fail closed: API stays online, payout worker stays OFF.
+          console.error(
+            'MAI payout signer verified: false'
+          );
+
           console.error(
             '[MAI PAYOUT] disabled because configuration validation failed:',
             error.message
