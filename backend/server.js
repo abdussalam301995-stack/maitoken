@@ -14994,6 +14994,116 @@ await pool.query(`
     }
 
 
+    function isRetryableTonReadError(
+      error
+    ) {
+
+      const status =
+        Number(
+          error?.response?.status ||
+          error?.status ||
+          0
+        );
+
+      const message =
+        String(
+          error?.message ||
+          ''
+        ).toLowerCase();
+
+      return (
+        status === 429 ||
+        status === 502 ||
+        status === 503 ||
+        status === 504 ||
+        message.includes('status code 429') ||
+        message.includes('timeout') ||
+        message.includes('timed out') ||
+        message.includes('econnreset') ||
+        message.includes('fetch failed')
+      );
+
+    }
+
+
+    function waitMs(
+      ms
+    ) {
+
+      return new Promise(
+        resolve =>
+          setTimeout(resolve, ms)
+      );
+
+    }
+
+
+    async function getMaiPayoutSeqnoWithRetry(
+      context,
+      withdrawalId
+    ) {
+
+      const delays = [
+        0,
+        1200,
+        2500,
+        5000
+      ];
+
+      let lastError = null;
+
+      for (
+        let attempt = 0;
+        attempt < delays.length;
+        attempt += 1
+      ) {
+
+        if (delays[attempt] > 0) {
+          await waitMs(delays[attempt]);
+        }
+
+        try {
+
+          const seqno =
+            await context.wallet.getSeqno();
+
+          console.log(
+            '[MAI PAYOUT] seqno received:',
+            withdrawalId,
+            seqno,
+            `attempt=${attempt + 1}`
+          );
+
+          return seqno;
+
+        } catch (error) {
+
+          lastError = error;
+
+          if (
+            !isRetryableTonReadError(error) ||
+            attempt === delays.length - 1
+          ) {
+            throw error;
+          }
+
+          console.warn(
+            '[MAI PAYOUT] seqno read retry:',
+            withdrawalId,
+            `attempt=${attempt + 1}`,
+            error.message
+          );
+
+        }
+
+      }
+
+      throw lastError ||
+        new Error('Unable to read payout wallet seqno');
+
+    }
+
+
     async function broadcastMaiPayout(
       withdrawal
     ) {
@@ -15046,16 +15156,25 @@ await pool.query(`
 
         });
       console.log(
-     '[MAI PAYOUT] requesting seqno:',
-     withdrawal.id
-       );
+        '[MAI PAYOUT] requesting seqno:',
+        withdrawal.id
+      );
+
+      // Reading seqno is safe to retry because no signed transaction has
+      // been broadcast yet. This absorbs transient TON Center 429/timeout
+      // errors without risking a duplicate MAI transfer.
       const seqno =
-        await context.wallet.getSeqno();
+        await getMaiPayoutSeqnoWithRetry(
+          context,
+          withdrawal.id
+        );
       console.log(
-         '[MAI PAYOUT] seqno received:',
-           withdrawal.id,
-           seqno
-           );
+        '[MAI PAYOUT] broadcasting signed transfer:',
+        withdrawal.id,
+        `seqno=${seqno}`,
+        `receive=${withdrawal.receive_amount}`
+      );
+
       await context.wallet.sendTransfer({
 
         seqno,
@@ -15063,8 +15182,16 @@ await pool.query(`
         secretKey:
           context.keyPair.secretKey,
 
+        // Wallet V5 external signed messages require the +2 IGNORE_ERRORS bit.
+        // Without it, V5 can reject the external message (exit code 137).
         sendMode:
-          SendMode.PAY_GAS_SEPARATELY,
+          SendMode.PAY_GAS_SEPARATELY |
+          SendMode.IGNORE_ERRORS,
+
+        // Keep the signed request short-lived so an uncertain broadcast cannot
+        // remain valid indefinitely. TON wallet replay protection also uses seqno.
+        timeout:
+          Math.floor(Date.now() / 1000) + 300,
 
         messages: [
 
@@ -15135,11 +15262,25 @@ await pool.query(`
 
         try {
 
-          await reconcileAutoPayout(
-            withdrawal
-          );
+          const reconciled =
+            await reconcileAutoPayout(
+              withdrawal
+            );
+
+          if (reconciled) {
+            console.log(
+              '[MAI PAYOUT] reconciled and completed:',
+              withdrawal.id
+            );
+          }
 
         } catch (error) {
+
+          console.error(
+            '[MAI PAYOUT] reconciliation error:',
+            withdrawal.id,
+            error.message
+          );
 
           await pool.query(
             `
