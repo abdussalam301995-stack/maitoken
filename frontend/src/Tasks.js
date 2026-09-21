@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { useTonAddress, useTonConnectUI } from '@tonconnect/ui-react';
+import { Address, beginCell, toNano } from '@ton/core';
 import './Tasks.css';
 
 const API_URL = (process.env.REACT_APP_API_URL || 'https://maitoken.onrender.com').replace(/\/$/, '');
@@ -116,16 +118,47 @@ function dailyTaskIconName(task) {
   return 'link';
 }
 
+function bytesToBase64(bytes) {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunk, bytes.length)));
+  }
+  return btoa(binary);
+}
+
+function smartNumber(value, max = 4) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n)) return '0';
+  return n.toLocaleString(undefined, { maximumFractionDigits: max });
+}
+
+function telegramChatIdFromUrl(url) {
+  try {
+    const parsed = new URL(String(url || '').trim());
+    if (!['t.me', 'www.t.me', 'telegram.me', 'www.telegram.me'].includes(parsed.hostname.toLowerCase())) {
+      return null;
+    }
+    const first = parsed.pathname.split('/').filter(Boolean)[0] || '';
+    if (!first || first.startsWith('+') || first === 'joinchat') return null;
+    return `@${first.replace(/^@/, '')}`;
+  } catch {
+    return null;
+  }
+}
+
 const tiers = [
-  { completions: 100, mai: 5000, gram: 0.5 },
-  { completions: 500, mai: 25000, gram: 2.5 },
-  { completions: 1000, mai: 50000, gram: 5 },
-  { completions: 2000, mai: 100000, gram: 10 },
-  { completions: 5000, mai: 250000, gram: 25 },
-  { completions: 10000, mai: 500000, gram: 50 }
+  { completions: 100 },
+  { completions: 500 },
+  { completions: 1000 },
+  { completions: 2000 },
+  { completions: 5000 },
+  { completions: 10000 }
 ];
 
 export default function Tasks({ initData, onUserUpdate }) {
+  const walletAddress = useTonAddress();
+  const [tonConnectUI] = useTonConnectUI();
   const [tab, setTab] = useState('Daily');
   const [tasks, setTasks] = useState([]);
   const [busy, setBusy] = useState('');
@@ -139,6 +172,13 @@ export default function Tasks({ initData, onUserUpdate }) {
   const [category, setCategory] = useState('Channel');
   const [selectedTier, setSelectedTier] = useState(null);
   const [targetUrl, setTargetUrl] = useState('');
+  const [campaignTitle, setCampaignTitle] = useState('');
+  const [campaignDescription, setCampaignDescription] = useState('');
+  const [quotes, setQuotes] = useState({});
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [approvedCampaigns, setApprovedCampaigns] = useState([]);
+  const [campaignTimers, setCampaignTimers] = useState({});
+  const [campaignNow, setCampaignNow] = useState(Date.now());
   const [managedTasks, setManagedTasks] = useState([]);
   const [missions, setMissions] = useState([]);
   const [managedLoading, setManagedLoading] = useState(false);
@@ -232,27 +272,300 @@ export default function Tasks({ initData, onUserUpdate }) {
     finally { setBusy(''); }
   };
 
+  const getQuote = async completions => {
+    const key = Number(completions);
+    if (quotes[key]) return quotes[key];
+
+    const data = await api('/api/campaigns/quote', {
+      method: 'POST',
+      initData,
+      body: { targetCount: key }
+    });
+
+    const quote = {
+      targetCount: Number(data.targetCount || key),
+      MAI: Number(data.MAI || 0),
+      GRAM: Number(data.GRAM || 0),
+      receiverWallet: data.receiverWallet || null
+    };
+
+    setQuotes(old => ({ ...old, [key]: quote }));
+    return quote;
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadQuotes = async () => {
+      setQuoteLoading(true);
+      try {
+        const rows = await Promise.all(
+          tiers.map(async tier => {
+            const data = await api('/api/campaigns/quote', {
+              method: 'POST',
+              initData,
+              body: { targetCount: tier.completions }
+            });
+            return [
+              tier.completions,
+              {
+                targetCount: Number(data.targetCount || tier.completions),
+                MAI: Number(data.MAI || 0),
+                GRAM: Number(data.GRAM || 0),
+                receiverWallet: data.receiverWallet || null
+              }
+            ];
+          })
+        );
+
+        if (!cancelled) setQuotes(Object.fromEntries(rows));
+      } catch (e) {
+        if (!cancelled) setMessage(e.message);
+      } finally {
+        if (!cancelled) setQuoteLoading(false);
+      }
+    };
+
+    if (tab === 'Promote') loadQuotes();
+    return () => { cancelled = true; };
+  }, [tab, initData]);
+
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
   const submitCampaign = async () => {
     if (selectedTier === null) return setMessage('Select a completion tier.');
+
+    const title = campaignTitle.trim();
+    const description = campaignDescription.trim();
+    const cleanUrl = targetUrl.trim();
+    const selected = tiers[selectedTier];
+
+    if (title.length < 2) return setMessage('Enter a campaign title.');
+    if (!description) return setMessage('Enter a campaign description.');
+    if (!/^https?:\/\//i.test(cleanUrl)) return setMessage('Enter a valid https:// target URL.');
+
+    let chatId = null;
+    let verificationType = 'manual';
+
+    if (category === 'Channel' || category === 'Group') {
+      chatId = telegramChatIdFromUrl(cleanUrl);
+      if (!chatId) {
+        return setMessage('For Channel / Group promotion, use a public https://t.me/username link so MAI can verify real membership.');
+      }
+      verificationType = 'telegram_member';
+    }
+
+    if (!walletAddress) {
+      setMessage(`Connect your TON wallet before paying with ${payMethod}.`);
+      try { await tonConnectUI.openModal(); } catch {}
+      return;
+    }
+
     setBusy('campaign');
+    setMessage('');
+
     try {
+      const quote = await getQuote(selected.completions);
+
+      if (payMethod === 'MAI' && Number(quote.MAI || 0) <= 0) {
+        throw new Error('MAI campaign price is unavailable.');
+      }
+      if (payMethod === 'GRAM' && Number(quote.GRAM || 0) <= 0) {
+        throw new Error('GRAM campaign price is unavailable.');
+      }
+
       const data = await api('/api/campaigns', {
         method: 'POST',
         initData,
         body: {
-          category,
-          targetUrl,
-          completions: tiers[selectedTier].completions,
-          paymentMethod: payMethod
+          type: category,
+          title,
+          targetUrl: cleanUrl,
+          description,
+          targetCount: selected.completions,
+          paymentMethod: payMethod,
+          verificationType,
+          chatId,
+          rewardPerUser: 12
         }
       });
-      onUserUpdate?.(data.user);
-      setMessage(data.message);
+
+      if (payMethod === 'MAI') {
+        const receiverWallet = String(data?.payment?.receiverWallet || '').trim();
+        const payerJettonWallet = String(data?.payment?.payerJettonWallet || '').trim();
+        const amountAtomic = String(data?.payment?.amountAtomic || '').trim();
+
+        if (!receiverWallet || !payerJettonWallet || !/^\d+$/.test(amountAtomic)) {
+          throw new Error('Secure MAI wallet payment information is unavailable.');
+        }
+
+        const canonicalReceiver = Address.parse(receiverWallet).toString();
+        const canonicalJettonWallet = Address.parse(payerJettonWallet).toString();
+        const canonicalSender = Address.parse(walletAddress).toString();
+
+        const transferBody = beginCell()
+          .storeUint(0x0f8a7ea5, 32)
+          .storeUint(BigInt(data.campaign.id), 64)
+          .storeCoins(BigInt(amountAtomic))
+          .storeAddress(Address.parse(canonicalReceiver))
+          .storeAddress(Address.parse(canonicalSender))
+          .storeBit(0)
+          .storeCoins(1n)
+          .storeBit(0)
+          .endCell();
+
+        await tonConnectUI.sendTransaction({
+          validUntil: Math.floor(Date.now() / 1000) + 300,
+          network: '-239',
+          messages: [{
+            address: canonicalJettonWallet,
+            amount: toNano('0.08').toString(),
+            payload: bytesToBase64(transferBody.toBoc())
+          }]
+        });
+      } else {
+        const receiverWallet = String(data?.payment?.receiverWallet || '').trim();
+        const amountNano = String(data?.payment?.amountNano || '').trim();
+
+        if (!receiverWallet || !/^\d+$/.test(amountNano)) {
+          throw new Error('Secure GRAM wallet payment information is unavailable.');
+        }
+
+        await tonConnectUI.sendTransaction({
+          validUntil: Math.floor(Date.now() / 1000) + 300,
+          network: '-239',
+          messages: [{ address: receiverWallet, amount: amountNano }]
+        });
+      }
+
+      setMessage(`${payMethod} payment sent. Waiting for blockchain confirmation…`);
+
+      let verified = false;
+      let lastError = null;
+
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        if (attempt > 0) await wait(3000);
+        try {
+          const verification = await api(
+            `/api/campaigns/${data.campaign.id}/verify-payment`,
+            { method: 'POST', initData }
+          );
+          if (verification?.verified) {
+            verified = true;
+            break;
+          }
+        } catch (e) {
+          lastError = e;
+        }
+      }
+
+      if (!verified) {
+        throw new Error(
+          lastError?.message ||
+          'Payment was sent but is not finalized yet. Please try again shortly.'
+        );
+      }
+
+      setMessage(`Payment verified. Campaign #${data.campaign.id} is waiting for admin approval.`);
+      setCampaignTitle('');
+      setCampaignDescription('');
       setTargetUrl('');
       setSelectedTier(null);
-    } catch (e) { setMessage(e.message); }
-    finally { setBusy(''); }
+    } catch (e) {
+      setMessage(e.message);
+    } finally {
+      setBusy('');
+    }
   };
+
+  const loadApprovedCampaigns = async () => {
+    try {
+      const data = await api('/api/campaigns/exclusive', { initData });
+      setApprovedCampaigns(data.items || []);
+    } catch (e) {
+      setMessage(e.message);
+    }
+  };
+
+  const openCampaign = async campaign => {
+    if (busy || campaign.completed_by_user) return;
+    setBusy(`campaign-open-${campaign.id}`);
+    setMessage('');
+
+    try {
+      const data = await api(`/api/campaigns/${campaign.id}/open`, {
+        method: 'POST',
+        initData
+      });
+
+      const waitSeconds = Math.max(1, Number(data.waitSeconds || 8));
+      setCampaignTimers(old => ({
+        ...old,
+        [campaign.id]: Date.now() + waitSeconds * 1000
+      }));
+
+      const url = data.targetUrl || campaign.target_url;
+      const webApp = window.Telegram?.WebApp;
+      if ((campaign.type === 'Channel' || campaign.type === 'Group') && webApp?.openTelegramLink) {
+        webApp.openTelegramLink(url);
+      } else if (webApp?.openLink) {
+        webApp.openLink(url);
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
+
+      setMessage(`Complete the task, then return after ${waitSeconds} seconds to claim 12 MAI.`);
+    } catch (e) {
+      setMessage(e.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const claimCampaign = async campaign => {
+    if (busy || campaign.completed_by_user) return;
+
+    const readyAt = Number(campaignTimers[campaign.id] || 0);
+    if (!readyAt || Date.now() < readyAt) {
+      return setMessage('Open the task first and wait until the claim timer finishes.');
+    }
+
+    setBusy(`campaign-claim-${campaign.id}`);
+    setMessage('');
+
+    try {
+      const data = await api(`/api/campaigns/${campaign.id}/complete`, {
+        method: 'POST',
+        initData
+      });
+
+      if (data.user) onUserUpdate?.(data.user);
+      setMessage(`+${Number(data.reward || 12).toFixed(4)} MAI received.`);
+
+      setCampaignTimers(old => {
+        const next = { ...old };
+        delete next[campaign.id];
+        return next;
+      });
+
+      await loadApprovedCampaigns();
+    } catch (e) {
+      setMessage(e.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  useEffect(() => {
+    if (tab !== 'Tasks') return;
+    loadApprovedCampaigns();
+  }, [tab]);
+
+  useEffect(() => {
+    if (!Object.keys(campaignTimers).length) return;
+    const id = setInterval(() => setCampaignNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [campaignTimers]);
 
   const loadManagedTasks = async () => {
     setManagedLoading(true);
@@ -452,14 +765,16 @@ export default function Tasks({ initData, onUserUpdate }) {
 
       {tab === 'Promote' && (
         <div className="partner-box">
-          <div className="task-hero"><span>MARKETING MARKETPLACE</span><h2>Promote</h2><p>Submit a campaign for review.</p></div>
-
-          <div className="toggle-row">
-            <button className={payMethod === 'MAI' ? 'active' : ''} onClick={() => setPayMethod('MAI')}>💎 PAY MAI</button>
-            <button className={payMethod === 'GRAM' ? 'active' : ''} onClick={() => setPayMethod('GRAM')}>✈ PAY GRAM</button>
+          <div className="task-hero">
+            <span>MARKETING MARKETPLACE</span>
+            <h2>Promote</h2>
+            <p>Pay securely from your connected wallet. Paid campaigns wait for admin approval.</p>
           </div>
 
-          {payMethod === 'GRAM' && <div className="notice">GRAM payment is not enabled in this version. Choose MAI.</div>}
+          <div className="toggle-row promote-pay-toggle">
+            <button className={payMethod === 'MAI' ? 'active' : ''} onClick={() => setPayMethod('MAI')}>💎 PAY MAI</button>
+            <button className={payMethod === 'GRAM' ? 'active' : ''} onClick={() => setPayMethod('GRAM')}>💎 PAY GRAM</button>
+          </div>
 
           <div className="field-label">CATEGORY</div>
           <div className="toggle-row">
@@ -467,26 +782,93 @@ export default function Tasks({ initData, onUserUpdate }) {
             <button className={category === 'Bot' ? 'active' : ''} onClick={() => setCategory('Bot')}>WEBSITE / BOT</button>
           </div>
 
+          <div className="field-label">CAMPAIGN TITLE</div>
+          <input
+            className="task-input"
+            value={campaignTitle}
+            maxLength={120}
+            onChange={e => setCampaignTitle(e.target.value)}
+            placeholder="Example: Join MAI Partner Channel"
+          />
+
+          <div className="field-label">DESCRIPTION</div>
+          <textarea
+            className="task-input task-textarea"
+            value={campaignDescription}
+            maxLength={700}
+            onChange={e => setCampaignDescription(e.target.value)}
+            placeholder="Tell MAI users why they should complete this task..."
+          />
+
           <div className="field-label">TARGET URL</div>
-          <input className="task-input" value={targetUrl} onChange={e => setTargetUrl(e.target.value)} placeholder="https://t.me/yourchannel" />
+          <input
+            className="task-input"
+            value={targetUrl}
+            onChange={e => setTargetUrl(e.target.value)}
+            placeholder={category === 'Channel' ? 'https://t.me/yourchannel' : 'https://example.com'}
+          />
 
           <div className="field-label">COMPLETIONS</div>
           <div className="tier-grid">
-            {tiers.map((t, i) => (
-              <button key={t.completions} className={`tier ${selectedTier === i ? 'active' : ''}`} onClick={() => setSelectedTier(i)}>
-                <b>{t.completions.toLocaleString()}</b><span>{t.mai.toLocaleString()} MAI</span>
-              </button>
-            ))}
+            {tiers.map((t, i) => {
+              const q = quotes[t.completions];
+              const price = payMethod === 'MAI'
+                ? `${smartNumber(q?.MAI, 4)} MAI`
+                : `${smartNumber(q?.GRAM, 6)} GRAM`;
+
+              return (
+                <button
+                  key={t.completions}
+                  className={`tier ${selectedTier === i ? 'active' : ''}`}
+                  onClick={() => setSelectedTier(i)}
+                  disabled={quoteLoading}
+                >
+                  <b>{t.completions.toLocaleString()}</b>
+                  <span>{quoteLoading && !q ? 'Loading…' : price}</span>
+                </button>
+              );
+            })}
           </div>
 
           {selectedTier !== null && (
-            <div className="burn-row"><span>Users receive 80%</span><b>20% BURN</b></div>
+            <>
+              <div className="promote-summary">
+                <span>Selected package</span>
+                <b>
+                  {tiers[selectedTier].completions.toLocaleString()} completions ·{' '}
+                  {payMethod === 'MAI'
+                    ? `${smartNumber(quotes[tiers[selectedTier].completions]?.MAI, 4)} MAI`
+                    : `${smartNumber(quotes[tiers[selectedTier].completions]?.GRAM, 6)} GRAM`}
+                </b>
+              </div>
+              <div className="burn-row">
+                <span>50% USER</span>
+                <b>50% BURN</b>
+              </div>
+              <div className="promote-reward-note">
+                User reward: <b>12 MAI</b> per successful completion
+              </div>
+            </>
           )}
 
-          <button className="gold-btn full" disabled={busy === 'campaign' || payMethod !== 'MAI' || !targetUrl} onClick={submitCampaign}>
-            {busy === 'campaign' ? 'SUBMITTING…' : 'SUBMIT CAMPAIGN'}
+          <button
+            className="gold-btn full"
+            disabled={
+              busy === 'campaign' ||
+              selectedTier === null ||
+              !campaignTitle.trim() ||
+              !campaignDescription.trim() ||
+              !targetUrl.trim()
+            }
+            onClick={submitCampaign}
+          >
+            {busy === 'campaign' ? 'PROCESSING PAYMENT…' : `PAY & SUBMIT WITH ${payMethod}`}
           </button>
-          <small className="disclaimer">Payment is deducted server-side and the campaign enters pending review.</small>
+
+          <small className="disclaimer">
+            Payment is sent from your connected TON wallet to the MAI promotion receiver wallet.
+            After blockchain verification, the campaign waits for admin approval.
+          </small>
         </div>
       )}
 
@@ -498,6 +880,54 @@ export default function Tasks({ initData, onUserUpdate }) {
             <p>Complete verified tasks and claim server-controlled rewards.</p>
           </div>
 
+          {approvedCampaigns.map(campaign => {
+            const readyAt = Number(campaignTimers[campaign.id] || 0);
+            const remaining = readyAt
+              ? Math.max(0, Math.ceil((readyAt - campaignNow) / 1000))
+              : 0;
+            const completed = Boolean(campaign.completed_by_user);
+            const opened = Boolean(readyAt);
+            const canClaim = opened && remaining <= 0 && !completed;
+            const campaignBusy =
+              busy === `campaign-open-${campaign.id}` ||
+              busy === `campaign-claim-${campaign.id}`;
+
+            return (
+              <div className="task-card promoted-task-card" key={`campaign-${campaign.id}`}>
+                <div className="task-icon premium-campaign-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path d="M4 12.5V7.8c0-.9.7-1.6 1.6-1.6h7.2l5-2.2v16l-5-2.2H5.6c-.9 0-1.6-.7-1.6-1.6v-3.7Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round"/>
+                    <path d="M8 18v2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+                  </svg>
+                </div>
+
+                <div className="task-info">
+                  <b>{campaign.title}</b>
+                  <span>Reward +{Number(campaign.reward_per_user || 12).toLocaleString()} MAI</span>
+                  {campaign.description && <small>{campaign.description}</small>}
+                  <small className="campaign-progress">
+                    {Number(campaign.completed_count || 0).toLocaleString()} / {Number(campaign.target_count || 0).toLocaleString()} completed
+                  </small>
+                </div>
+
+                <button
+                  className={`task-btn ${completed ? 'done' : ''}`}
+                  disabled={completed || campaignBusy}
+                  onClick={() => canClaim ? claimCampaign(campaign) : openCampaign(campaign)}
+                >
+                  {completed
+                    ? 'CLAIMED ✓'
+                    : campaignBusy
+                      ? 'WORKING…'
+                      : opened && remaining > 0
+                        ? `${remaining}s`
+                        : canClaim
+                          ? 'CLAIM'
+                          : 'JOIN'}
+                </button>
+              </div>
+            );
+          })}
           {managedLoading && (
             <div className="task-empty-card">
               Loading tasks...

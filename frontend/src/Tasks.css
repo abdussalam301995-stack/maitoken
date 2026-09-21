@@ -1533,3 +1533,93 @@
     font-size: 12px;
   }
 }
+
+/* =========================================================
+   PROMOTE PAYMENT + APPROVED CAMPAIGN EXTENSION
+   Added without removing the known-good Daily/Tasks visual restore.
+   ========================================================= */
+
+.task-textarea {
+  min-height: 112px;
+  resize: vertical;
+  line-height: 1.45;
+  font-family: inherit;
+}
+
+.promote-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 14px 0 8px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 220, 120, 0.18);
+  border-radius: 16px;
+  background: rgba(8, 10, 18, 0.58);
+}
+
+.promote-summary span {
+  color: rgba(235, 238, 248, 0.68);
+  font-size: 12px;
+}
+
+.promote-summary b {
+  color: #ffe59a;
+  text-align: right;
+  font-size: 13px;
+}
+
+.promote-reward-note {
+  margin: 8px 0 16px;
+  text-align: center;
+  color: rgba(239, 241, 249, 0.72);
+  font-size: 12px;
+}
+
+.promote-reward-note b { color: #ffe59a; }
+.promote-pay-toggle button { min-width: 0; }
+
+.promoted-task-card {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(255, 218, 112, 0.24);
+}
+
+.promoted-task-card::after {
+  content: "PROMOTED";
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: rgba(255, 229, 154, 0.42);
+  pointer-events: none;
+}
+
+.premium-campaign-icon svg {
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+
+.promoted-task-card .task-info small {
+  display: block;
+  margin-top: 4px;
+  color: rgba(229, 232, 242, 0.64);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.promoted-task-card .task-info .campaign-progress {
+  color: rgba(255, 225, 142, 0.68);
+}
+
+@media (max-width: 600px) {
+  .promote-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .promote-summary b { text-align: left; }
+  .promoted-task-card::after { display: none; }
+}

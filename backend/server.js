@@ -569,7 +569,7 @@
       gramPriceInMai:
         num(
           'GRAM_PRICE_IN_MAI',
-          500
+          12000
         ),
 
 
