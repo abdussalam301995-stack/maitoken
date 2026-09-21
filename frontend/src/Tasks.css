@@ -1360,3 +1360,176 @@
     transition: none;
   }
 }
+/* =========================================================
+   MAI TASKS — BASELINE VISUAL RESTORE
+   Keeps the current Tasks/Missions APIs and four-tab navigation,
+   while restoring the original premium Daily/Promote presentation.
+   ========================================================= */
+
+/* Premium SVG icons used by the original MAI task experience. */
+.premium-task-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: #ffe797;
+}
+
+.premium-task-icon svg {
+  display: block;
+  width: 27px;
+  height: 27px;
+  overflow: visible;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.task-icon.ad-icon .premium-task-icon {
+  color: #ffe28a;
+}
+
+/* Daily card typography: prevent title/reward text from running together. */
+.tasks-page .task-card > .task-info > b {
+  display: block;
+  margin: 0;
+  color: #f3f6ff;
+  font-size: 13px;
+  line-height: 1.3;
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+
+.tasks-page .task-card > .task-info > span {
+  display: block;
+  margin-top: 4px;
+  color: rgba(210, 220, 241, 0.58);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.task-label,
+.field-label {
+  margin: 15px 0 8px;
+  color: #fff1bf;
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.task-message,
+.notice {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 220, 110, 0.15);
+  border-radius: 12px;
+  background: rgba(18, 20, 29, 0.9);
+  color: #f5e7b0;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.task-message {
+  cursor: pointer;
+}
+
+/* Original Promote controls: real dark/gold buttons instead of browser defaults. */
+.partner-box .toggle-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-height: 0;
+  padding: 8px;
+}
+
+.partner-box .toggle-row button {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 9px 8px;
+  border: 1px solid rgba(255, 221, 110, 0.13);
+  border-radius: 11px;
+  background: linear-gradient(145deg, rgba(16, 21, 35, 0.9), rgba(26, 21, 14, 0.78));
+  color: rgba(226, 232, 247, 0.64);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1.25;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.partner-box .toggle-row button.active {
+  border-color: rgba(255, 221, 110, 0.32);
+  background: linear-gradient(145deg, rgba(255, 211, 79, 0.18), rgba(41, 29, 12, 0.86));
+  color: #ffe89b;
+  box-shadow: inset 0 0 0 1px rgba(255, 226, 135, 0.06), 0 0 18px rgba(255, 207, 68, 0.06);
+}
+
+.partner-box .toggle-row button:active,
+.partner-box .tier:active {
+  transform: scale(0.98);
+}
+
+.partner-box .task-hero {
+  margin-bottom: 14px;
+}
+
+.partner-box .tier {
+  cursor: pointer;
+}
+
+.partner-box .tier b {
+  display: block;
+  color: inherit;
+  font-size: 14px;
+  font-weight: 950;
+  line-height: 1.2;
+}
+
+.partner-box .tier span {
+  display: block;
+  margin-top: 5px;
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+.partner-box .burn-row b {
+  color: #ffb09a;
+  font-size: 11px;
+}
+
+.partner-box .disclaimer {
+  display: block;
+}
+
+@media (max-width: 600px) {
+  .tasks-page .task-card > .task-info > b {
+    font-size: 12px;
+  }
+
+  .tasks-page .task-card > .task-info > span {
+    font-size: 9px;
+  }
+
+  .premium-task-icon,
+  .premium-task-icon svg {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+@media (max-width: 390px) {
+  .partner-box .toggle-row button {
+    min-height: 39px;
+    padding: 8px 5px;
+    font-size: 9px;
+  }
+
+  .partner-box .tier b {
+    font-size: 12px;
+  }
+}

@@ -49,6 +49,73 @@ async function api(path, { method = 'GET', body, initData } = {}) {
   return data;
 }
 
+
+
+/* =========================================================
+   PREMIUM TASK ICONS
+   Restores the original MAI premium line-icon language without
+   changing any task/reward/backend behavior.
+   ========================================================= */
+function PremiumTaskIcon({ name }) {
+  const icons = {
+    ad: (
+      <>
+        <rect x="3" y="5" width="18" height="14" rx="3" />
+        <path d="M10 9l5 3-5 3V9z" />
+        <path d="M8 2h8" />
+      </>
+    ),
+    news: (
+      <>
+        <rect x="4" y="5" width="16" height="14" rx="2" />
+        <path d="M8 9h8M8 13h8M8 17h5" />
+      </>
+    ),
+    wallet: (
+      <>
+        <rect x="3.5" y="6" width="17" height="13" rx="3" />
+        <path d="M4.5 8.5h12" />
+        <path d="M15 11.5h5.5v4H15a2 2 0 0 1 0-4Z" />
+        <circle cx="16.5" cy="13.5" r=".7" fill="currentColor" stroke="none" />
+      </>
+    ),
+    people: (
+      <>
+        <circle cx="9" cy="8.5" r="2.8" />
+        <circle cx="16.5" cy="9.5" r="2.2" />
+        <path d="M3.8 19c.4-3.3 2.3-5.1 5.2-5.1s4.8 1.8 5.2 5.1M14.5 14.5c3-.3 5 1.3 5.5 4" />
+      </>
+    ),
+    link: (
+      <>
+        <path d="m9.5 14.5-1.7 1.7a3.2 3.2 0 0 1-4.5-4.5l3.3-3.3a3.2 3.2 0 0 1 4.5 0" />
+        <path d="m14.5 9.5 1.7-1.7a3.2 3.2 0 0 1 4.5 4.5l-3.3 3.3a3.2 3.2 0 0 1-4.5 0" />
+        <path d="m8.8 15.2 6.4-6.4" />
+      </>
+    )
+  };
+
+  const icon = icons[name] || icons.link;
+
+  return (
+    <span className="premium-task-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        {icon}
+      </svg>
+    </span>
+  );
+}
+
+function dailyTaskIconName(task) {
+  const key = String(task?.key || '').toLowerCase();
+  const title = String(task?.title || '').toLowerCase();
+
+  if (key === 'news' || title.includes('news')) return 'news';
+  if (key === 'payout' || title.includes('pay out') || title.includes('payout')) return 'wallet';
+  if (key === 'chat' || title.includes('chat') || title.includes('group')) return 'people';
+  return 'link';
+}
+
 const tiers = [
   { completions: 100, mai: 5000, gram: 0.5 },
   { completions: 500, mai: 25000, gram: 2.5 },
@@ -343,7 +410,7 @@ export default function Tasks({ initData, onUserUpdate }) {
           </div>
 
           <div className="task-card ad-card">
-            <div className="task-icon">◉</div>
+            <div className="task-icon ad-icon"><PremiumTaskIcon name="ad" /></div>
             <div className="task-info"><b>Sponsored Ad</b><span>10s engagement · Daily {adCount}/20</span></div>
             <button className="task-btn" onClick={startAd} disabled={!!adSession}>{adSession ? `${adSeconds}s` : 'WATCH'}</button>
           </div>
@@ -351,7 +418,7 @@ export default function Tasks({ initData, onUserUpdate }) {
           <div className="task-label">SOCIAL TASKS</div>
           {tasks.map(task => (
             <div className="task-card" key={task.key}>
-              <div className="task-icon">✦</div>
+              <div className="task-icon"><PremiumTaskIcon name={dailyTaskIconName(task)} /></div>
               <div className="task-info"><b>{task.title}</b><span>Reward +{task.reward} MAI</span></div>
               <button className={`task-btn ${task.completed ? 'done' : ''}`} onClick={() => verifyTask(task)} disabled={task.completed || busy === task.key}>
                 {task.completed
