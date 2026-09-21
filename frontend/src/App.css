@@ -11943,3 +11943,75 @@ body.maiAdminOpen .adminPanel.adminV4 {
     transition: none;
   }
 }
+
+/* =========================================================
+   MAI GIVEAWAY — FINAL PREMIUM DETAILS
+   ========================================================= */
+.giveawayCampaignStats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.giveawayRequirements {
+  display:grid; gap:8px; margin:0 0 14px; padding:13px;
+  border:1px solid rgba(255,214,92,.14); border-radius:14px;
+  background:linear-gradient(145deg,rgba(255,210,74,.055),rgba(72,119,255,.035));
+}
+.giveawayRequirements strong { color:#ffe28b; font-size:11px; letter-spacing:.04em; }
+.giveawayRequirements span { color:rgba(226,235,255,.72); font-size:9px; line-height:1.5; overflow-wrap:anywhere; }
+.giveawayCampaignCard.featured::after {
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(115deg,transparent 0 42%,rgba(255,230,143,.035) 50%,transparent 58%);
+}
+@media (max-width:420px){
+  .giveawayCampaignStats{grid-template-columns:repeat(2,minmax(0,1fr));}
+  .giveawayRequirements{padding:11px;}
+}
+
+/* =========================================================
+   GIVEAWAY — VERIFIED TYPE CONTROLS
+   ========================================================= */
+.giveawayQuiz,
+.giveawayCustomVerify {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 13px;
+  border: 1px solid rgba(255, 207, 92, 0.18);
+  border-radius: 14px;
+  background: rgba(8, 15, 28, 0.72);
+}
+
+.giveawayQuiz > b,
+.giveawayCustomVerify > b {
+  color: #f7d982;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.giveawayQuiz label {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+  cursor: pointer;
+}
+
+.giveawayQuiz input[type="radio"] {
+  margin-top: 2px;
+  accent-color: #e7bd55;
+}
+
+.giveawayCustomVerify input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 11px;
+  background: rgba(2, 9, 20, 0.88);
+  color: inherit;
+  outline: none;
+}
+
+.giveawayCustomVerify input:focus {
+  border-color: rgba(238, 198, 92, 0.6);
+  box-shadow: 0 0 0 3px rgba(238, 198, 92, 0.08);
+}

@@ -13248,6 +13248,7 @@ function GiveawayPage({ back, toast, playClick }) {
   const [featured, setFeatured] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
+  const [giveawayAnswers, setGiveawayAnswers] = useState({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -13272,9 +13273,12 @@ function GiveawayPage({ back, toast, playClick }) {
     try {
       const data = await api(`/api/giveaways/${giveaway.id}/join`, {
         method: 'POST',
-        body: {}
+        body: {
+          answerIndex: giveawayAnswers[String(giveaway.id)]?.answerIndex,
+          customAnswer: giveawayAnswers[String(giveaway.id)]?.customAnswer
+        }
       });
-      if (data.joined) toast('Giveaway entry confirmed.');
+      if (data.joined) toast(data.message || (data.newEntry === false ? 'Entry already recorded.' : 'Giveaway entry confirmed.'));
       await load();
     } catch (error) {
       toast(error.message);
@@ -13300,15 +13304,29 @@ function GiveawayPage({ back, toast, playClick }) {
           <div className="giveawayCampaignStats">
             <div><span>Prize Pool</span><b>{Number(config.prizePool || config.prizePerWinner || 0).toLocaleString()} MAI</b></div>
             <div><span>Winners</span><b>{Number(config.winnerCount || 1).toLocaleString()}</b></div>
-            <div><span>Ends</span><b>{giveaway.ends_at ? new Date(giveaway.ends_at).toLocaleDateString() : 'Open'}</b></div>
+            <div><span>Start Date</span><b>{giveaway.starts_at ? new Date(giveaway.starts_at).toLocaleDateString() : 'Now'}</b></div>
+            <div><span>End Date</span><b>{giveaway.ends_at ? new Date(giveaway.ends_at).toLocaleDateString() : 'Open'}</b></div>
+          </div>
+          <div className="giveawayRequirements">
+            <strong>How to Join</strong>
+            {giveaway.giveaway_type === 'task' && <span>✓ Complete all required MAI tasks: {(config.taskKeys || []).join(', ') || 'campaign tasks'}</span>}
+            {giveaway.giveaway_type === 'referral' && <span>✓ Invite at least {Number(config.successfulInvites || 1)} successful friend(s)</span>}
+            {giveaway.giveaway_type === 'holding' && <span>✓ Hold at least {Number(config.minimumMai || 0).toLocaleString()} MAI</span>}
+            {giveaway.giveaway_type === 'lucky_draw' && <span>✓ Tap Join Giveaway to receive your verified entry</span>}
+            {giveaway.giveaway_type === 'leaderboard' && <span>✓ Rank in the Top {Number(config.leaderboardTop || 100)} by {config.leaderboardMetric === 'referrals' ? 'successful referrals' : config.leaderboardMetric === 'tasks' ? 'completed tasks' : 'in-game MAI balance'}</span>}
+            {giveaway.giveaway_type === 'social' && <span>✓ Complete all required verified Social Tasks: {(config.socialTaskIds || []).join(', ') || 'configured tasks'}</span>}
+            {giveaway.giveaway_type === 'quiz' && <><span>✓ Answer the quiz correctly</span><div className="giveawayQuiz"><b>{config.quizQuestion || 'Quiz'}</b>{(config.quizOptions || []).map((option,index)=><label key={index}><input type="radio" name={`quiz-${giveaway.id}`} checked={Number(giveawayAnswers[String(giveaway.id)]?.answerIndex)===index} onChange={()=>setGiveawayAnswers(old=>({...old,[String(giveaway.id)]:{...(old[String(giveaway.id)]||{}),answerIndex:index}}))} /> <span>{option}</span></label>)}</div></>}
+            {giveaway.giveaway_type === 'purchase' && <span>✓ Have at least {Number(config.minimumPurchase || 0).toLocaleString()} {config.purchaseCurrency || 'MAI'} in verified MAI Network Promote payments</span>}
+            {giveaway.giveaway_type === 'custom' && <><span>✓ Complete the custom verification</span><label className="giveawayCustomVerify"><b>{config.customPrompt || 'Verification answer / code'}</b><input value={giveawayAnswers[String(giveaway.id)]?.customAnswer || ''} onChange={e=>setGiveawayAnswers(old=>({...old,[String(giveaway.id)]:{...(old[String(giveaway.id)]||{}),customAnswer:e.target.value}}))} placeholder="Enter answer / code" /></label></>}
+            {giveaway.allow_multiple_entries && ['referral','purchase'].includes(giveaway.giveaway_type) && <span>✓ Additional entries require new qualifying evidence; repeated taps do not create duplicate entries</span>}
           </div>
           <button
             type="button"
             className="goldBtn full"
-            disabled={giveaway.joined || busy === String(giveaway.id)}
+            disabled={busy === String(giveaway.id) || (giveaway.joined && !giveaway.allow_multiple_entries)}
             onClick={() => join(giveaway)}
           >
-            {giveaway.joined ? 'JOINED ✓' : busy === String(giveaway.id) ? 'VERIFYING…' : 'JOIN GIVEAWAY'}
+            {busy === String(giveaway.id) ? 'VERIFYING…' : giveaway.joined ? (giveaway.allow_multiple_entries ? 'ADD ANOTHER ENTRY' : 'JOINED ✓') : 'JOIN GIVEAWAY'}
           </button>
         </div>
       </article>

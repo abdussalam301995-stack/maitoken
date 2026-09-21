@@ -6879,6 +6879,15 @@ await pool.query(`
       const status=['draft','active','paused'].includes(b.status)?b.status:'draft';
       const r=await client.query(`INSERT INTO managed_missions(title,description,icon,completion_bonus,status,featured,starts_at,ends_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,[title,String(b.description||'').slice(0,1000),String(b.icon||'◆').slice(0,16),Math.max(0,safeNumber(b.completionBonus)),status,!!b.featured,b.startsAt||null,b.endsAt||null,req.admin?.telegramId||null]);
       const ids=Array.isArray(b.taskIds)?[...new Set(b.taskIds.map(x=>String(x)).filter(x=>/^\d+$/.test(x)))]:[];
+      if(ids.length){
+        const existing=(await client.query(`SELECT id::text AS id FROM managed_tasks WHERE id=ANY($1::bigint[])`,[ids])).rows.map(x=>String(x.id));
+        const existingSet=new Set(existing);
+        const missing=ids.filter(id=>!existingSet.has(String(id)));
+        if(missing.length){
+          await client.query('ROLLBACK');
+          return res.status(400).json({success:false,message:`Selected task does not exist: ${missing.join(', ')}`,missingTaskIds:missing});
+        }
+      }
       for(let i=0;i<ids.length;i++) await client.query(`INSERT INTO managed_mission_tasks(mission_id,task_id,sort_order) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,[r.rows[0].id,ids[i],i]);
       await client.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,metadata,ip_hash) VALUES($1,'mission_created','managed_mission',$2,$3,$4)`,[req.admin?.telegramId||null,String(r.rows[0].id),{title,status,taskIds:ids},hash(req.ip).slice(0,32)]);
       await client.query('COMMIT'); res.json({success:true,item:r.rows[0]});
@@ -18077,6 +18086,21 @@ app.post(
       `);
 
       await pool.query(`
+        CREATE TABLE IF NOT EXISTS mai_giveaway_entry_requests(
+          id BIGSERIAL PRIMARY KEY,
+          giveaway_id BIGINT NOT NULL REFERENCES mai_giveaways(id) ON DELETE CASCADE,
+          telegram_id TEXT NOT NULL,
+          request_key TEXT NOT NULL DEFAULT 'primary',
+          metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+          reviewed_by TEXT,
+          reviewed_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(giveaway_id, telegram_id, request_key)
+        )
+      `);
+
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS mai_giveaway_winners(
           id BIGSERIAL PRIMARY KEY,
           giveaway_id BIGINT NOT NULL REFERENCES mai_giveaways(id) ON DELETE CASCADE,
@@ -18620,128 +18644,150 @@ app.post(
        GIVEAWAY — USER
        ------------------------- */
 
+    function normalizeGiveawayAnswer(value) {
+      return String(value ?? '').trim().toLowerCase();
+    }
+
+    function hashGiveawayAnswer(value) {
+      return crypto
+        .createHash('sha256')
+        .update(normalizeGiveawayAnswer(value))
+        .digest('hex');
+    }
+
+    function publicGiveawayConfig(giveaway) {
+      const config = { ...(giveaway.config || {}) };
+      delete config.correctOption;
+      delete config.customAnswer;
+      delete config.customAnswerHash;
+      return config;
+    }
+
+    async function giveawayLeaderboardPosition(giveaway, telegramId, db = pool) {
+      const config = giveaway.config || {};
+      const metric = String(config.leaderboardMetric || 'balance');
+      let query;
+
+      if (metric === 'referrals') {
+        query = `
+          WITH scores AS (
+            SELECT u.telegram_id,
+                   COUNT(r.telegram_id)::numeric AS score
+            FROM users u
+            LEFT JOIN users r
+              ON r.referred_by=u.telegram_id
+             AND r.referral_qualified=TRUE
+            WHERE u.account_status='active'
+            GROUP BY u.telegram_id
+          ), ranked AS (
+            SELECT telegram_id, score,
+                   ROW_NUMBER() OVER (ORDER BY score DESC, telegram_id ASC) AS rank
+            FROM scores
+          )
+          SELECT score, rank::int FROM ranked WHERE telegram_id=$1
+        `;
+      } else if (metric === 'tasks') {
+        query = `
+          WITH scores AS (
+            SELECT u.telegram_id,
+                   COUNT(c.id)::numeric AS score
+            FROM users u
+            LEFT JOIN managed_task_completions c
+              ON c.telegram_id=u.telegram_id
+             AND c.claimed_at IS NOT NULL
+            WHERE u.account_status='active'
+            GROUP BY u.telegram_id
+          ), ranked AS (
+            SELECT telegram_id, score,
+                   ROW_NUMBER() OVER (ORDER BY score DESC, telegram_id ASC) AS rank
+            FROM scores
+          )
+          SELECT score, rank::int FROM ranked WHERE telegram_id=$1
+        `;
+      } else {
+        query = `
+          WITH ranked AS (
+            SELECT telegram_id, balance::numeric AS score,
+                   ROW_NUMBER() OVER (ORDER BY balance DESC, telegram_id ASC) AS rank
+            FROM users
+            WHERE account_status='active'
+          )
+          SELECT score, rank::int FROM ranked WHERE telegram_id=$1
+        `;
+      }
+
+      return (await db.query(query,[String(telegramId)])).rows[0] || null;
+    }
+
     async function giveawayEligibility(
       giveaway,
-      telegramId
+      telegramId,
+      submission = {}
     ) {
-      const type =
-        String(
-          giveaway.giveaway_type ||
-          ''
-        ).toLowerCase();
-
-      const config =
-        giveaway.config || {};
+      const type = String(giveaway.giveaway_type || '').toLowerCase();
+      const config = giveaway.config || {};
 
       if (type === 'holding') {
-        const user = (
-          await pool.query(
-            `SELECT * FROM users WHERE telegram_id=$1`,
-            [String(telegramId)]
-          )
-        ).rows[0];
-
-        if (!user) {
-          return {eligible:false,reason:'User not found'};
-        }
-
-        const holding =
-          await getUserHoldingSnapshot(
-            user,
-            pool,
-            {forceWallet:true}
-          );
-
-        const minimum =
-          safeNumber(config.minimumMai);
-
-        return {
-          eligible:
-            holding.total >= minimum,
-          reason:
-            holding.total >= minimum
-              ? null
-              : `Minimum ${minimum} MAI holding required`
-        };
+        const user = (await pool.query(
+          `SELECT * FROM users WHERE telegram_id=$1`,
+          [String(telegramId)]
+        )).rows[0];
+        if (!user) return {eligible:false,reason:'User not found'};
+        const holding = await getUserHoldingSnapshot(user,pool,{forceWallet:true});
+        const minimum = safeNumber(config.minimumMai);
+        return {eligible:holding.total>=minimum,reason:holding.total>=minimum?null:`Minimum ${minimum} MAI holding required`};
       }
 
       if (type === 'referral') {
-        const count = (
-          await pool.query(
-            `
-            SELECT COUNT(*)::int AS c
-            FROM users
-            WHERE referred_by=$1
-              AND referral_qualified=TRUE
-            `,
-            [String(telegramId)]
-          )
-        ).rows[0]?.c || 0;
-
-        const required =
-          Math.max(
-            1,
-            Number(config.successfulInvites || 1)
-          );
-
-        return {
-          eligible:
-            Number(count) >= required,
-          reason:
-            Number(count) >= required
-              ? null
-              : `${required} successful invites required`
-        };
+        const count=(await pool.query(`SELECT COUNT(*)::int AS c FROM users WHERE referred_by=$1 AND referral_qualified=TRUE`,[String(telegramId)])).rows[0]?.c||0;
+        const required=Math.max(1,Number(config.successfulInvites||1));
+        return {eligible:Number(count)>=required,reason:Number(count)>=required?null:`${required} successful invites required`,metadata:{qualifiedReferrals:Number(count)},evidenceKey:`referral:${Number(count)}`};
       }
 
       if (type === 'task') {
-        const requiredKeys =
-          Array.isArray(config.taskKeys)
-            ? config.taskKeys
-            : [];
-
-        if (!requiredKeys.length) {
-          return {eligible:true,reason:null};
-        }
-
-        const count = (
-          await pool.query(
-            `
-            SELECT COUNT(DISTINCT task_key)::int AS c
-            FROM daily_task_completions
-            WHERE telegram_id=$1
-              AND task_key=ANY($2::text[])
-            `,
-            [String(telegramId),requiredKeys]
-          )
-        ).rows[0]?.c || 0;
-
-        return {
-          eligible:
-            Number(count) >= requiredKeys.length,
-          reason:
-            Number(count) >= requiredKeys.length
-              ? null
-              : 'Complete the required tasks first'
-        };
+        const requiredKeys=Array.isArray(config.taskKeys)?config.taskKeys:[];
+        if (!requiredKeys.length) return {eligible:false,reason:'This giveaway has no required tasks configured'};
+        const count=(await pool.query(`SELECT COUNT(DISTINCT task_key)::int AS c FROM daily_task_completions WHERE telegram_id=$1 AND task_key=ANY($2::text[])`,[String(telegramId),requiredKeys])).rows[0]?.c||0;
+        return {eligible:Number(count)>=requiredKeys.length,reason:Number(count)>=requiredKeys.length?null:'Complete the required tasks first'};
       }
 
-      /*
-       * Lucky draw itself has no extra eligibility rule.
-       * Social/quiz/purchase/custom rules must only be published
-       * when their real authoritative verifier exists.
-       */
-      if (
-        ['lucky_draw','leaderboard'].includes(type)
-      ) {
-        return {eligible:true,reason:null};
+      if (type === 'social') {
+        const ids=Array.isArray(config.socialTaskIds)?config.socialTaskIds.map(Number).filter(Number.isFinite):[];
+        if (!ids.length) return {eligible:false,reason:'This social giveaway has no verified social tasks configured'};
+        const count=(await pool.query(`SELECT COUNT(DISTINCT task_id)::int AS c FROM managed_task_completions WHERE telegram_id=$1 AND task_id=ANY($2::bigint[]) AND verified_at IS NOT NULL`,[String(telegramId),ids])).rows[0]?.c||0;
+        return {eligible:Number(count)>=ids.length,reason:Number(count)>=ids.length?null:'Complete the required verified social actions first'};
       }
 
-      return {
-        eligible:false,
-        reason:
-          'This giveaway type requires an authoritative verifier before it can accept entries'
-      };
+      if (type === 'quiz') {
+        const answer=Number(submission.answerIndex);
+        const correct=Number(config.correctOption);
+        const ok=Number.isInteger(answer)&&Number.isInteger(correct)&&answer===correct;
+        return {eligible:ok,reason:ok?null:'Quiz answer is incorrect'};
+      }
+
+      if (type === 'purchase') {
+        const currency=String(config.purchaseCurrency||'MAI').toUpperCase()==='GRAM'?'GRAM':'MAI';
+        const minimum=Math.max(0,safeNumber(config.minimumPurchase));
+        const total=safeNumber((await pool.query(`SELECT COALESCE(SUM(payment_amount),0) AS total FROM campaigns WHERE owner_id=$1 AND payment_status='paid' AND payment_method=$2`,[String(telegramId),currency])).rows[0]?.total);
+        return {eligible:total>=minimum,reason:total>=minimum?null:`At least ${minimum} ${currency} verified promotion purchase is required`,metadata:{verifiedPurchaseTotal:total,currency},evidenceKey:`purchase:${currency}:${total}`};
+      }
+
+      if (type === 'leaderboard') {
+        const topN=Math.max(1,Math.min(100000,Number(config.leaderboardTop||100)));
+        const row=await giveawayLeaderboardPosition(giveaway,telegramId,pool);
+        const ok=!!row&&Number(row.rank)<=topN;
+        return {eligible:ok,reason:ok?null:`Reach the Top ${topN} leaderboard first`,metadata:row?{rank:Number(row.rank),score:safeNumber(row.score)}:{}};
+      }
+
+      if (type === 'custom') {
+        const expected=String(config.customAnswerHash||'');
+        const supplied=hashGiveawayAnswer(submission.customAnswer||'');
+        const ok=expected.length===64 && supplied===expected;
+        return {eligible:ok,reason:ok?null:'Custom verification answer/code is incorrect'};
+      }
+
+      if (type === 'lucky_draw') return {eligible:true,reason:null};
+      return {eligible:false,reason:'Unsupported giveaway type'};
     }
 
     app.get(
@@ -18784,15 +18830,16 @@ app.post(
 
           res.json({
             success:true,
-            featured:
-              rows.find(row => row.featured) ||
-              rows[0] ||
-              null,
+            featured: (() => {
+              const row = rows.find(item => item.featured) || rows[0] || null;
+              return row ? { ...row, config: publicGiveawayConfig(row) } : null;
+            })(),
             showHomeGift:
               rows.some(row => row.show_on_home),
             items:
               rows.map(row => ({
                 ...row,
+                config: publicGiveawayConfig(row),
                 joined:
                   joined.has(String(row.id))
               }))
@@ -18835,7 +18882,8 @@ app.post(
           const eligibility =
             await giveawayEligibility(
               giveaway,
-              req.auth.id
+              req.auth.id,
+              req.body || {}
             );
 
           if (!eligibility.eligible) {
@@ -18846,33 +18894,37 @@ app.post(
           }
 
           const entryKey =
-            giveaway.allow_multiple_entries
-              ? String(
-                  req.get('X-Idempotency-Key') ||
-                  crypto.randomUUID()
-                )
+            giveaway.allow_multiple_entries && eligibility.evidenceKey
+              ? String(eligibility.evidenceKey).slice(0,160)
               : 'primary';
 
-          await pool.query(
+          const entryInsert = await pool.query(
             `
             INSERT INTO mai_giveaway_entries(
               giveaway_id,
               telegram_id,
-              entry_key
+              entry_key,
+              metadata
             )
-            VALUES($1,$2,$3)
+            VALUES($1,$2,$3,$4)
             ON CONFLICT DO NOTHING
+            RETURNING id
             `,
             [
               giveaway.id,
               String(req.auth.id),
-              entryKey
+              entryKey,
+              JSON.stringify(eligibility.metadata || {})
             ]
           );
 
           res.json({
             success:true,
-            joined:true
+            joined:true,
+            newEntry: entryInsert.rowCount > 0,
+            message: entryInsert.rowCount > 0
+              ? 'Giveaway entry confirmed'
+              : 'This qualifying evidence already has an entry'
           });
         } catch (error) {
           next(error);
@@ -18956,7 +19008,7 @@ app.post(
            * as draft, but cannot be published live.
            */
           const verifierReady =
-            ['task','referral','lucky_draw','leaderboard','holding']
+            ['task','referral','lucky_draw','leaderboard','social','quiz','holding','purchase','custom']
               .includes(type);
 
           let status =
@@ -18967,6 +19019,62 @@ app.post(
             !verifierReady
           ) {
             status='draft';
+          }
+
+          const startsAt = body.startsAt || null;
+          const endsAt = body.endsAt || null;
+          if (startsAt && Number.isNaN(Date.parse(startsAt))) {
+            return res.status(400).json({success:false,message:'Invalid giveaway start date'});
+          }
+          if (endsAt && Number.isNaN(Date.parse(endsAt))) {
+            return res.status(400).json({success:false,message:'Invalid giveaway end date'});
+          }
+          if (startsAt && endsAt && new Date(endsAt) <= new Date(startsAt)) {
+            return res.status(400).json({success:false,message:'Giveaway end time must be after start time'});
+          }
+
+          const rawConfig = body.config && typeof body.config === 'object' ? body.config : {};
+          const config = { ...rawConfig };
+          if ('winnerCount' in config) config.winnerCount = Math.max(1, Math.min(100, Number(config.winnerCount) || 1));
+          if ('prizePool' in config) config.prizePool = Math.max(0, safeNumber(config.prizePool));
+          if ('prizePerWinner' in config) config.prizePerWinner = Math.max(0, safeNumber(config.prizePerWinner));
+          if ('successfulInvites' in config) config.successfulInvites = Math.max(1, Number(config.successfulInvites) || 1);
+          if ('minimumMai' in config) config.minimumMai = Math.max(0, safeNumber(config.minimumMai));
+          if (type === 'task' && Array.isArray(config.taskKeys)) {
+            config.taskKeys = [...new Set(config.taskKeys.map(x => String(x || '').trim()).filter(Boolean))].slice(0,100);
+          }
+          if (type === 'social') {
+            config.socialTaskIds = [...new Set((Array.isArray(config.socialTaskIds) ? config.socialTaskIds : []).map(Number).filter(Number.isFinite))].slice(0,100);
+            if (!config.socialTaskIds.length && ['live','scheduled'].includes(status)) return res.status(400).json({success:false,message:'Social giveaway requires at least one verified managed task'});
+          }
+          if (type === 'quiz') {
+            config.quizQuestion = String(config.quizQuestion || '').trim().slice(0,500);
+            config.quizOptions = (Array.isArray(config.quizOptions) ? config.quizOptions : []).map(x=>String(x||'').trim().slice(0,200)).filter(Boolean).slice(0,8);
+            config.correctOption = Number(config.correctOption);
+            if ((!config.quizQuestion || config.quizOptions.length < 2 || !Number.isInteger(config.correctOption) || config.correctOption < 0 || config.correctOption >= config.quizOptions.length) && ['live','scheduled'].includes(status)) return res.status(400).json({success:false,message:'Quiz requires a question, at least two choices, and a valid correct answer'});
+          }
+          if (type === 'purchase') {
+            config.purchaseCurrency = String(config.purchaseCurrency || 'MAI').toUpperCase() === 'GRAM' ? 'GRAM' : 'MAI';
+            config.minimumPurchase = Math.max(0, safeNumber(config.minimumPurchase));
+          }
+          if (type === 'leaderboard') {
+            config.leaderboardMetric = ['balance','referrals','tasks'].includes(String(config.leaderboardMetric)) ? String(config.leaderboardMetric) : 'balance';
+            config.leaderboardTop = Math.max(1, Math.min(100000, Number(config.leaderboardTop) || 100));
+          }
+          if (type === 'custom') {
+            config.customPrompt = String(config.customPrompt || '').trim().slice(0,500);
+            const answer = String(config.customAnswer || '').trim();
+            if ((!config.customPrompt || !answer) && ['live','scheduled'].includes(status)) return res.status(400).json({success:false,message:'Custom giveaway requires a verification prompt and answer/code'});
+            if (answer) config.customAnswerHash = hashGiveawayAnswer(answer);
+            delete config.customAnswer;
+          }
+          if (['live','scheduled'].includes(status)) {
+            if (type === 'task' && !(Array.isArray(config.taskKeys) && config.taskKeys.length)) return res.status(400).json({success:false,message:'Task giveaway requires at least one task key'});
+            if (type === 'purchase' && !(safeNumber(config.minimumPurchase) > 0)) return res.status(400).json({success:false,message:'Purchase giveaway requires a minimum verified purchase greater than zero'});
+            if (type === 'social') {
+              const found = (await pool.query(`SELECT COUNT(*)::int AS c FROM managed_tasks WHERE id=ANY($1::bigint[])`,[config.socialTaskIds])).rows[0]?.c || 0;
+              if (Number(found) !== config.socialTaskIds.length) return res.status(400).json({success:false,message:'One or more Social Task IDs do not exist'});
+            }
           }
 
           const row = (
@@ -18998,13 +19106,13 @@ app.post(
                   ? String(body.imageUrl)
                   : null,
                 type,
-                JSON.stringify(body.config || {}),
+                JSON.stringify(config),
                 Boolean(body.showOnHome),
                 Boolean(body.featured),
                 Boolean(body.allowMultipleEntries),
                 status,
-                body.startsAt || null,
-                body.endsAt || null,
+                startsAt,
+                endsAt,
                 adminActor(req)
               ]
             )
@@ -19069,17 +19177,32 @@ app.post(
           }
 
           const verifierReady =
-            ['task','referral','lucky_draw','leaderboard','holding']
+            ['task','referral','lucky_draw','leaderboard','social','quiz','holding','purchase','custom']
               .includes(current.giveaway_type);
 
           if (
             ['live','scheduled'].includes(requested) &&
             !verifierReady
           ) {
-            return res.status(409).json({
-              success:false,
-              message:'This giveaway type has no authoritative verifier yet'
-            });
+            return res.status(409).json({success:false,message:'This giveaway type has no authoritative verifier yet'});
+          }
+
+          if (['live','scheduled'].includes(requested)) {
+            const cfg = current.config || {};
+            if (current.giveaway_type === 'task' && !(Array.isArray(cfg.taskKeys) && cfg.taskKeys.length)) return res.status(409).json({success:false,message:'Task giveaway requires task keys'});
+            if (current.giveaway_type === 'social') {
+              const socialIds=[...new Set((Array.isArray(cfg.socialTaskIds)?cfg.socialTaskIds:[]).map(Number).filter(Number.isFinite))];
+              if (!socialIds.length) return res.status(409).json({success:false,message:'Social giveaway requires verified managed tasks'});
+              const found=(await pool.query(`SELECT COUNT(*)::int AS c FROM managed_tasks WHERE id=ANY($1::bigint[])`,[socialIds])).rows[0]?.c||0;
+              if (Number(found)!==socialIds.length) return res.status(409).json({success:false,message:'One or more Social Task IDs no longer exist'});
+            }
+            if (current.giveaway_type === 'quiz') {
+              const optionCount=Array.isArray(cfg.quizOptions)?cfg.quizOptions.length:0;
+              const correct=Number(cfg.correctOption);
+              if (!cfg.quizQuestion || optionCount<2 || !Number.isInteger(correct) || correct<0 || correct>=optionCount) return res.status(409).json({success:false,message:'Quiz configuration is incomplete'});
+            }
+            if (current.giveaway_type === 'purchase' && !(safeNumber(cfg.minimumPurchase)>0)) return res.status(409).json({success:false,message:'Purchase giveaway requires a minimum verified promotion purchase greater than zero'});
+            if (current.giveaway_type === 'custom' && (!cfg.customPrompt || !cfg.customAnswerHash)) return res.status(409).json({success:false,message:'Custom verification configuration is incomplete'});
           }
 
           const row = (
@@ -19148,40 +19271,34 @@ app.post(
 
           const entries = (
             await client.query(
-              `
-              SELECT DISTINCT telegram_id
-              FROM mai_giveaway_entries
-              WHERE giveaway_id=$1
-              ORDER BY telegram_id
-              `,
+              `SELECT DISTINCT telegram_id FROM mai_giveaway_entries WHERE giveaway_id=$1 ORDER BY telegram_id`,
               [giveaway.id]
             )
           ).rows;
 
           if (!entries.length) {
             await client.query('ROLLBACK');
-            return res.status(409).json({
-              success:false,
-              message:'No eligible entries'
-            });
+            return res.status(409).json({success:false,message:'No eligible entries'});
           }
 
-          /*
-           * Cryptographically secure server-side draw.
-           * We intentionally do not use browser Math.random().
-           */
-          const poolRows = [...entries];
-          const selected = [];
+          let selected = [];
+          let selectionMethod = 'crypto_random';
 
-          while (
-            selected.length < winnerCount &&
-            poolRows.length
-          ) {
-            const index =
-              crypto.randomInt(0,poolRows.length);
-            selected.push(
-              poolRows.splice(index,1)[0]
-            );
+          if (giveaway.giveaway_type === 'leaderboard') {
+            const ranked = [];
+            for (const entry of entries) {
+              const pos = await giveawayLeaderboardPosition(giveaway,entry.telegram_id,client);
+              if (pos) ranked.push({...entry,rank:Number(pos.rank),score:safeNumber(pos.score)});
+            }
+            ranked.sort((a,b)=>a.rank-b.rank || String(a.telegram_id).localeCompare(String(b.telegram_id)));
+            selected = ranked.slice(0,winnerCount);
+            selectionMethod = 'leaderboard_rank';
+          } else {
+            const poolRows = [...entries];
+            while (selected.length < winnerCount && poolRows.length) {
+              const index = crypto.randomInt(0,poolRows.length);
+              selected.push(poolRows.splice(index,1)[0]);
+            }
           }
 
           const prize =
@@ -19198,13 +19315,14 @@ app.post(
                 prize,
                 selection_method
               )
-              VALUES($1,$2,$3,'crypto_random')
+              VALUES($1,$2,$3,$4)
               ON CONFLICT DO NOTHING
               `,
               [
                 giveaway.id,
                 winner.telegram_id,
-                prize
+                prize,
+                selectionMethod
               ]
             );
           }
@@ -19255,7 +19373,7 @@ app.post(
               JOIN mai_giveaways g
                 ON g.id=w.giveaway_id
               LEFT JOIN users u
-               ON u.telegram_id::text=w.telegram_id
+                ON u.telegram_id::text=w.telegram_id
               ORDER BY w.created_at DESC
               LIMIT 1000
               `

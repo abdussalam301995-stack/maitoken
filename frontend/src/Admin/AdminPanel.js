@@ -148,7 +148,17 @@
       const [launchControl, setLaunchControl] = useState(null);
       const [moduleStatus, setModuleStatus] = useState(null);
       const [taskMode, setTaskMode] = useState('tasks');
-      const [giveawayMode, setGiveawayMode] = useState('campaigns');
+      const [giveawayMode, setGiveawayMode] = useState('create');
+      const [giveawayPreview, setGiveawayPreview] = useState(false);
+      const [giveawayForm, setGiveawayForm] = useState({
+        title:'', description:'', imageUrl:'', giveawayType:'lucky_draw',
+        prizePool:'', winnerCount:'1', prizePerWinner:'', startsAt:'', endsAt:'',
+        taskKeys:'', successfulInvites:'1', minimumMai:'0',
+        socialTaskIds:'', quizQuestion:'', quizOptions:'', quizCorrectOption:'0',
+        leaderboardMetric:'balance', leaderboardTop:'100', purchaseCurrency:'MAI', minimumPurchase:'0',
+        customPrompt:'', customAnswer:'',
+        showOnHome:true, featured:true, allowMultipleEntries:false
+      });
       const [broadcastMode, setBroadcastMode] = useState('create');
 
       const loadAll = useCallback(async (silent = false) => {
@@ -1055,6 +1065,12 @@
             'Task IDs separated by commas:',
             managedTasks.map(x => x.id).slice(0,3).join(',')
           ).split(',').map(x => x.trim()).filter(Boolean);
+          const validTaskIds = new Set(managedTasks.map(x => String(x.id)));
+          const missingIds = ids.filter(id => !validTaskIds.has(String(id)));
+          if (missingIds.length) {
+            setError(`Selected task does not exist: ${missingIds.join(', ')}`);
+            return;
+          }
           const completionBonus = Number(promptValue('Completion bonus MAI:', '0'));
           await runAction('create-mission','/admin/missions',{
             title,
@@ -1152,41 +1168,150 @@
       };
 
       const renderGiveaway = () => {
-        const createGiveaway = async () => {
-          const title = promptValue('Giveaway title:');
-          if (!title) return;
-          const giveawayType = promptValue('Type: task, referral, lucky_draw, leaderboard, holding, social, quiz, purchase, custom','lucky_draw');
-          const description = promptValue('Description:');
-          const imageUrl = promptValue('Campaign image URL (optional):');
+        const verifierReadyTypes = new Set(['task','referral','lucky_draw','leaderboard','social','quiz','holding','purchase','custom']);
+        const setGiveawayField = (key, value) =>
+          setGiveawayForm(old => ({ ...old, [key]: value }));
+
+        const createGiveaway = async (requestedStatus = 'draft') => {
+          const title = String(giveawayForm.title || '').trim();
+          if (!title) {
+            setError('Giveaway title is required.');
+            return;
+          }
+          if (!String(giveawayForm.description || '').trim()) {
+            setError('Giveaway description is required.');
+            return;
+          }
+          if (giveawayForm.startsAt && giveawayForm.endsAt && new Date(giveawayForm.endsAt) <= new Date(giveawayForm.startsAt)) {
+            setError('Giveaway end time must be after the start time.');
+            return;
+          }
+          const config = {
+            prizePool:Number(giveawayForm.prizePool || 0),
+            winnerCount:Math.max(1, Number(giveawayForm.winnerCount || 1)),
+            prizePerWinner:Number(giveawayForm.prizePerWinner || 0)
+          };
+          if (giveawayForm.giveawayType === 'task') {
+            config.taskKeys = String(giveawayForm.taskKeys || '').split(',').map(x=>x.trim()).filter(Boolean);
+          }
+          if (giveawayForm.giveawayType === 'referral') {
+            config.successfulInvites = Math.max(1, Number(giveawayForm.successfulInvites || 1));
+          }
+          if (giveawayForm.giveawayType === 'holding') {
+            config.minimumMai = Math.max(0, Number(giveawayForm.minimumMai || 0));
+          }
+          if (giveawayForm.giveawayType === 'social') {
+            config.socialTaskIds = String(giveawayForm.socialTaskIds || '').split(',').map(x=>Number(x.trim())).filter(Number.isFinite);
+          }
+          if (giveawayForm.giveawayType === 'quiz') {
+            config.quizQuestion = String(giveawayForm.quizQuestion || '').trim();
+            config.quizOptions = String(giveawayForm.quizOptions || '').split('\n').map(x=>x.trim()).filter(Boolean);
+            config.correctOption = Math.max(0, Number(giveawayForm.quizCorrectOption || 0));
+          }
+          if (giveawayForm.giveawayType === 'leaderboard') {
+            config.leaderboardMetric = giveawayForm.leaderboardMetric;
+            config.leaderboardTop = Math.max(1, Number(giveawayForm.leaderboardTop || 100));
+          }
+          if (giveawayForm.giveawayType === 'purchase') {
+            config.purchaseCurrency = giveawayForm.purchaseCurrency;
+            config.minimumPurchase = Math.max(0, Number(giveawayForm.minimumPurchase || 0));
+          }
+          if (giveawayForm.giveawayType === 'custom') {
+            config.customPrompt = String(giveawayForm.customPrompt || '').trim();
+            config.customAnswer = String(giveawayForm.customAnswer || '').trim();
+          }
           await runAction('create-giveaway','/admin/giveaways',{
-            title, giveawayType, description, imageUrl: imageUrl || null,
-            status:'draft', showOnHome:false, featured:false, allowMultipleEntries:false,
-            config:{}
+            title,
+            giveawayType:giveawayForm.giveawayType,
+            description:String(giveawayForm.description || '').trim(),
+            imageUrl:String(giveawayForm.imageUrl || '').trim() || null,
+            status:requestedStatus,
+            showOnHome:Boolean(giveawayForm.showOnHome),
+            featured:Boolean(giveawayForm.featured),
+            allowMultipleEntries:Boolean(giveawayForm.allowMultipleEntries && ['referral','purchase'].includes(giveawayForm.giveawayType)),
+            startsAt:giveawayForm.startsAt || null,
+            endsAt:giveawayForm.endsAt || null,
+            config
           });
+          setGiveawayForm(old => ({...old,title:'',description:'',imageUrl:'',prizePool:'',prizePerWinner:'',taskKeys:'',socialTaskIds:'',quizQuestion:'',quizOptions:'',customPrompt:'',customAnswer:''}));
+          setGiveawayPreview(false);
+          setGiveawayMode('campaigns');
         };
+
+        const fieldStyle = {width:'100%',boxSizing:'border-box',padding:'12px 13px',borderRadius:10,border:'1px solid rgba(255,255,255,.12)',background:'rgba(4,13,28,.72)',color:'inherit',outline:'none'};
+        const labelStyle = {display:'grid',gap:7};
+
         return (
           <>
             <section className="adminSection">
               <div className="adminSectionHead">
                 <div><span>CAMPAIGN ENGINE</span><h3>Giveaway</h3></div>
-                <button onClick={createGiveaway} disabled={!!busy}>Create Giveaway</button>
+                <Status>{giveaways.some(x=>x.status==='live') ? 'active' : 'draft'}</Status>
               </div>
               <div className="adminActions">
+                <button className={giveawayMode==='create'?'good':''} onClick={()=>setGiveawayMode('create')}>Create Giveaway</button>
                 <button className={giveawayMode==='campaigns'?'good':''} onClick={()=>setGiveawayMode('campaigns')}>All Campaigns</button>
                 <button className={giveawayMode==='winners'?'good':''} onClick={()=>setGiveawayMode('winners')}>Winners</button>
                 <button className={giveawayMode==='settings'?'good':''} onClick={()=>setGiveawayMode('settings')}>Settings</button>
               </div>
             </section>
+
+            {giveawayMode==='create' && (
+              <section className="adminSection">
+                <div className="adminSectionHead"><div><span>NEW CAMPAIGN</span><h3>Create Giveaway</h3></div></div>
+                <div className="adminDataGrid">
+                  <label style={labelStyle}><span>Title</span><input style={fieldStyle} value={giveawayForm.title} onChange={e=>setGiveawayField('title',e.target.value)} placeholder="MAI Community Giveaway" /></label>
+                  <label style={labelStyle}><span>Type</span><select style={fieldStyle} value={giveawayForm.giveawayType} onChange={e=>setGiveawayField('giveawayType',e.target.value)}>
+                    <option value="task">Task Completion</option><option value="referral">Referral Based</option><option value="lucky_draw">Lucky Draw</option><option value="leaderboard">Leaderboard</option><option value="social">Social Action</option><option value="quiz">Quiz / Trivia</option><option value="holding">Holding Based</option><option value="purchase">Purchase (Verified Promote Payment)</option><option value="custom">Custom</option>
+                  </select></label>
+                  <label style={labelStyle}><span>Prize Pool (MAI)</span><input style={fieldStyle} type="number" min="0" value={giveawayForm.prizePool} onChange={e=>setGiveawayField('prizePool',e.target.value)} /></label>
+                  <label style={labelStyle}><span>Winner Count</span><input style={fieldStyle} type="number" min="1" max="100" value={giveawayForm.winnerCount} onChange={e=>setGiveawayField('winnerCount',e.target.value)} /></label>
+                  <label style={labelStyle}><span>Prize / Winner (MAI)</span><input style={fieldStyle} type="number" min="0" value={giveawayForm.prizePerWinner} onChange={e=>setGiveawayField('prizePerWinner',e.target.value)} /></label>
+                  <label style={labelStyle}><span>Campaign Image URL</span><input style={fieldStyle} value={giveawayForm.imageUrl} onChange={e=>setGiveawayField('imageUrl',e.target.value)} placeholder="https://..." /></label>
+                  <label style={labelStyle}><span>Start</span><input style={fieldStyle} type="datetime-local" value={giveawayForm.startsAt} onChange={e=>setGiveawayField('startsAt',e.target.value)} /></label>
+                  <label style={labelStyle}><span>End</span><input style={fieldStyle} type="datetime-local" value={giveawayForm.endsAt} onChange={e=>setGiveawayField('endsAt',e.target.value)} /></label>
+                </div>
+                <label style={{...labelStyle,marginTop:12}}><span>Description</span><textarea style={{...fieldStyle,minHeight:100,resize:'vertical'}} value={giveawayForm.description} onChange={e=>setGiveawayField('description',e.target.value)} placeholder="Explain the giveaway and requirements." /></label>
+                {giveawayForm.giveawayType==='task' && <label style={{...labelStyle,marginTop:12}}><span>Required Task Keys (comma separated)</span><input style={fieldStyle} value={giveawayForm.taskKeys} onChange={e=>setGiveawayField('taskKeys',e.target.value)} placeholder="daily_checkin, join_news" /></label>}
+                {giveawayForm.giveawayType==='referral' && <label style={{...labelStyle,marginTop:12}}><span>Successful Invites Required</span><input style={fieldStyle} type="number" min="1" value={giveawayForm.successfulInvites} onChange={e=>setGiveawayField('successfulInvites',e.target.value)} /></label>}
+                {giveawayForm.giveawayType==='holding' && <label style={{...labelStyle,marginTop:12}}><span>Minimum MAI Holding</span><input style={fieldStyle} type="number" min="0" value={giveawayForm.minimumMai} onChange={e=>setGiveawayField('minimumMai',e.target.value)} /></label>}
+                {giveawayForm.giveawayType==='social' && <label style={{...labelStyle,marginTop:12}}><span>Verified Managed Task IDs (comma separated)</span><input style={fieldStyle} value={giveawayForm.socialTaskIds} onChange={e=>setGiveawayField('socialTaskIds',e.target.value)} placeholder="12, 15, 18" /><small>Use IDs from Tasks & Missions. Users must have these tasks server-verified.</small></label>}
+                {giveawayForm.giveawayType==='leaderboard' && <div className="adminDataGrid" style={{marginTop:12}}><label style={labelStyle}><span>Leaderboard Metric</span><select style={fieldStyle} value={giveawayForm.leaderboardMetric} onChange={e=>setGiveawayField('leaderboardMetric',e.target.value)}><option value="balance">In-game MAI Balance</option><option value="referrals">Successful Referrals</option><option value="tasks">Completed Managed Tasks</option></select></label><label style={labelStyle}><span>Eligible Top N</span><input style={fieldStyle} type="number" min="1" value={giveawayForm.leaderboardTop} onChange={e=>setGiveawayField('leaderboardTop',e.target.value)} /></label></div>}
+                {giveawayForm.giveawayType==='quiz' && <div style={{marginTop:12,display:'grid',gap:12}}><label style={labelStyle}><span>Quiz Question</span><input style={fieldStyle} value={giveawayForm.quizQuestion} onChange={e=>setGiveawayField('quizQuestion',e.target.value)} placeholder="What is MAI...?" /></label><label style={labelStyle}><span>Choices — one per line</span><textarea style={{...fieldStyle,minHeight:110}} value={giveawayForm.quizOptions} onChange={e=>setGiveawayField('quizOptions',e.target.value)} placeholder={'Choice A\nChoice B\nChoice C'} /></label><label style={labelStyle}><span>Correct Choice Number (1 = first)</span><input style={fieldStyle} type="number" min="1" value={Number(giveawayForm.quizCorrectOption||0)+1} onChange={e=>setGiveawayField('quizCorrectOption',String(Math.max(0,Number(e.target.value||1)-1)))} /></label></div>}
+                {giveawayForm.giveawayType==='purchase' && <div className="adminDataGrid" style={{marginTop:12}}><label style={labelStyle}><span>Verified Payment Currency</span><select style={fieldStyle} value={giveawayForm.purchaseCurrency} onChange={e=>setGiveawayField('purchaseCurrency',e.target.value)}><option value="MAI">MAI</option><option value="GRAM">GRAM</option></select></label><label style={labelStyle}><span>Minimum Verified Purchase</span><input style={fieldStyle} type="number" min="0" step="any" value={giveawayForm.minimumPurchase} onChange={e=>setGiveawayField('minimumPurchase',e.target.value)} /></label></div>}
+                {giveawayForm.giveawayType==='custom' && <div style={{marginTop:12,display:'grid',gap:12}}><label style={labelStyle}><span>Verification Prompt</span><input style={fieldStyle} value={giveawayForm.customPrompt} onChange={e=>setGiveawayField('customPrompt',e.target.value)} placeholder="Enter the campaign access code" /></label><label style={labelStyle}><span>Correct Answer / Code</span><input style={fieldStyle} value={giveawayForm.customAnswer} onChange={e=>setGiveawayField('customAnswer',e.target.value)} placeholder="Private verification answer" /></label><p className="adminFootnote">The answer is hashed by the backend and is never returned to the Mini App.</p></div>}
+                <p className="adminFootnote">All giveaway types use server-side verification. Quiz answers and Custom verification answers are not exposed to users.</p>
+                <div className="adminActions" style={{marginTop:14}}>
+                  <label><input type="checkbox" checked={giveawayForm.showOnHome} onChange={e=>setGiveawayField('showOnHome',e.target.checked)} /> Show on Home</label>
+                  <label><input type="checkbox" checked={giveawayForm.featured} onChange={e=>setGiveawayField('featured',e.target.checked)} /> Featured</label>
+                  <label><input type="checkbox" checked={giveawayForm.allowMultipleEntries && ['referral','purchase'].includes(giveawayForm.giveawayType)} disabled={!['referral','purchase'].includes(giveawayForm.giveawayType)} onChange={e=>setGiveawayField('allowMultipleEntries',e.target.checked)} /> Multiple Entries (Referral / Purchase evidence only)</label>
+                </div>
+                <div className="adminActions" style={{marginTop:14}}>
+                  <button onClick={()=>setGiveawayPreview(v=>!v)} disabled={!!busy}>{giveawayPreview?'Close Preview':'Preview'}</button>
+                  <button onClick={()=>createGiveaway('draft')} disabled={!!busy}>{busy==='create-giveaway'?'Saving…':'Save as Draft'}</button>
+                  <button className="good" onClick={()=>createGiveaway('live')} disabled={!!busy || !verifierReadyTypes.has(giveawayForm.giveawayType)}>{busy==='create-giveaway'?'Publishing…':'Publish Giveaway'}</button>
+                </div>
+                {giveawayPreview && (
+                  <article className="adminListCard" style={{marginTop:14}}>
+                    {giveawayForm.imageUrl && <img src={giveawayForm.imageUrl} alt="" style={{width:'100%',maxHeight:260,objectFit:'cover',borderRadius:14,marginBottom:12}} />}
+                    <div className="adminListTop"><div className="adminBadgeIcon">🎁</div><div className="adminGrow"><b>{giveawayForm.title || 'Giveaway title'}</b><span>{String(giveawayForm.giveawayType).replaceAll('_',' ')} · User preview</span></div><Status>{verifierReadyTypes.has(giveawayForm.giveawayType)?'ready':'draft only'}</Status></div>
+                    <p className="adminFootnote">{giveawayForm.description || 'Campaign description will appear here.'}</p>
+                    <div className="adminDataGrid"><div><span>Prize Pool</span><b>{fmt(giveawayForm.prizePool)} MAI</b></div><div><span>Winners</span><b>{fmt(giveawayForm.winnerCount)}</b></div><div><span>Start</span><b>{giveawayForm.startsAt || 'Immediately'}</b></div><div><span>End</span><b>{giveawayForm.endsAt || 'Open'}</b></div></div>
+                  </article>
+                )}
+              </section>
+            )}
+
             {giveawayMode==='campaigns' && <div className="adminList">
               {giveaways.map(item=>(
                 <article className="adminListCard" key={item.id}>
-                  <div className="adminListTop"><div className="adminBadgeIcon">🎁</div><div className="adminGrow"><b>{item.title}</b><span>{item.giveaway_type} · {fmt(item.entries)} entries</span></div><Status>{item.status}</Status></div>
+                  <div className="adminListTop"><div className="adminBadgeIcon">🎁</div><div className="adminGrow"><b>{item.title}</b><span>{String(item.giveaway_type||'giveaway').replaceAll('_',' ')} · {fmt(item.entries)} entries</span></div><Status>{item.status}</Status></div>
                   <div className="adminDataGrid"><div><span>Home Gift</span><b>{item.show_on_home?'ON':'OFF'}</b></div><div><span>Featured</span><b>{item.featured?'YES':'NO'}</b></div><div><span>Start</span><b>{when(item.starts_at)}</b></div><div><span>End</span><b>{when(item.ends_at)}</b></div></div>
                   <div className="adminActions">
-                    {item.status!=='live' && <button className="good" onClick={()=>runAction(`give-live-${item.id}`,`/admin/giveaways/${item.id}/status`,{status:'live'})}>Publish</button>}
+                    {['draft','paused','scheduled'].includes(item.status) && <button className="good" onClick={()=>runAction(`give-live-${item.id}`,`/admin/giveaways/${item.id}/status`,{status:'live'})}>Publish</button>}
                     {item.status==='live' && <button className="warn" onClick={()=>runAction(`give-pause-${item.id}`,`/admin/giveaways/${item.id}/status`,{status:'paused'})}>Pause</button>}
                     {!['ended','completed'].includes(item.status) && <button className="danger" onClick={()=>runAction(`give-end-${item.id}`,`/admin/giveaways/${item.id}/status`,{status:'ended'})}>End</button>}
-                    {item.status==='ended' && <button onClick={()=>{const n=Number(promptValue('Number of winners:','1')); if(n>0)runAction(`give-draw-${item.id}`,`/admin/giveaways/${item.id}/draw`,{winnerCount:n});}}>Draw Winners</button>}
+                    {item.status==='ended' && <button onClick={()=>{const n=Number(promptValue('Number of winners:',String(item.config?.winnerCount || 1))); if(n>0)runAction(`give-draw-${item.id}`,`/admin/giveaways/${item.id}/draw`,{winnerCount:n});}}>Draw Winners</button>}
                   </div>
                 </article>
               ))}
@@ -1196,7 +1321,7 @@
               {giveawayWinners.map(item=><article className="adminListCard" key={item.id}><div className="adminListTop"><div className="adminBadgeIcon">🏆</div><div className="adminGrow"><b>{item.giveaway_title}</b><span>UID {item.telegram_id} · @{item.username || 'unknown'}</span></div><Status>{item.payment_status}</Status></div><div className="adminDataGrid"><div><span>Prize</span><b>{fmt(item.prize)} MAI</b></div><div><span>Method</span><b>{item.selection_method}</b></div></div></article>)}
               {!giveawayWinners.length && <Empty text="No winners selected yet." />}
             </div>}
-            {giveawayMode==='settings' && <section className="adminSection"><p className="adminFootnote">Global giveaway visibility is controlled by published campaigns. Unsupported social/quiz/purchase/custom verification types remain draft until a real authoritative verifier exists.</p></section>}
+            {giveawayMode==='settings' && <section className="adminSection"><div className="adminSectionHead"><div><span>SAFETY</span><h3>Giveaway Publishing Rules</h3></div></div><p className="adminFootnote">Home Gift visibility comes only from active published campaigns with Show on Home enabled. All listed Giveaway types have server-side eligibility checks. Multiple Entries is enabled only for Referral and verified Purchase evidence, where the backend can prove new qualifying evidence. Purchase currently means a verified MAI Network Promote payment; no separate Top-up ledger exists in the current backend.</p></section>}
           </>
         );
       };
