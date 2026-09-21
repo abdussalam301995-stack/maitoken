@@ -19255,7 +19255,7 @@ app.post(
               JOIN mai_giveaways g
                 ON g.id=w.giveaway_id
               LEFT JOIN users u
-                ON u.telegram_id=w.telegram_id
+               ON u.telegram_id::text=w.telegram_id
               ORDER BY w.created_at DESC
               LIMIT 1000
               `
