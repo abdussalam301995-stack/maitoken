@@ -56,7 +56,7 @@ export default function Friends({
   const [notice, setNotice] = useState('');
   const [copied, setCopied] = useState(false);
 
-  const telegramId = getUserId(user);
+  const telegramId = getUserTelegramId(user);
   const botUsername =
     process.env.REACT_APP_BOT_USERNAME ||
     DEFAULT_BOT_USERNAME;
@@ -76,7 +76,7 @@ export default function Friends({
 
     const rawInitData =
       initData ||
-      tg()?.initData ||
+      getTelegramWebApp()?.initData ||
       '';
 
     if (rawInitData) {
@@ -333,7 +333,7 @@ export default function Friends({
         message
       )}`;
 
-    const webApp = tg();
+    const webApp = getTelegramWebApp();
 
     if (webApp?.openTelegramLink) {
       webApp.openTelegramLink(
