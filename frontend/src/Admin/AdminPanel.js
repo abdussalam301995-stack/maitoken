@@ -1238,6 +1238,30 @@
           setGiveawayMode('campaigns');
         };
 
+        const awardGiveawayPrize = async item => {
+          if (!item || String(item.payment_status || '').toLowerCase() === 'paid') return;
+          const ok = window.confirm(`Award ${fmt(item.prize)} MAI to UID ${item.telegram_id}? This credits the user's Main Balance exactly once.`);
+          if (!ok) return;
+          await runAction(`give-award-${item.id}`,`/admin/giveaway-winners/${item.id}/award`,{});
+        };
+
+        const deleteGiveawayHistory = async item => {
+          if (!item || !['ended','completed'].includes(String(item.status))) return;
+          const ok = window.confirm(`Delete "${item.title}" from Giveaway history? Audit, entries and winner/payment records will be preserved safely.`);
+          if (!ok) return;
+          setBusy(`give-delete-${item.id}`);
+          setError('');
+          try {
+            await adminApi(`/admin/giveaways/${item.id}`, { method:'DELETE' });
+            flash('Giveaway history removed.');
+            await loadAll(true);
+          } catch (e) {
+            setError(e.message || 'Could not delete giveaway history.');
+          } finally {
+            setBusy('');
+          }
+        };
+
         const fieldStyle = {width:'100%',boxSizing:'border-box',padding:'12px 13px',borderRadius:10,border:'1px solid rgba(255,255,255,.12)',background:'rgba(4,13,28,.72)',color:'inherit',outline:'none'};
         const labelStyle = {display:'grid',gap:7};
 
@@ -1294,7 +1318,7 @@
                 {giveawayPreview && (
                   <article className="adminListCard" style={{marginTop:14}}>
                     {giveawayForm.imageUrl && <img src={giveawayForm.imageUrl} alt="" style={{width:'100%',maxHeight:260,objectFit:'cover',borderRadius:14,marginBottom:12}} />}
-                    <div className="adminListTop"><div className="adminBadgeIcon">🎁</div><div className="adminGrow"><b>{giveawayForm.title || 'Giveaway title'}</b><span>{String(giveawayForm.giveawayType).replaceAll('_',' ')} · User preview</span></div><Status>{verifierReadyTypes.has(giveawayForm.giveawayType)?'ready':'draft only'}</Status></div>
+                    <div className="adminListTop"><div className="adminBadgeIcon">🎁</div><div className="adminGrow"><b>{giveawayForm.title || 'Giveaway title'}</b><span>{String(giveawayForm.giveawayType).replaceAll('_',' ')} · User preview{giveawayForm.featured?' · FEATURED':''}</span></div><Status>{giveawayForm.featured?'featured':verifierReadyTypes.has(giveawayForm.giveawayType)?'ready':'draft only'}</Status></div>
                     <p className="adminFootnote">{giveawayForm.description || 'Campaign description will appear here.'}</p>
                     <div className="adminDataGrid"><div><span>Prize Pool</span><b>{fmt(giveawayForm.prizePool)} MAI</b></div><div><span>Winners</span><b>{fmt(giveawayForm.winnerCount)}</b></div><div><span>Start</span><b>{giveawayForm.startsAt || 'Immediately'}</b></div><div><span>End</span><b>{giveawayForm.endsAt || 'Open'}</b></div></div>
                   </article>
@@ -1312,13 +1336,14 @@
                     {item.status==='live' && <button className="warn" onClick={()=>runAction(`give-pause-${item.id}`,`/admin/giveaways/${item.id}/status`,{status:'paused'})}>Pause</button>}
                     {!['ended','completed'].includes(item.status) && <button className="danger" onClick={()=>runAction(`give-end-${item.id}`,`/admin/giveaways/${item.id}/status`,{status:'ended'})}>End</button>}
                     {item.status==='ended' && <button onClick={()=>{const n=Number(promptValue('Number of winners:',String(item.config?.winnerCount || 1))); if(n>0)runAction(`give-draw-${item.id}`,`/admin/giveaways/${item.id}/draw`,{winnerCount:n});}}>Draw Winners</button>}
+                    {['ended','completed'].includes(item.status) && <button className="danger" disabled={busy===`give-delete-${item.id}`} onClick={()=>deleteGiveawayHistory(item)}>{busy===`give-delete-${item.id}`?'Deleting…':'Delete History'}</button>}
                   </div>
                 </article>
               ))}
               {!giveaways.length && <Empty text="No giveaway campaigns." />}
             </div>}
             {giveawayMode==='winners' && <div className="adminList">
-              {giveawayWinners.map(item=><article className="adminListCard" key={item.id}><div className="adminListTop"><div className="adminBadgeIcon">🏆</div><div className="adminGrow"><b>{item.giveaway_title}</b><span>UID {item.telegram_id} · @{item.username || 'unknown'}</span></div><Status>{item.payment_status}</Status></div><div className="adminDataGrid"><div><span>Prize</span><b>{fmt(item.prize)} MAI</b></div><div><span>Method</span><b>{item.selection_method}</b></div></div></article>)}
+              {giveawayWinners.map(item=><article className="adminListCard" key={item.id}><div className="adminListTop"><div className="adminBadgeIcon">🏆</div><div className="adminGrow"><b>{item.giveaway_title}</b><span>UID {item.telegram_id} · @{item.username || 'unknown'}</span></div><Status>{item.payment_status}</Status></div><div className="adminDataGrid"><div><span>Prize</span><b>{fmt(item.prize)} MAI</b></div><div><span>Method</span><b>{item.selection_method}</b></div><div><span>Awarded</span><b>{when(item.paid_at)}</b></div></div>{String(item.payment_status||'').toLowerCase()!=='paid' && <div className="adminActions"><button className="good" disabled={busy===`give-award-${item.id}`} onClick={()=>awardGiveawayPrize(item)}>{busy===`give-award-${item.id}`?'Awarding…':'Award Prize'}</button></div>}</article>)}
               {!giveawayWinners.length && <Empty text="No winners selected yet." />}
             </div>}
             {giveawayMode==='settings' && <section className="adminSection"><div className="adminSectionHead"><div><span>SAFETY</span><h3>Giveaway Publishing Rules</h3></div></div><p className="adminFootnote">Home Gift visibility comes only from active published campaigns with Show on Home enabled. All listed Giveaway types have server-side eligibility checks. Multiple Entries is enabled only for Referral and verified Purchase evidence, where the backend can prove new qualifying evidence. Purchase currently means a verified MAI Network Promote payment; no separate Top-up ledger exists in the current backend.</p></section>}

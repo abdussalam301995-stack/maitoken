@@ -13256,7 +13256,13 @@ function GiveawayPage({ back, toast, playClick }) {
       const data = await api('/api/giveaways');
       const nextItems = Array.isArray(data.items) ? data.items : [];
       setItems(nextItems);
-      setFeatured(data.featured || nextItems[0] || null);
+      const featuredId = data.featured?.id;
+      setFeatured(
+        nextItems.find(item => String(item.id) === String(featuredId)) ||
+        data.featured ||
+        nextItems[0] ||
+        null
+      );
     } catch (error) {
       toast(error.message);
     } finally {

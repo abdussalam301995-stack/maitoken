@@ -18069,9 +18069,14 @@ app.post(
           ends_at TIMESTAMPTZ,
           created_by TEXT,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          admin_deleted_at TIMESTAMPTZ,
+          admin_deleted_by TEXT
         )
       `);
+
+      await pool.query(`ALTER TABLE mai_giveaways ADD COLUMN IF NOT EXISTS admin_deleted_at TIMESTAMPTZ`);
+      await pool.query(`ALTER TABLE mai_giveaways ADD COLUMN IF NOT EXISTS admin_deleted_by TEXT`);
 
       await pool.query(`
         CREATE TABLE IF NOT EXISTS mai_giveaway_entries(
@@ -18108,10 +18113,15 @@ app.post(
           prize NUMERIC(30,8) NOT NULL DEFAULT 0,
           selection_method TEXT NOT NULL,
           payment_status TEXT NOT NULL DEFAULT 'pending',
+          paid_at TIMESTAMPTZ,
+          paid_by TEXT,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           UNIQUE(giveaway_id, telegram_id)
         )
       `);
+
+      await pool.query(`ALTER TABLE mai_giveaway_winners ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ`);
+      await pool.query(`ALTER TABLE mai_giveaway_winners ADD COLUMN IF NOT EXISTS paid_by TEXT`);
 
       await pool.query(`
         CREATE TABLE IF NOT EXISTS mai_broadcasts(
@@ -18803,6 +18813,7 @@ app.post(
               SELECT *
               FROM mai_giveaways
               WHERE status='live'
+                AND admin_deleted_at IS NULL
                 AND (starts_at IS NULL OR starts_at<=NOW())
                 AND (ends_at IS NULL OR ends_at>NOW())
               ORDER BY featured DESC, created_at DESC
@@ -18832,7 +18843,13 @@ app.post(
             success:true,
             featured: (() => {
               const row = rows.find(item => item.featured) || rows[0] || null;
-              return row ? { ...row, config: publicGiveawayConfig(row) } : null;
+              return row
+                ? {
+                    ...row,
+                    config: publicGiveawayConfig(row),
+                    joined: joined.has(String(row.id))
+                  }
+                : null;
             })(),
             showHomeGift:
               rows.some(row => row.show_on_home),
@@ -18865,6 +18882,7 @@ app.post(
               FROM mai_giveaways
               WHERE id=$1
                 AND status='live'
+                AND admin_deleted_at IS NULL
                 AND (starts_at IS NULL OR starts_at<=NOW())
                 AND (ends_at IS NULL OR ends_at>NOW())
               `,
@@ -18955,6 +18973,7 @@ app.post(
                   WHERE e.giveaway_id=g.id
                 ) AS entries
               FROM mai_giveaways g
+              WHERE g.admin_deleted_at IS NULL
               ORDER BY g.created_at DESC
               `
             )
@@ -19353,6 +19372,173 @@ app.post(
       }
     );
 
+    /*
+     * Award an in-app MAI giveaway prize exactly once.
+     * This is intentionally separate from the W5 withdrawal/payout worker.
+     */
+    app.post(
+      '/admin/giveaway-winners/:id/award',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        const client = await pool.connect();
+
+        try {
+          await ensureMaiV5Schema();
+          await client.query('BEGIN');
+
+          const winner = (
+            await client.query(
+              `
+              SELECT w.*, g.title AS giveaway_title, g.admin_deleted_at
+              FROM mai_giveaway_winners w
+              JOIN mai_giveaways g ON g.id=w.giveaway_id
+              WHERE w.id=$1
+              FOR UPDATE OF w
+              `,
+              [req.params.id]
+            )
+          ).rows[0];
+
+          if (!winner || winner.admin_deleted_at) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({success:false,message:'Giveaway winner not found'});
+          }
+
+          if (String(winner.payment_status || '').toLowerCase() === 'paid') {
+            await client.query('ROLLBACK');
+            return res.status(409).json({success:false,message:'This giveaway prize has already been awarded'});
+          }
+
+          const prize = safeNumber(winner.prize);
+          if (!(prize > 0)) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({success:false,message:'Winner prize must be greater than zero'});
+          }
+
+          const credited = await client.query(
+            `
+            UPDATE users
+            SET balance=balance+$2, updated_at=NOW()
+            WHERE telegram_id::text=$1
+            RETURNING telegram_id, balance
+            `,
+            [String(winner.telegram_id),prize]
+          );
+
+          if (!credited.rowCount) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({success:false,message:'Winner user account not found'});
+          }
+
+          await client.query(
+            `
+            UPDATE mai_giveaway_winners
+            SET payment_status='paid', paid_at=NOW(), paid_by=$2
+            WHERE id=$1
+            `,
+            [req.params.id,String(req.admin?.telegramId || req.auth?.id || '')]
+          );
+
+          await client.query(
+            `
+            INSERT INTO admin_audit_logs(
+              admin_id,action,target_type,target_id,metadata,ip_hash
+            )
+            VALUES($1,'giveaway_prize_awarded','giveaway_winner',$2,$3,$4)
+            `,
+            [
+              req.admin?.telegramId || null,
+              String(req.params.id),
+              {
+                giveawayId:winner.giveaway_id,
+                telegramId:String(winner.telegram_id),
+                prize,
+                giveawayTitle:winner.giveaway_title
+              },
+              hash(req.ip).slice(0,32)
+            ]
+          );
+
+          await client.query('COMMIT');
+          res.json({
+            success:true,
+            message:`${prize} MAI awarded`,
+            winnerId:winner.id,
+            telegramId:String(winner.telegram_id),
+            prize,
+            balance:safeNumber(credited.rows[0]?.balance)
+          });
+        } catch (error) {
+          try { await client.query('ROLLBACK'); } catch {}
+          next(error);
+        } finally {
+          client.release();
+        }
+      }
+    );
+
+    /*
+     * "Delete" completed giveaway history from Admin UI without destroying
+     * entries, winner/payment evidence, or audit records.
+     */
+    app.delete(
+      '/admin/giveaways/:id',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+
+          const current = (
+            await pool.query(
+              `SELECT id,title,status,admin_deleted_at FROM mai_giveaways WHERE id=$1`,
+              [req.params.id]
+            )
+          ).rows[0];
+
+          if (!current || current.admin_deleted_at) {
+            return res.status(404).json({success:false,message:'Giveaway not found'});
+          }
+
+          if (!['ended','completed'].includes(String(current.status))) {
+            return res.status(409).json({
+              success:false,
+              message:'Only ended or completed giveaway history can be deleted'
+            });
+          }
+
+          await pool.query(
+            `
+            UPDATE mai_giveaways
+            SET admin_deleted_at=NOW(), admin_deleted_by=$2, show_on_home=FALSE, featured=FALSE, updated_at=NOW()
+            WHERE id=$1
+            `,
+            [req.params.id,String(req.admin?.telegramId || req.auth?.id || '')]
+          );
+
+          await pool.query(
+            `
+            INSERT INTO admin_audit_logs(
+              admin_id,action,target_type,target_id,metadata,ip_hash
+            )
+            VALUES($1,'giveaway_history_deleted','giveaway',$2,$3,$4)
+            `,
+            [
+              req.admin?.telegramId || null,
+              String(req.params.id),
+              {title:current.title,status:current.status,softDelete:true},
+              hash(req.ip).slice(0,32)
+            ]
+          );
+
+          res.json({success:true,message:'Giveaway history removed from Admin Panel'});
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
     app.get(
       '/admin/giveaway-winners',
       authenticate,
@@ -19374,6 +19560,7 @@ app.post(
                 ON g.id=w.giveaway_id
               LEFT JOIN users u
                 ON u.telegram_id::text=w.telegram_id
+              WHERE g.admin_deleted_at IS NULL
               ORDER BY w.created_at DESC
               LIMIT 1000
               `
