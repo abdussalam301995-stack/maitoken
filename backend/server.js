@@ -3783,7 +3783,10 @@ if (
         target_url TEXT,
         telegram_chat_id TEXT,
         rule_config JSONB NOT NULL DEFAULT '{}'::jsonb,
-        recurrence TEXT NOT NULL DEFAULT 'once' CHECK (recurrence IN ('once','daily')),
+        recurrence TEXT NOT NULL DEFAULT 'once' CHECK (recurrence IN ('once','daily','interval')),
+        refresh_hours INTEGER CHECK (refresh_hours IS NULL OR refresh_hours > 0),
+        claim_limit INTEGER CHECK (claim_limit IS NULL OR claim_limit > 0),
+        admin_hidden BOOLEAN NOT NULL DEFAULT FALSE,
         status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','active','paused','ended')),
         starts_at TIMESTAMPTZ,
         ends_at TIMESTAMPTZ,
@@ -3792,6 +3795,15 @@ if (
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_managed_tasks_status ON managed_tasks(status, created_at DESC);
+      ALTER TABLE managed_tasks DROP CONSTRAINT IF EXISTS managed_tasks_recurrence_check;
+      ALTER TABLE managed_tasks ADD COLUMN IF NOT EXISTS refresh_hours INTEGER;
+      ALTER TABLE managed_tasks ADD COLUMN IF NOT EXISTS claim_limit INTEGER;
+      ALTER TABLE managed_tasks ADD COLUMN IF NOT EXISTS admin_hidden BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE managed_tasks ADD CONSTRAINT managed_tasks_recurrence_check CHECK (recurrence IN ('once','daily','interval'));
+      ALTER TABLE managed_tasks DROP CONSTRAINT IF EXISTS managed_tasks_refresh_hours_check;
+      ALTER TABLE managed_tasks ADD CONSTRAINT managed_tasks_refresh_hours_check CHECK (refresh_hours IS NULL OR refresh_hours > 0);
+      ALTER TABLE managed_tasks DROP CONSTRAINT IF EXISTS managed_tasks_claim_limit_check;
+      ALTER TABLE managed_tasks ADD CONSTRAINT managed_tasks_claim_limit_check CHECK (claim_limit IS NULL OR claim_limit > 0);
 
       CREATE TABLE IF NOT EXISTS managed_task_completions(
         id BIGSERIAL PRIMARY KEY,
@@ -3814,12 +3826,15 @@ if (
         completion_bonus NUMERIC(30,8) NOT NULL DEFAULT 0 CHECK (completion_bonus >= 0),
         status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','active','paused','ended')),
         featured BOOLEAN NOT NULL DEFAULT FALSE,
+        admin_hidden BOOLEAN NOT NULL DEFAULT FALSE,
         starts_at TIMESTAMPTZ,
         ends_at TIMESTAMPTZ,
         created_by BIGINT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+
+      ALTER TABLE managed_missions ADD COLUMN IF NOT EXISTS admin_hidden BOOLEAN NOT NULL DEFAULT FALSE;
 
       CREATE TABLE IF NOT EXISTS managed_mission_tasks(
         mission_id BIGINT NOT NULL REFERENCES managed_missions(id) ON DELETE CASCADE,
@@ -6676,6 +6691,16 @@ await pool.query(`
       return String(task?.recurrence || 'once') === 'daily' ? utcDay() : 'once';
     }
 
+    async function managedPeriodKeyForUser(task, userId, db = pool) {
+      if (String(task?.recurrence || 'once') !== 'interval') return managedPeriodKey(task);
+      const hours = Math.max(1, safeInteger(task?.refresh_hours, 4));
+      const last = (await db.query(`SELECT id,claimed_at FROM managed_task_completions WHERE telegram_id=$1 AND task_id=$2 AND claimed_at IS NOT NULL ORDER BY claimed_at DESC,id DESC LIMIT 1`,[userId,task.id])).rows[0];
+      if (!last) return 'interval:0';
+      const nextAt = new Date(last.claimed_at).getTime() + hours * 3600000;
+      if (Date.now() < nextAt) return null;
+      return `interval:${last.id}`;
+    }
+
     function managedTaskIsLive(task) {
       const now = Date.now();
       if (String(task?.status) !== 'active') return false;
@@ -6736,25 +6761,46 @@ await pool.query(`
     }
 
     async function managedTaskListForUser(userId) {
-      const result = await pool.query(`
+      const tasks = (await pool.query(`
         SELECT t.*,
-          c.verified_at, c.claimed_at, c.reward_snapshot
+          (SELECT COUNT(*)::int FROM managed_task_completions cc WHERE cc.task_id=t.id AND cc.claimed_at IS NOT NULL) AS completion_count
         FROM managed_tasks t
-        LEFT JOIN managed_task_completions c
-          ON c.task_id=t.id AND c.telegram_id=$1
-          AND c.period_key=(CASE WHEN t.recurrence='daily' THEN $2 ELSE 'once' END)
-        WHERE t.status='active'
+        WHERE t.status='active' AND COALESCE(t.admin_hidden,FALSE)=FALSE
           AND (t.starts_at IS NULL OR t.starts_at <= NOW())
           AND (t.ends_at IS NULL OR t.ends_at > NOW())
         ORDER BY t.created_at DESC
-      `,[userId,utcDay()]);
-      return result.rows.map(t => ({
-        id:String(t.id), title:t.title, description:t.description, icon:t.icon,
-        type:t.task_type, reward:safeNumber(t.reward), link:t.target_url,
-        recurrence:t.recurrence, startsAt:t.starts_at, endsAt:t.ends_at,
-        verified:!!t.verified_at, completed:!!t.claimed_at,
-        state:t.claimed_at ? 'claimed' : t.verified_at ? 'claim' : 'verify'
-      }));
+      `)).rows;
+      const out=[];
+      for (const t of tasks) {
+        const limit=t.claim_limit==null?null:Math.max(1,safeInteger(t.claim_limit,1));
+        const used=Math.max(0,safeInteger(t.completion_count,0));
+        if(limit!==null && used>=limit) continue;
+        let period=managedPeriodKey(t);
+        let nextEligibleAt=null;
+        if(String(t.recurrence)==='interval') {
+          const last=(await pool.query(`SELECT id,verified_at,claimed_at,reward_snapshot FROM managed_task_completions WHERE telegram_id=$1 AND task_id=$2 AND claimed_at IS NOT NULL ORDER BY claimed_at DESC,id DESC LIMIT 1`,[userId,t.id])).rows[0];
+          const hours=Math.max(1,safeInteger(t.refresh_hours,4));
+          if(last?.claimed_at) {
+            nextEligibleAt=new Date(new Date(last.claimed_at).getTime()+hours*3600000).toISOString();
+            period=Date.now()>=new Date(nextEligibleAt).getTime()?`interval:${last.id}`:null;
+          } else period='interval:0';
+          if(period===null) {
+            out.push({id:String(t.id),title:t.title,description:t.description,icon:t.icon,type:t.task_type,reward:safeNumber(t.reward),link:t.target_url,recurrence:t.recurrence,refreshHours:hours,claimLimit:limit,completionCount:used,remaining:limit===null?null:Math.max(0,limit-used),startsAt:t.starts_at,endsAt:t.ends_at,verified:false,completed:true,state:'claimed',nextEligibleAt});
+            continue;
+          }
+        }
+        const c=(await pool.query(`SELECT verified_at,claimed_at,reward_snapshot FROM managed_task_completions WHERE telegram_id=$1 AND task_id=$2 AND period_key=$3 LIMIT 1`,[userId,t.id,period])).rows[0];
+        out.push({
+          id:String(t.id), title:t.title, description:t.description, icon:t.icon,
+          type:t.task_type, reward:safeNumber(t.reward), link:t.target_url,
+          recurrence:t.recurrence, refreshHours:t.refresh_hours, claimLimit:limit,
+          completionCount:used, remaining:limit===null?null:Math.max(0,limit-used),
+          startsAt:t.starts_at, endsAt:t.ends_at,
+          verified:!!c?.verified_at, completed:!!c?.claimed_at,
+          state:c?.claimed_at ? 'claimed' : c?.verified_at ? 'claim' : 'verify', nextEligibleAt
+        });
+      }
+      return out;
     }
 
     async function managedMissionListForUser(userId) {
@@ -6772,8 +6818,12 @@ await pool.query(`
             c.claimed_at
           FROM managed_mission_tasks mt
           JOIN managed_tasks t ON t.id=mt.task_id
-          LEFT JOIN managed_task_completions c ON c.task_id=t.id AND c.telegram_id=$2
-            AND c.period_key=(CASE WHEN t.recurrence='daily' THEN $3 ELSE 'once' END)
+          LEFT JOIN LATERAL (
+            SELECT cc.claimed_at FROM managed_task_completions cc
+            WHERE cc.task_id=t.id AND cc.telegram_id=$2
+              AND (t.recurrence='interval' OR cc.period_key=(CASE WHEN t.recurrence='daily' THEN $3 ELSE 'once' END))
+            ORDER BY cc.claimed_at DESC NULLS LAST,cc.id DESC LIMIT 1
+          ) c ON TRUE
           WHERE mt.mission_id=$1
           ORDER BY mt.sort_order,t.id
         `,[m.id,userId,utcDay()])).rows;
@@ -6800,7 +6850,10 @@ await pool.query(`
         if(!task || !managedTaskIsLive(task)) return res.status(404).json({success:false,message:'Task is not active.'});
         const check=await managedTaskVerification(task,req.auth.id);
         if(!check.verified) return res.status(409).json({success:false,verified:false,...check});
-        const period=managedPeriodKey(task);
+        const period=await managedPeriodKeyForUser(task,req.auth.id);
+        if(period===null) return res.status(409).json({success:false,message:'Task cooldown is still active.'});
+        const used=(await pool.query(`SELECT COUNT(*)::int AS c FROM managed_task_completions WHERE task_id=$1 AND claimed_at IS NOT NULL`,[task.id])).rows[0]?.c||0;
+        if(task.claim_limit!=null && used>=safeInteger(task.claim_limit,0)) return res.status(409).json({success:false,message:'Task limit has been reached.'});
         await pool.query(`INSERT INTO managed_task_completions(telegram_id,task_id,period_key,reward_snapshot,verified_at)
           VALUES($1,$2,$3,$4,NOW()) ON CONFLICT(telegram_id,task_id,period_key) DO UPDATE SET verified_at=COALESCE(managed_task_completions.verified_at,NOW())`,
           [req.auth.id,task.id,period,safeNumber(task.reward)]);
@@ -6815,7 +6868,10 @@ await pool.query(`
         const q=await client.query(`SELECT * FROM managed_tasks WHERE id=$1 FOR UPDATE`,[req.params.id]);
         const task=q.rows[0];
         if(!task || !managedTaskIsLive(task)){ await client.query('ROLLBACK'); return res.status(404).json({success:false,message:'Task is not active.'}); }
-        const period=managedPeriodKey(task);
+        const period=await managedPeriodKeyForUser(task,req.auth.id,client);
+        if(period===null){ await client.query('ROLLBACK'); return res.status(409).json({success:false,message:'Task cooldown is still active.'}); }
+        const used=(await client.query(`SELECT COUNT(*)::int AS c FROM managed_task_completions WHERE task_id=$1 AND claimed_at IS NOT NULL`,[task.id])).rows[0]?.c||0;
+        if(task.claim_limit!=null && used>=safeInteger(task.claim_limit,0)){ await client.query('ROLLBACK'); return res.status(409).json({success:false,message:'Task limit has been reached.'}); }
         const c=(await client.query(`SELECT * FROM managed_task_completions WHERE telegram_id=$1 AND task_id=$2 AND period_key=$3 FOR UPDATE`,[req.auth.id,task.id,period])).rows[0];
         if(!c?.verified_at){ await client.query('ROLLBACK'); return res.status(409).json({success:false,message:'Verify the task first.'}); }
         if(c.claimed_at){ await client.query('ROLLBACK'); return res.json({success:true,reward:safeNumber(c.reward_snapshot),alreadyClaimed:true,user:await buildUser(req.auth.id)}); }
@@ -6834,7 +6890,7 @@ await pool.query(`
         await client.query('BEGIN');
         const m=(await client.query(`SELECT * FROM managed_missions WHERE id=$1 AND status='active' FOR UPDATE`,[req.params.id])).rows[0];
         if(!m){await client.query('ROLLBACK');return res.status(404).json({success:false,message:'Mission is not active.'});}
-        const rows=(await client.query(`SELECT t.id,t.recurrence,c.claimed_at FROM managed_mission_tasks mt JOIN managed_tasks t ON t.id=mt.task_id LEFT JOIN managed_task_completions c ON c.task_id=t.id AND c.telegram_id=$2 AND c.period_key=(CASE WHEN t.recurrence='daily' THEN $3 ELSE 'once' END) WHERE mt.mission_id=$1`,[m.id,req.auth.id,utcDay()])).rows;
+        const rows=(await client.query(`SELECT t.id,t.recurrence,c.claimed_at FROM managed_mission_tasks mt JOIN managed_tasks t ON t.id=mt.task_id LEFT JOIN LATERAL (SELECT cc.claimed_at FROM managed_task_completions cc WHERE cc.task_id=t.id AND cc.telegram_id=$2 AND (t.recurrence='interval' OR cc.period_key=(CASE WHEN t.recurrence='daily' THEN $3 ELSE 'once' END)) ORDER BY cc.claimed_at DESC NULLS LAST,cc.id DESC LIMIT 1) c ON TRUE WHERE mt.mission_id=$1`,[m.id,req.auth.id,utcDay()])).rows;
         if(!rows.length || rows.some(x=>!x.claimed_at)){await client.query('ROLLBACK');return res.status(409).json({success:false,message:'Complete every mission task first.'});}
         const ins=await client.query(`INSERT INTO managed_mission_completions(telegram_id,mission_id,bonus_snapshot) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING mission_id`,[req.auth.id,m.id,safeNumber(m.completion_bonus)]);
         if(!ins.rowCount){await client.query('ROLLBACK');return res.json({success:true,alreadyClaimed:true,user:await buildUser(req.auth.id)});}
@@ -6848,7 +6904,7 @@ await pool.query(`
 
     /* ---------------- ADMIN TASKS & MISSIONS ---------------- */
     app.get('/admin/tasks', authenticate, admin, async (req,res,next)=>{try{
-      const items=(await pool.query(`SELECT t.*, (SELECT COUNT(*)::int FROM managed_task_completions c WHERE c.task_id=t.id AND c.claimed_at IS NOT NULL) AS completion_count FROM managed_tasks t ORDER BY t.created_at DESC`)).rows;
+      const items=(await pool.query(`SELECT t.*, (SELECT COUNT(*)::int FROM managed_task_completions c WHERE c.task_id=t.id AND c.claimed_at IS NOT NULL) AS completion_count FROM managed_tasks t WHERE COALESCE(t.admin_hidden,FALSE)=FALSE ORDER BY t.created_at DESC`)).rows;
       res.json({success:true,items});
     }catch(e){next(e)}});
 
@@ -6856,10 +6912,17 @@ await pool.query(`
       const b=req.body||{}; const type=String(b.taskType||'').trim();
       if(!MANAGED_TASK_TYPES.has(type)) return res.status(400).json({success:false,message:'Unsupported task type.'});
       const title=String(b.title||'').trim().slice(0,120); if(!title) return res.status(400).json({success:false,message:'Title is required.'});
-      const reward=Math.max(0,safeNumber(b.reward)); const recurrence=b.recurrence==='daily'?'daily':'once';
+      const reward=Math.max(0,safeNumber(b.reward));
+      const recurrence=['daily','interval'].includes(String(b.recurrence))?String(b.recurrence):'once';
+      const refreshHours=recurrence==='interval'?Math.max(1,Math.min(8760,safeInteger(b.refreshHours,4))):null;
+      const claimLimit=(b.claimLimit===null || b.claimLimit==='' || String(b.claimLimit).toLowerCase()==='all')?null:Math.max(1,safeInteger(b.claimLimit,1));
       const status=['draft','active','paused'].includes(b.status)?b.status:'draft';
-      const r=await pool.query(`INSERT INTO managed_tasks(title,description,icon,task_type,reward,target_url,telegram_chat_id,rule_config,recurrence,status,starts_at,ends_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,[title,String(b.description||'').slice(0,1000),String(b.icon||'✦').slice(0,16),type,reward,b.targetUrl||null,b.telegramChatId||null,b.ruleConfig||{},recurrence,status,b.startsAt||null,b.endsAt||null,req.admin?.telegramId||null]);
-      await pool.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,metadata,ip_hash) VALUES($1,'task_created','managed_task',$2,$3,$4)`,[req.admin?.telegramId||null,String(r.rows[0].id),{title,type,reward,status},hash(req.ip).slice(0,32)]);
+      const rules=(b.ruleConfig && typeof b.ruleConfig==='object' && !Array.isArray(b.ruleConfig))?b.ruleConfig:{};
+      if(status==='active' && type==='telegram_join' && !String(b.telegramChatId||'').trim()) return res.status(400).json({success:false,message:'Telegram chat ID / @username is required before publishing.'});
+      if(status==='active' && type==='telegram_bot' && !String(rules.eventType||'').trim()) return res.status(400).json({success:false,message:'A verified MAI server event is required before publishing this bot task.'});
+      if(status==='active' && ['visit_link','custom'].includes(type)) return res.status(400).json({success:false,message:'This task type has no secure automatic verifier yet. Save it as draft until a verifier is configured.'});
+      const r=await pool.query(`INSERT INTO managed_tasks(title,description,icon,task_type,reward,target_url,telegram_chat_id,rule_config,recurrence,refresh_hours,claim_limit,status,starts_at,ends_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,[title,String(b.description||'').slice(0,1000),String(b.icon||'✦').slice(0,16),type,reward,b.targetUrl||null,b.telegramChatId||null,rules,recurrence,refreshHours,claimLimit,status,b.startsAt||null,b.endsAt||null,req.admin?.telegramId||null]);
+      await pool.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,metadata,ip_hash) VALUES($1,'task_created','managed_task',$2,$3,$4)`,[req.admin?.telegramId||null,String(r.rows[0].id),{title,type,reward,status,recurrence,refreshHours,claimLimit},hash(req.ip).slice(0,32)]);
       res.json({success:true,item:r.rows[0]});
     }catch(e){next(e)}});
 
@@ -6870,8 +6933,15 @@ await pool.query(`
       res.json({success:true,item:r.rows[0]});
     }catch(e){next(e)}});
 
+    app.delete('/admin/tasks/:id', authenticate, admin, async (req,res,next)=>{try{
+      const r=await pool.query(`UPDATE managed_tasks SET status='ended',admin_hidden=TRUE,updated_at=NOW() WHERE id=$1 AND COALESCE(admin_hidden,FALSE)=FALSE RETURNING id,title`,[req.params.id]);
+      if(!r.rowCount)return res.status(404).json({success:false,message:'Task not found.'});
+      await pool.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,metadata,ip_hash) VALUES($1,'task_admin_hidden','managed_task',$2,$3,$4)`,[req.admin?.telegramId||null,String(req.params.id),{title:r.rows[0].title,preservedHistory:true},hash(req.ip).slice(0,32)]);
+      res.json({success:true,message:'Task removed from Admin history. Completion and audit records were preserved.'});
+    }catch(e){next(e)}});
+
     app.get('/admin/missions', authenticate, admin, async (req,res,next)=>{try{
-      const items=(await pool.query(`SELECT m.*, COALESCE(json_agg(json_build_object('id',t.id,'title',t.title,'reward',t.reward) ORDER BY mt.sort_order) FILTER (WHERE t.id IS NOT NULL),'[]') AS tasks FROM managed_missions m LEFT JOIN managed_mission_tasks mt ON mt.mission_id=m.id LEFT JOIN managed_tasks t ON t.id=mt.task_id GROUP BY m.id ORDER BY m.created_at DESC`)).rows;
+      const items=(await pool.query(`SELECT m.*, COALESCE(json_agg(json_build_object('id',t.id,'title',t.title,'reward',t.reward) ORDER BY mt.sort_order) FILTER (WHERE t.id IS NOT NULL),'[]') AS tasks FROM managed_missions m LEFT JOIN managed_mission_tasks mt ON mt.mission_id=m.id LEFT JOIN managed_tasks t ON t.id=mt.task_id WHERE COALESCE(m.admin_hidden,FALSE)=FALSE GROUP BY m.id ORDER BY m.created_at DESC`)).rows;
       res.json({success:true,items});
     }catch(e){next(e)}});
 
@@ -6901,6 +6971,13 @@ await pool.query(`
       res.json({success:true,item:r.rows[0]});
     }catch(e){next(e)}});
 
+
+    app.delete('/admin/missions/:id', authenticate, admin, async (req,res,next)=>{try{
+      const r=await pool.query(`UPDATE managed_missions SET status='ended',admin_hidden=TRUE,updated_at=NOW() WHERE id=$1 AND COALESCE(admin_hidden,FALSE)=FALSE RETURNING id,title`,[req.params.id]);
+      if(!r.rowCount)return res.status(404).json({success:false,message:'Mission not found.'});
+      await pool.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,metadata,ip_hash) VALUES($1,'mission_admin_hidden','managed_mission',$2,$3,$4)`,[req.admin?.telegramId||null,String(req.params.id),{title:r.rows[0].title,preservedHistory:true},hash(req.ip).slice(0,32)]);
+      res.json({success:true,message:'Mission removed from Admin history. Completion and audit records were preserved.'});
+    }catch(e){next(e)}});
 
     /* =========================================================
        HEALTH

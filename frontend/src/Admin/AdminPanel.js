@@ -148,6 +148,8 @@
       const [launchControl, setLaunchControl] = useState(null);
       const [moduleStatus, setModuleStatus] = useState(null);
       const [taskMode, setTaskMode] = useState('tasks');
+      const [taskComposerOpen, setTaskComposerOpen] = useState(false);
+      const [taskForm, setTaskForm] = useState({title:'',targetUrl:'',reward:'',taskType:'telegram_join',telegramChatId:'',limitMode:'all',customLimit:'',refreshMode:'once',customHours:'',description:'',icon:'✦',requirementValue:'1',botEventType:'',status:'draft'});
       const [giveawayMode, setGiveawayMode] = useState('create');
       const [giveawayPreview, setGiveawayPreview] = useState(false);
       const [giveawayForm, setGiveawayForm] = useState({
@@ -1037,134 +1039,74 @@
         String(window.prompt(label, fallback) || '').trim();
 
       const renderTasksMissions = () => {
-        const createTask = async () => {
-          const title = promptValue('Task title:');
-          if (!title) return;
-          const taskType = promptValue(
-            'Task type: telegram_join, telegram_bot, invite_friends, hold_mai, mining_mission, daily_mission, visit_link, custom',
-            'telegram_join'
-          );
-          const reward = Number(promptValue('Reward MAI:', '0'));
-          const targetUrl = promptValue('Target URL (optional):');
-          const telegramChatId = promptValue('Telegram chat ID / @username (optional):');
-          await runAction('create-task','/admin/tasks',{
-            title,
-            taskType,
-            reward: Number.isFinite(reward) ? reward : 0,
-            targetUrl: targetUrl || null,
-            telegramChatId: telegramChatId || null,
-            recurrence: taskType === 'daily_mission' ? 'daily' : 'once',
-            status: 'draft'
-          });
+        const setTaskField=(key,value)=>setTaskForm(old=>({...old,[key]:value}));
+        const resetTaskForm=()=>setTaskForm({title:'',targetUrl:'',reward:'',taskType:'telegram_join',telegramChatId:'',limitMode:'all',customLimit:'',refreshMode:'once',customHours:'',description:'',icon:'✦',requirementValue:'1',botEventType:'',status:'draft'});
+        const submitTask=async requestedStatus=>{
+          const title=String(taskForm.title||'').trim();
+          const reward=Number(taskForm.reward);
+          if(!title){setError('Task title is required.');return;}
+          if(!Number.isFinite(reward)||reward<0){setError('Reward must be a valid MAI amount.');return;}
+          const claimLimit=taskForm.limitMode==='all'?null:taskForm.limitMode==='custom'?Number(taskForm.customLimit):Number(taskForm.limitMode);
+          if(claimLimit!==null&&(!Number.isInteger(claimLimit)||claimLimit<=0)){setError('Task limit must be a positive whole number.');return;}
+          const recurrence=taskForm.refreshMode==='once'?'once':'interval';
+          const refreshHours=recurrence==='interval'?(taskForm.refreshMode==='custom'?Number(taskForm.customHours):Number(taskForm.refreshMode)):null;
+          if(recurrence==='interval'&&(!Number.isInteger(refreshHours)||refreshHours<=0)){setError('Refresh hours must be a positive whole number.');return;}
+          const ruleConfig={};
+          if(taskForm.taskType==='invite_friends') ruleConfig.count=Math.max(1,Number(taskForm.requirementValue||1));
+          if(taskForm.taskType==='hold_mai') ruleConfig.amount=Math.max(0,Number(taskForm.requirementValue||0));
+          if(['mining_mission','daily_mission'].includes(taskForm.taskType)) ruleConfig.claims=Math.max(1,Number(taskForm.requirementValue||1));
+          if(taskForm.taskType==='telegram_bot') ruleConfig.eventType=String(taskForm.botEventType||'').trim();
+          if(requestedStatus==='active'&&['visit_link','custom'].includes(taskForm.taskType)){setError('This task type has no secure automatic verifier yet. Save it as Draft until a verifier is configured.');return;}
+          setBusy('create-task'); setError('');
+          try {
+            await adminApi('/admin/tasks',{method:'POST',body:JSON.stringify({title,description:String(taskForm.description||'').trim(),icon:String(taskForm.icon||'✦').trim()||'✦',taskType:taskForm.taskType,reward,targetUrl:String(taskForm.targetUrl||'').trim()||null,telegramChatId:String(taskForm.telegramChatId||'').trim()||null,ruleConfig,claimLimit,recurrence,refreshHours,status:requestedStatus})});
+            flash(requestedStatus==='active'?'Task published.':'Task draft saved.'); await loadAll(true); resetTaskForm(); setTaskComposerOpen(false); setTaskMode('tasks');
+          } catch(e) { setError(e.message||'Could not create task.'); } finally { setBusy(''); }
         };
-
+        const deleteTask=async item=>{if(!window.confirm(`Delete "${item.title}" from Tasks & Missions? Completion and audit records will be preserved.`))return;setBusy(`task-delete-${item.id}`);setError('');try{await adminApi(`/admin/tasks/${item.id}`,{method:'DELETE'});flash('Task removed safely.');await loadAll(true);}catch(e){setError(e.message||'Could not delete task.');}finally{setBusy('');}};
         const createMission = async () => {
-          const title = promptValue('Mission title:');
-          if (!title) return;
-          const ids = promptValue(
-            'Task IDs separated by commas:',
-            managedTasks.map(x => x.id).slice(0,3).join(',')
-          ).split(',').map(x => x.trim()).filter(Boolean);
-          const validTaskIds = new Set(managedTasks.map(x => String(x.id)));
-          const missingIds = ids.filter(id => !validTaskIds.has(String(id)));
-          if (missingIds.length) {
-            setError(`Selected task does not exist: ${missingIds.join(', ')}`);
-            return;
-          }
+          const title = promptValue('Mission title:'); if (!title) return;
+          const ids = promptValue('Task IDs separated by commas:',managedTasks.map(x => x.id).slice(0,3).join(',')).split(',').map(x => x.trim()).filter(Boolean);
+          const validTaskIds = new Set(managedTasks.map(x => String(x.id))); const missingIds = ids.filter(id => !validTaskIds.has(String(id)));
+          if (missingIds.length) { setError(`Selected task does not exist: ${missingIds.join(', ')}`); return; }
           const completionBonus = Number(promptValue('Completion bonus MAI:', '0'));
-          await runAction('create-mission','/admin/missions',{
-            title,
-            taskIds: ids,
-            completionBonus: Number.isFinite(completionBonus) ? completionBonus : 0,
-            status: 'draft'
-          });
+          await runAction('create-mission','/admin/missions',{title,taskIds:ids,completionBonus:Number.isFinite(completionBonus)?completionBonus:0,status:'draft'});
         };
-
-        return (
-          <>
-            <section className="adminSection">
-              <div className="adminSectionHead">
-                <div><span>TASK ENGINE</span><h3>Tasks & Missions</h3></div>
-                <div className="adminActions">
-                  <button onClick={createTask} disabled={!!busy}>Create Task</button>
-                  <button onClick={createMission} disabled={!!busy}>Create Mission</button>
-                </div>
-              </div>
-              <div className="adminMiniStats">
-                <div><span>Tasks</span><b>{managedTasks.length}</b></div>
-                <div><span>Active Tasks</span><b>{managedTasks.filter(x=>x.status==='active').length}</b></div>
-                <div><span>Missions</span><b>{managedMissions.length}</b></div>
-              </div>
-              <div className="adminActions">
-                <button className={taskMode==='tasks'?'good':''} onClick={()=>setTaskMode('tasks')}>Active Tasks</button>
-                <button className={taskMode==='missions'?'good':''} onClick={()=>setTaskMode('missions')}>Missions</button>
-                <button className={taskMode==='history'?'good':''} onClick={()=>setTaskMode('history')}>History</button>
-              </div>
-            </section>
-
-            {taskMode === 'tasks' && (
-              <div className="adminList">
-                {managedTasks.map(item => (
-                  <article className="adminListCard" key={item.id}>
-                    <div className="adminListTop">
-                      <div className="adminBadgeIcon">{item.icon || '✓'}</div>
-                      <div className="adminGrow"><b>{item.title}</b><span>#{item.id} · {item.task_type}</span></div>
-                      <Status>{item.status}</Status>
-                    </div>
-                    <div className="adminDataGrid">
-                      <div><span>Reward</span><b>{fmt(item.reward)} MAI</b></div>
-                      <div><span>Completed</span><b>{fmt(item.completion_count)}</b></div>
-                      <div><span>Recurrence</span><b>{item.recurrence || 'once'}</b></div>
-                      <div><span>Created</span><b>{when(item.created_at)}</b></div>
-                    </div>
-                    <div className="adminActions">
-                      {item.status !== 'active' && <button className="good" onClick={()=>runAction(`task-active-${item.id}`,`/admin/tasks/${item.id}/status`,{status:'active'})}>Activate</button>}
-                      {item.status === 'active' && <button className="warn" onClick={()=>runAction(`task-pause-${item.id}`,`/admin/tasks/${item.id}/status`,{status:'paused'})}>Pause</button>}
-                      {item.status !== 'ended' && <button className="danger" onClick={()=>runAction(`task-end-${item.id}`,`/admin/tasks/${item.id}/status`,{status:'ended'})}>End</button>}
-                    </div>
-                  </article>
-                ))}
-                {!managedTasks.length && <Empty text="No managed tasks yet." />}
-              </div>
-            )}
-
-            {taskMode === 'missions' && (
-              <div className="adminList">
-                {managedMissions.map(item => (
-                  <article className="adminListCard" key={item.id}>
-                    <div className="adminListTop">
-                      <div className="adminBadgeIcon">{item.icon || '◆'}</div>
-                      <div className="adminGrow"><b>{item.title}</b><span>#{item.id} · {(item.tasks || []).length} tasks</span></div>
-                      <Status>{item.status}</Status>
-                    </div>
-                    <div className="adminDataGrid">
-                      <div><span>Bonus</span><b>{fmt(item.completion_bonus)} MAI</b></div>
-                      <div><span>Featured</span><b>{item.featured ? 'YES' : 'NO'}</b></div>
-                      <div><span>Starts</span><b>{when(item.starts_at)}</b></div>
-                      <div><span>Ends</span><b>{when(item.ends_at)}</b></div>
-                    </div>
-                    <div className="adminActions">
-                      {item.status !== 'active' && <button className="good" onClick={()=>runAction(`mission-active-${item.id}`,`/admin/missions/${item.id}/status`,{status:'active'})}>Activate</button>}
-                      {item.status === 'active' && <button className="warn" onClick={()=>runAction(`mission-pause-${item.id}`,`/admin/missions/${item.id}/status`,{status:'paused'})}>Pause</button>}
-                      {item.status !== 'ended' && <button className="danger" onClick={()=>runAction(`mission-end-${item.id}`,`/admin/missions/${item.id}/status`,{status:'ended'})}>End</button>}
-                    </div>
-                  </article>
-                ))}
-                {!managedMissions.length && <Empty text="No missions yet." />}
-              </div>
-            )}
-
-            {taskMode === 'history' && (
-              <div className="adminList">
-                {[...managedTasks.filter(x=>x.status==='ended'),...managedMissions.filter(x=>x.status==='ended')].map((item,index)=>(
-                  <article className="adminListCard" key={`${item.id}-${index}`}>
-                    <div className="adminListTop"><div className="adminBadgeIcon">☷</div><div className="adminGrow"><b>{item.title}</b><span>Ended module #{item.id}</span></div><Status>ended</Status></div>
-                  </article>
-                ))}
-              </div>
-            )}
-          </>
-        );
+        const deleteMission=async item=>{if(!window.confirm(`Delete "${item.title}" from Tasks & Missions? Mission completion and audit records will be preserved.`))return;setBusy(`mission-delete-${item.id}`);setError('');try{await adminApi(`/admin/missions/${item.id}`,{method:'DELETE'});flash('Mission removed safely.');await loadAll(true);}catch(e){setError(e.message||'Could not delete mission.');}finally{setBusy('');}};
+        const refreshLabel=item=>item.recurrence==='interval'?`Every ${item.refresh_hours||4}h`:item.recurrence==='daily'?'Every 24h':'Once only';
+        const limitLabel=item=>item.claim_limit==null?'All Users':fmt(item.claim_limit);
+        return (<>
+          <section className="adminSection adminTaskEngine">
+            <div className="adminSectionHead"><div><span>TASK ENGINE</span><h3>Tasks & Missions</h3></div><div className="adminActions"><button className="adminPrimaryAction" onClick={()=>setTaskComposerOpen(v=>!v)} disabled={!!busy}>{taskComposerOpen?'Close Creator':'✦ Create Task'}</button><button onClick={createMission} disabled={!!busy}>◆ Create Mission</button></div></div>
+            <div className="adminMiniStats"><div><span>Tasks</span><b>{managedTasks.length}</b></div><div><span>Active Tasks</span><b>{managedTasks.filter(x=>x.status==='active').length}</b></div><div><span>Missions</span><b>{managedMissions.length}</b></div></div>
+            <div className="adminActions adminTaskTabs"><button className={taskMode==='tasks'?'good':''} onClick={()=>setTaskMode('tasks')}>Active Tasks</button><button className={taskMode==='missions'?'good':''} onClick={()=>setTaskMode('missions')}>Missions</button><button className={taskMode==='history'?'good':''} onClick={()=>setTaskMode('history')}>History</button></div>
+          </section>
+          {taskComposerOpen&&<section className="adminSection adminTaskComposer"><div className="adminTaskComposerHero"><div className="adminTaskComposerIcon">✦</div><div><span>PREMIUM TASK CREATOR</span><h3>Create a verified MAI task</h3><p>Rewards, limits and refresh rules are enforced by the server.</p></div></div>
+            <div className="adminTaskFormGrid">
+              <label className="adminTaskField adminTaskWide"><span>Task Title</span><input value={taskForm.title} onChange={e=>setTaskField('title',e.target.value)} placeholder="e.g. Join MAI News" maxLength="120" /></label>
+              <label className="adminTaskField adminTaskWide"><span>Task Link</span><input value={taskForm.targetUrl} onChange={e=>setTaskField('targetUrl',e.target.value)} placeholder="https://t.me/... or https://..." /></label>
+              <label className="adminTaskField"><span>Reward · MAI</span><input type="number" min="0" step="0.01" value={taskForm.reward} onChange={e=>setTaskField('reward',e.target.value)} placeholder="12" /></label>
+              <label className="adminTaskField"><span>Task Type</span><select value={taskForm.taskType} onChange={e=>setTaskField('taskType',e.target.value)}><option value="telegram_join">Telegram Join</option><option value="telegram_bot">Telegram Bot</option><option value="invite_friends">Invite Friends</option><option value="hold_mai">Hold MAI</option><option value="mining_mission">Mining Mission</option><option value="daily_mission">Daily Mission</option><option value="visit_link">Visit Link</option><option value="custom">Custom</option></select></label>
+              <label className="adminTaskField"><span>Task Limit</span><select value={taskForm.limitMode} onChange={e=>setTaskField('limitMode',e.target.value)}><option value="all">All Users · Unlimited</option><option value="100">100 Claims</option><option value="200">200 Claims</option><option value="500">500 Claims</option><option value="1000">1,000 Claims</option><option value="custom">Custom Limit</option></select></label>
+              {taskForm.limitMode==='custom'&&<label className="adminTaskField"><span>Custom Limit</span><input type="number" min="1" step="1" value={taskForm.customLimit} onChange={e=>setTaskField('customLimit',e.target.value)} placeholder="250" /></label>}
+              <label className="adminTaskField"><span>Refresh / Cooldown</span><select value={taskForm.refreshMode} onChange={e=>setTaskField('refreshMode',e.target.value)}><option value="once">Once Only</option><option value="4">Every 4 Hours</option><option value="8">Every 8 Hours</option><option value="12">Every 12 Hours</option><option value="24">Every 24 Hours</option><option value="custom">Custom Hours</option></select></label>
+              {taskForm.refreshMode==='custom'&&<label className="adminTaskField"><span>Custom Hours</span><input type="number" min="1" step="1" value={taskForm.customHours} onChange={e=>setTaskField('customHours',e.target.value)} placeholder="6" /></label>}
+              <label className="adminTaskField"><span>Telegram Chat / @username</span><input value={taskForm.telegramChatId} onChange={e=>setTaskField('telegramChatId',e.target.value)} placeholder="@MAI_News_Official" /></label>
+              {taskForm.taskType==='invite_friends'&&<label className="adminTaskField"><span>Required Invites</span><input type="number" min="1" step="1" value={taskForm.requirementValue} onChange={e=>setTaskField('requirementValue',e.target.value)} /></label>}
+              {taskForm.taskType==='hold_mai'&&<label className="adminTaskField"><span>Minimum MAI Holding</span><input type="number" min="0" step="0.01" value={taskForm.requirementValue} onChange={e=>setTaskField('requirementValue',e.target.value)} /></label>}
+              {['mining_mission','daily_mission'].includes(taskForm.taskType)&&<label className="adminTaskField"><span>Required Mining Claims</span><input type="number" min="1" step="1" value={taskForm.requirementValue} onChange={e=>setTaskField('requirementValue',e.target.value)} /></label>}
+              {taskForm.taskType==='telegram_bot'&&<label className="adminTaskField"><span>Verified Server Event</span><input value={taskForm.botEventType} onChange={e=>setTaskField('botEventType',e.target.value)} placeholder="MAI-owned event type" /></label>}
+              {['visit_link','custom'].includes(taskForm.taskType)&&<div className="adminTaskVerifierWarning adminTaskWide">⚠ Secure automatic verification is not configured for this type. It can be saved as Draft, but cannot be safely published for rewards yet.</div>}
+              <label className="adminTaskField"><span>Icon</span><input value={taskForm.icon} onChange={e=>setTaskField('icon',e.target.value)} maxLength="16" placeholder="✦" /></label>
+              <label className="adminTaskField adminTaskWide"><span>Description</span><textarea value={taskForm.description} onChange={e=>setTaskField('description',e.target.value)} placeholder="Explain what the user must complete." maxLength="1000" /></label>
+            </div>
+            <div className="adminTaskSafety"><b>SERVER CONTROLLED</b><span>{taskForm.limitMode==='all'?'Unlimited users':`${taskForm.limitMode==='custom'?(taskForm.customLimit||'Custom'):taskForm.limitMode} total claims`} · {taskForm.refreshMode==='once'?'one claim per user':taskForm.refreshMode==='custom'?`refresh every ${taskForm.customHours||'?'}h`:`refresh every ${taskForm.refreshMode}h`}</span></div>
+            <div className="adminActions adminTaskSubmit"><button onClick={()=>submitTask('draft')} disabled={!!busy}>Save Draft</button><button className="good" onClick={()=>submitTask('active')} disabled={!!busy}>{busy==='create-task'?'Publishing…':'Publish Task'}</button></div>
+          </section>}
+          {taskMode==='tasks'&&<div className="adminList">{managedTasks.map(item=><article className="adminListCard adminTaskCard" key={item.id}><div className="adminListTop"><div className="adminBadgeIcon">{item.icon||'✓'}</div><div className="adminGrow"><b>{item.title}</b><span>#{item.id} · {String(item.task_type||'task').replaceAll('_',' ')}</span></div><Status>{item.status}</Status></div><div className="adminDataGrid"><div><span>Reward</span><b>{fmt(item.reward)} MAI</b></div><div><span>Used</span><b>{fmt(item.completion_count)} / {limitLabel(item)}</b></div><div><span>Refresh</span><b>{refreshLabel(item)}</b></div><div><span>Remaining</span><b>{item.claim_limit==null?'Unlimited':fmt(Math.max(0,Number(item.claim_limit)-Number(item.completion_count||0)))}</b></div></div>{item.target_url&&<div className="adminTaskLink">↗ {item.target_url}</div>}<div className="adminActions">{item.status!=='active'&&<button className="good" onClick={()=>runAction(`task-active-${item.id}`,`/admin/tasks/${item.id}/status`,{status:'active'})}>Activate</button>}{item.status==='active'&&<button className="warn" onClick={()=>runAction(`task-pause-${item.id}`,`/admin/tasks/${item.id}/status`,{status:'paused'})}>Pause</button>}{item.status!=='ended'&&<button className="danger" onClick={()=>runAction(`task-end-${item.id}`,`/admin/tasks/${item.id}/status`,{status:'ended'})}>End</button>}<button className="danger adminDeleteAction" disabled={busy===`task-delete-${item.id}`} onClick={()=>deleteTask(item)}>{busy===`task-delete-${item.id}`?'Deleting…':'Delete'}</button></div></article>)}{!managedTasks.length&&<Empty text="No managed tasks yet."/>}</div>}
+          {taskMode==='missions'&&<div className="adminList">{managedMissions.map(item=><article className="adminListCard adminTaskCard" key={item.id}><div className="adminListTop"><div className="adminBadgeIcon">{item.icon||'◆'}</div><div className="adminGrow"><b>{item.title}</b><span>#{item.id} · {(item.tasks||[]).length} tasks</span></div><Status>{item.status}</Status></div><div className="adminDataGrid"><div><span>Bonus</span><b>{fmt(item.completion_bonus)} MAI</b></div><div><span>Featured</span><b>{item.featured?'YES':'NO'}</b></div><div><span>Starts</span><b>{when(item.starts_at)}</b></div><div><span>Ends</span><b>{when(item.ends_at)}</b></div></div><div className="adminActions">{item.status!=='active'&&<button className="good" onClick={()=>runAction(`mission-active-${item.id}`,`/admin/missions/${item.id}/status`,{status:'active'})}>Activate</button>}{item.status==='active'&&<button className="warn" onClick={()=>runAction(`mission-pause-${item.id}`,`/admin/missions/${item.id}/status`,{status:'paused'})}>Pause</button>}{item.status!=='ended'&&<button className="danger" onClick={()=>runAction(`mission-end-${item.id}`,`/admin/missions/${item.id}/status`,{status:'ended'})}>End</button>}<button className="danger adminDeleteAction" disabled={busy===`mission-delete-${item.id}`} onClick={()=>deleteMission(item)}>{busy===`mission-delete-${item.id}`?'Deleting…':'Delete'}</button></div></article>)}{!managedMissions.length&&<Empty text="No missions yet."/>}</div>}
+          {taskMode==='history'&&<div className="adminList">{[...managedTasks.filter(x=>x.status==='ended'),...managedMissions.filter(x=>x.status==='ended')].map((item,index)=><article className="adminListCard adminTaskCard" key={`${item.id}-${index}`}><div className="adminListTop"><div className="adminBadgeIcon">☷</div><div className="adminGrow"><b>{item.title}</b><span>Ended module #{item.id}</span></div><Status>ended</Status></div><div className="adminActions"><button className="danger adminDeleteAction" onClick={()=>item.task_type?deleteTask(item):deleteMission(item)}>Delete</button></div></article>)}</div>}
+        </>);
       };
 
       const renderGiveaway = () => {
