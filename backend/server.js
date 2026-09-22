@@ -18285,6 +18285,14 @@ app.post(
       `);
 
       await pool.query(`
+        ALTER TABLE mai_broadcasts
+          ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+
+        ALTER TABLE mai_broadcasts
+          ADD COLUMN IF NOT EXISTS archived_by TEXT;
+      `);
+
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS mai_broadcast_receipts(
           broadcast_id BIGINT NOT NULL REFERENCES mai_broadcasts(id) ON DELETE CASCADE,
           telegram_id TEXT NOT NULL,
@@ -19794,6 +19802,189 @@ app.post(
       }
     );
 
+    const BROADCAST_AUDIENCE_TYPES = new Set([
+      'all',
+      'top_inviters',
+      'top_wallet_holders',
+      'specific'
+    ]);
+
+    const BROADCAST_DESTINATIONS = new Set([
+      'mini_app',
+      'telegram',
+      'both'
+    ]);
+
+    const BROADCAST_PRIORITIES = new Set([
+      'normal',
+      'important',
+      'critical'
+    ]);
+
+    function normalizeBroadcastLimit(value) {
+      return clamp(safeInteger(value, 10), 1, 500);
+    }
+
+    function normalizeBroadcastIds(value) {
+      const source = Array.isArray(value)
+        ? value
+        : String(value || '').split(/[\s,]+/);
+
+      return [...new Set(
+        source
+          .map(item => String(item || '').trim())
+          .filter(id => /^\d{5,20}$/.test(id))
+      )].slice(0, 500);
+    }
+
+    function normalizeBroadcastCreateBody(body = {}) {
+      const title = String(body.title || '').trim();
+      const message = String(body.message || '').trim();
+      const destination = String(body.destination || 'mini_app').trim();
+      const audienceType = String(body.audienceType || 'all').trim();
+      const priority = String(body.priority || 'normal').trim();
+      const imageUrl = String(body.imageUrl || '').trim();
+      const scheduledAtRaw = String(body.scheduledAt || '').trim();
+      const config = body.audienceConfig && typeof body.audienceConfig === 'object'
+        ? body.audienceConfig
+        : {};
+
+      if (!title || title.length > 120) {
+        throw Object.assign(new Error('Broadcast title must be 1-120 characters'), {statusCode:400});
+      }
+      if (!message || message.length > 3500) {
+        throw Object.assign(new Error('Broadcast message must be 1-3500 characters'), {statusCode:400});
+      }
+      if (!BROADCAST_DESTINATIONS.has(destination)) {
+        throw Object.assign(new Error('Unsupported broadcast destination'), {statusCode:400});
+      }
+      if (!BROADCAST_AUDIENCE_TYPES.has(audienceType)) {
+        throw Object.assign(new Error('Unsupported broadcast audience type'), {statusCode:400});
+      }
+      if (!BROADCAST_PRIORITIES.has(priority)) {
+        throw Object.assign(new Error('Unsupported broadcast priority'), {statusCode:400});
+      }
+      if (imageUrl && (!/^https:\/\//i.test(imageUrl) || imageUrl.length > 1000)) {
+        throw Object.assign(new Error('Image URL must be a valid HTTPS URL'), {statusCode:400});
+      }
+
+      let audienceConfig = {};
+      if (audienceType === 'specific') {
+        const telegramIds = normalizeBroadcastIds(config.telegramIds);
+        if (!telegramIds.length) {
+          throw Object.assign(new Error('At least one valid Telegram ID is required'), {statusCode:400});
+        }
+        audienceConfig = {telegramIds};
+      } else if (audienceType === 'top_inviters' || audienceType === 'top_wallet_holders') {
+        audienceConfig = {limit: normalizeBroadcastLimit(config.limit)};
+      }
+
+      let scheduledAt = null;
+      if (scheduledAtRaw) {
+        const parsed = new Date(scheduledAtRaw);
+        if (!Number.isFinite(parsed.getTime()) || parsed.getTime() <= Date.now() + 30000) {
+          throw Object.assign(new Error('Scheduled time must be a valid future time'), {statusCode:400});
+        }
+        scheduledAt = parsed.toISOString();
+      }
+
+      return {
+        title,
+        message,
+        destination,
+        audienceType,
+        audienceConfig,
+        priority,
+        imageUrl: imageUrl || null,
+        scheduledAt
+      };
+    }
+
+    async function resolveTopWalletHolders(limit) {
+      const users = (
+        await pool.query(
+          `SELECT telegram_id,wallet_address
+           FROM users
+           WHERE account_status='active'
+             AND wallet_address IS NOT NULL
+             AND BTRIM(wallet_address)<>''
+           ORDER BY telegram_id ASC`
+        )
+      ).rows;
+
+      const ranked = [];
+      for (const user of users) {
+        try {
+          // Wallet-only MAI. Never use users.balance/in-game balance here.
+          const walletBalance = await fetchMaiWalletBalance(user.wallet_address);
+          if (walletBalance > 0) {
+            ranked.push({
+              telegram_id:user.telegram_id,
+              wallet_balance:safeNumber(walletBalance)
+            });
+          }
+        } catch (error) {
+          console.warn('[MAI BROADCAST] wallet ranking read failed:', String(user.telegram_id), error.message);
+        }
+      }
+
+      ranked.sort((a,b) =>
+        b.wallet_balance - a.wallet_balance ||
+        String(a.telegram_id).localeCompare(String(b.telegram_id))
+      );
+
+      return ranked.slice(0, normalizeBroadcastLimit(limit));
+    }
+
+    async function resolveBroadcastAudience(broadcast) {
+      const type = String(broadcast.audience_type || 'all');
+      const config = broadcast.audience_config || {};
+
+      // SECURITY: unknown audience types fail closed. Never fall back to all users.
+      if (!BROADCAST_AUDIENCE_TYPES.has(type)) {
+        throw new Error(`Unsupported broadcast audience type: ${type}`);
+      }
+
+      if (type === 'specific') {
+        const ids = normalizeBroadcastIds(config.telegramIds);
+        if (!ids.length) return [];
+        return (await pool.query(
+          `SELECT telegram_id
+           FROM users
+           WHERE account_status='active'
+             AND telegram_id::text=ANY($1::text[])`,
+          [ids]
+        )).rows;
+      }
+
+      if (type === 'top_inviters') {
+        const limit = normalizeBroadcastLimit(config.limit);
+        return (await pool.query(
+          `SELECT u.telegram_id, COUNT(r.telegram_id)::int AS qualified_invites
+           FROM users u
+           JOIN users r
+             ON r.referred_by=u.telegram_id
+            AND r.referral_qualified=TRUE
+           WHERE u.account_status='active'
+           GROUP BY u.telegram_id
+           ORDER BY qualified_invites DESC, u.telegram_id ASC
+           LIMIT $1`,
+          [limit]
+        )).rows;
+      }
+
+      if (type === 'top_wallet_holders') {
+        return resolveTopWalletHolders(config.limit);
+      }
+
+      return (await pool.query(
+        `SELECT telegram_id
+         FROM users
+         WHERE account_status='active'
+         ORDER BY telegram_id ASC`
+      )).rows;
+    }
+
     app.get(
       '/admin/broadcasts',
       authenticate,
@@ -19801,23 +19992,51 @@ app.post(
       async (req,res,next) => {
         try {
           await ensureMaiV5Schema();
-
           const rows = (
             await pool.query(
-              `
-              SELECT *
-              FROM mai_broadcasts
-              ORDER BY created_at DESC
-              LIMIT 500
-              `
+              `SELECT *
+               FROM mai_broadcasts
+               WHERE archived_at IS NULL
+               ORDER BY created_at DESC
+               LIMIT 500`
             )
           ).rows;
+          res.json({success:true,items:rows});
+        } catch (error) { next(error); }
+      }
+    );
 
+    app.post(
+      '/admin/broadcasts/preview',
+      authenticate,
+      admin,
+      rateLimit(12,60000),
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+          const normalized = normalizeBroadcastCreateBody({
+            title:req.body?.title || 'Preview',
+            message:req.body?.message || 'Preview',
+            destination:req.body?.destination || 'mini_app',
+            audienceType:req.body?.audienceType,
+            audienceConfig:req.body?.audienceConfig,
+            priority:req.body?.priority || 'normal'
+          });
+          const audience = await resolveBroadcastAudience({
+            audience_type:normalized.audienceType,
+            audience_config:normalized.audienceConfig
+          });
           res.json({
             success:true,
-            items:rows
+            count:audience.length,
+            sample:audience.slice(0,10).map(item => ({
+              telegramId:String(item.telegram_id),
+              qualifiedInvites:item.qualified_invites ?? null,
+              walletBalance:item.wallet_balance ?? null
+            }))
           });
         } catch (error) {
+          if (error.statusCode) return res.status(error.statusCode).json({success:false,message:error.message});
           next(error);
         }
       }
@@ -19827,171 +20046,41 @@ app.post(
       '/admin/broadcasts',
       authenticate,
       admin,
+      rateLimit(20,60000),
       async (req,res,next) => {
         try {
           await ensureMaiV5Schema();
-
-          const body=req.body || {};
-          const title=String(body.title || '').trim();
-          const message=String(body.message || '').trim();
-
-          if (!title || !message) {
-            return res.status(400).json({
-              success:false,
-              message:'Title and message are required'
-            });
-          }
-
-          const audienceType = String(body.audienceType || 'all');
-          if (!BROADCAST_AUDIENCE_TYPES.has(audienceType)) {
-            return res.status(400).json({success:false,message:'Unsupported broadcast audience type'});
-          }
-
-          const status =
-            body.scheduledAt
-              ? 'scheduled'
-              : 'draft';
-
+          const body = normalizeBroadcastCreateBody(req.body || {});
           const row = (
             await pool.query(
-              `
-              INSERT INTO mai_broadcasts(
-                title,
-                message,
-                image_url,
-                destination,
-                audience_type,
-                audience_config,
-                cta,
-                priority,
-                status,
-                scheduled_at,
-                created_by
-              )
-              VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-              RETURNING *
-              `,
+              `INSERT INTO mai_broadcasts(
+                 title,message,image_url,destination,audience_type,audience_config,
+                 cta,priority,status,scheduled_at,created_by
+               )
+               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+               RETURNING *`,
               [
-                title,
-                message,
-                body.imageUrl || null,
-                ['mini_app','telegram','both'].includes(body.destination)
-                  ? body.destination
-                  : 'mini_app',
-                audienceType,
-                JSON.stringify(body.audienceConfig || {}),
-                JSON.stringify(body.cta || {}),
-                ['normal','important','critical'].includes(body.priority)
-                  ? body.priority
-                  : 'normal',
-                status,
-                body.scheduledAt || null,
+                body.title,
+                body.message,
+                body.imageUrl,
+                body.destination,
+                body.audienceType,
+                JSON.stringify(body.audienceConfig),
+                JSON.stringify({}),
+                body.priority,
+                body.scheduledAt ? 'scheduled' : 'draft',
+                body.scheduledAt,
                 adminActor(req)
               ]
             )
           ).rows[0];
-
-          res.json({
-            success:true,
-            item:row
-          });
+          res.json({success:true,item:row});
         } catch (error) {
+          if (error.statusCode) return res.status(error.statusCode).json({success:false,message:error.message});
           next(error);
         }
       }
     );
-
-    const BROADCAST_AUDIENCE_TYPES = new Set([
-      'all',
-      'active',
-      'mai_holders',
-      'minimum_level',
-      'giveaway_participants',
-      'task_participants',
-      'mission_participants',
-      'specific'
-    ]);
-
-    async function resolveBroadcastAudience(broadcast) {
-      const type = String(broadcast.audience_type || 'all');
-      const config = broadcast.audience_config || {};
-
-      // SECURITY: an unknown audience must fail closed. Never silently
-      // fall back to all users, because that could mass-message users.
-      if (!BROADCAST_AUDIENCE_TYPES.has(type)) {
-        throw new Error(`Unsupported broadcast audience type: ${type}`);
-      }
-
-      if (type === 'specific') {
-        const ids = Array.isArray(config.telegramIds)
-          ? [...new Set(config.telegramIds.map(String).filter(id => /^\d+$/.test(id)))]
-          : [];
-        if (!ids.length) return [];
-        return (await pool.query(
-          `SELECT telegram_id FROM users WHERE telegram_id::text=ANY($1::text[])`,
-          [ids]
-        )).rows;
-      }
-
-      if (type === 'mai_holders') {
-        return (await pool.query(
-          `SELECT telegram_id FROM users WHERE COALESCE(balance,0)>0`
-        )).rows;
-      }
-
-      if (type === 'active') {
-        return (await pool.query(
-          `SELECT telegram_id FROM users WHERE updated_at > NOW() - INTERVAL '30 days'`
-        )).rows;
-      }
-
-      if (type === 'minimum_level') {
-        const minimumLevel = Math.max(1, safeInteger(config.minimumLevel ?? config.level, 1));
-        return (await pool.query(
-          `SELECT telegram_id FROM users
-           WHERE COALESCE(mining_checkpoint_level,mining_highest_level,1) >= $1`,
-          [minimumLevel]
-        )).rows;
-      }
-
-      if (type === 'giveaway_participants') {
-        const giveawayId = String(config.giveawayId || '').trim();
-        if (!/^\d+$/.test(giveawayId)) return [];
-        return (await pool.query(
-          `SELECT DISTINCT u.telegram_id
-           FROM mai_giveaway_entries e
-           JOIN users u ON u.telegram_id::text=e.telegram_id
-           WHERE e.giveaway_id=$1`,
-          [giveawayId]
-        )).rows;
-      }
-
-      if (type === 'task_participants') {
-        const taskId = String(config.taskId || '').trim();
-        if (!/^\d+$/.test(taskId)) return [];
-        return (await pool.query(
-          `SELECT DISTINCT u.telegram_id
-           FROM managed_task_completions c
-           JOIN users u ON u.telegram_id=c.telegram_id
-           WHERE c.task_id=$1 AND c.claimed_at IS NOT NULL`,
-          [taskId]
-        )).rows;
-      }
-
-      if (type === 'mission_participants') {
-        const missionId = String(config.missionId || '').trim();
-        if (!/^\d+$/.test(missionId)) return [];
-        return (await pool.query(
-          `SELECT DISTINCT u.telegram_id
-           FROM managed_mission_completions c
-           JOIN users u ON u.telegram_id=c.telegram_id
-           WHERE c.mission_id=$1`,
-          [missionId]
-        )).rows;
-      }
-
-      return (await pool.query(`SELECT telegram_id FROM users`)).rows;
-    }
 
     async function sendTelegramBroadcastMessage(targetTelegramId, broadcast) {
       let lastError = null;
@@ -20004,19 +20093,17 @@ app.post(
           });
         } catch (error) {
           lastError = error;
-          if (attempt < 3) {
-            await new Promise(resolve => setTimeout(resolve, 350 * attempt));
-          }
+          if (attempt < 3) await new Promise(resolve => setTimeout(resolve,350 * attempt));
         }
       }
       throw lastError || new Error('Telegram broadcast delivery failed');
     }
 
     async function deliverBroadcast(broadcast) {
+      if (broadcast.archived_at) throw new Error('Archived broadcast cannot be delivered');
       const audience = await resolveBroadcastAudience(broadcast);
+      if (!audience.length) throw new Error('Broadcast audience is empty');
 
-      // These rows are both the Mini App target list and read-state records.
-      // This prevents a targeted Mini App broadcast from leaking to all users.
       for (const target of audience) {
         await pool.query(
           `INSERT INTO mai_broadcast_receipts(broadcast_id,telegram_id)
@@ -20028,7 +20115,6 @@ app.post(
 
       let delivered = 0;
       let failed = 0;
-
       if (['telegram','both'].includes(broadcast.destination)) {
         for (const target of audience) {
           try {
@@ -20048,10 +20134,9 @@ app.post(
         `UPDATE mai_broadcasts
          SET status='sent',sent_at=NOW(),targeted_count=$2,
              delivered_count=$3,failed_count=$4,updated_at=NOW()
-         WHERE id=$1`,
+         WHERE id=$1 AND archived_at IS NULL`,
         [broadcast.id,audience.length,delivered,failed]
       );
-
       return {targeted:audience.length,delivered,failed};
     }
 
@@ -20059,6 +20144,7 @@ app.post(
       '/admin/broadcasts/:id/send',
       authenticate,
       admin,
+      rateLimit(8,60000),
       async (req,res,next) => {
         try {
           await ensureMaiV5Schema();
@@ -20070,15 +20156,20 @@ app.post(
           const claimed = (await pool.query(
             `UPDATE mai_broadcasts
              SET status='sending',updated_at=NOW()
-             WHERE id=$1 AND status NOT IN('sent','sending')
+             WHERE id=$1
+               AND archived_at IS NULL
+               AND status IN('draft','scheduled','failed')
              RETURNING *`,
             [req.params.id]
           )).rows[0];
 
           if (!claimed) {
-            const existing=(await pool.query(`SELECT status FROM mai_broadcasts WHERE id=$1`,[req.params.id])).rows[0];
+            const existing=(await pool.query(
+              `SELECT status,archived_at FROM mai_broadcasts WHERE id=$1`,
+              [req.params.id]
+            )).rows[0];
             if (!existing) return res.status(404).json({success:false,message:'Broadcast not found'});
-            return res.status(409).json({success:false,message:`Broadcast is already ${existing.status}`});
+            return res.status(409).json({success:false,message:existing.archived_at?'Broadcast is archived':`Broadcast cannot be sent from status ${existing.status}`});
           }
 
           try {
@@ -20086,11 +20177,44 @@ app.post(
             res.json({success:true,...result});
           } catch (error) {
             await pool.query(
-              `UPDATE mai_broadcasts SET status='failed',updated_at=NOW() WHERE id=$1 AND status='sending'`,
+              `UPDATE mai_broadcasts SET status='failed',updated_at=NOW()
+               WHERE id=$1 AND status='sending'`,
               [claimed.id]
             );
             throw error;
           }
+        } catch (error) { next(error); }
+      }
+    );
+
+    app.delete(
+      '/admin/broadcasts/:id',
+      authenticate,
+      admin,
+      rateLimit(20,60000),
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+          const confirmation = String(req.body?.confirmation || '');
+          if (confirmation !== 'DELETE BROADCAST HISTORY') {
+            return res.status(409).json({success:false,message:'Type DELETE BROADCAST HISTORY to confirm'});
+          }
+
+          // Soft archive only: preserve receipts, delivery counts and audit evidence.
+          const row=(await pool.query(
+            `UPDATE mai_broadcasts
+             SET archived_at=NOW(),archived_by=$2,updated_at=NOW()
+             WHERE id=$1
+               AND archived_at IS NULL
+               AND status IN('sent','failed')
+             RETURNING id,status`,
+            [req.params.id,adminActor(req)]
+          )).rows[0];
+
+          if (!row) {
+            return res.status(409).json({success:false,message:'Only completed or failed broadcast history can be deleted'});
+          }
+          res.json({success:true,id:String(row.id)});
         } catch (error) { next(error); }
       }
     );
@@ -20105,14 +20229,17 @@ app.post(
           await ensureMaiV5Schema();
           const due=(await pool.query(
             `SELECT id FROM mai_broadcasts
-             WHERE status='scheduled' AND scheduled_at IS NOT NULL AND scheduled_at<=NOW()
+             WHERE status='scheduled'
+               AND archived_at IS NULL
+               AND scheduled_at IS NOT NULL
+               AND scheduled_at<=NOW()
              ORDER BY scheduled_at ASC LIMIT 10`
           )).rows;
 
           for (const row of due) {
             const claimed=(await pool.query(
               `UPDATE mai_broadcasts SET status='sending',updated_at=NOW()
-               WHERE id=$1 AND status='scheduled'
+               WHERE id=$1 AND status='scheduled' AND archived_at IS NULL
                RETURNING *`,
               [row.id]
             )).rows[0];
@@ -20122,7 +20249,8 @@ app.post(
             } catch (error) {
               console.error('[MAI BROADCAST] scheduled send failed:', claimed.id, error.message);
               await pool.query(
-                `UPDATE mai_broadcasts SET status='failed',updated_at=NOW() WHERE id=$1 AND status='sending'`,
+                `UPDATE mai_broadcasts SET status='failed',updated_at=NOW()
+                 WHERE id=$1 AND status='sending'`,
                 [claimed.id]
               );
             }

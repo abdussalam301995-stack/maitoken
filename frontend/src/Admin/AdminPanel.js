@@ -168,6 +168,14 @@
         showOnHome:true, featured:true, allowMultipleEntries:false
       });
       const [broadcastMode, setBroadcastMode] = useState('create');
+      const [broadcastComposerOpen, setBroadcastComposerOpen] = useState(false);
+      const [broadcastPreview, setBroadcastPreview] = useState(null);
+      const [broadcastSendConfirm, setBroadcastSendConfirm] = useState({id:null,text:''});
+      const [broadcastDeleteConfirm, setBroadcastDeleteConfirm] = useState(null);
+      const [broadcastForm, setBroadcastForm] = useState({
+        title:'', message:'', destination:'mini_app', audienceType:'all',
+        audienceLimit:'10', telegramIds:'', priority:'normal', scheduledAt:''
+      });
 
       const loadAll = useCallback(async (silent = false) => {
         if (!silent) setLoading(true);
@@ -1331,31 +1339,129 @@
       };
 
       const renderBroadcast = () => {
-        const createBroadcast = async () => {
-          const title=promptValue('Broadcast title:'); if(!title)return;
-          const message=promptValue('Message:'); if(!message)return;
-          const destination=promptValue('Destination: mini_app, telegram, both','mini_app');
-          const audienceType=promptValue('Audience: all, active, mai_holders, specific','all');
-          let audienceConfig={};
-          if(audienceType==='specific') audienceConfig.telegramIds=promptValue('Telegram IDs separated by commas:').split(',').map(x=>x.trim()).filter(Boolean);
-          await runAction('create-broadcast','/admin/broadcasts',{title,message,destination,audienceType,audienceConfig,priority:'normal'});
+        const audienceLabel = item => ({
+          all:'All Users', top_inviters:'Top Inviters',
+          top_wallet_holders:'Top MAI Wallet Holders', specific:'Specific Telegram IDs'
+        }[item?.audience_type || item?.audienceType] || item?.audience_type || item?.audienceType || 'Unknown');
+
+        const destinationLabel = value => ({
+          mini_app:'Mini App', telegram:'Telegram Bot', both:'Mini App + Telegram'
+        }[value] || value || '—');
+
+        const buildBroadcastPayload = () => {
+          const audienceConfig = {};
+          if (broadcastForm.audienceType === 'specific') {
+            audienceConfig.telegramIds = broadcastForm.telegramIds
+              .split(/[\s,]+/).map(x=>x.trim()).filter(Boolean);
+          }
+          if (['top_inviters','top_wallet_holders'].includes(broadcastForm.audienceType)) {
+            audienceConfig.limit = Number(broadcastForm.audienceLimit || 10);
+          }
+          return {
+            title:broadcastForm.title.trim(),
+            message:broadcastForm.message.trim(),
+            destination:broadcastForm.destination,
+            audienceType:broadcastForm.audienceType,
+            audienceConfig,
+            priority:broadcastForm.priority,
+            scheduledAt:broadcastForm.scheduledAt ? new Date(broadcastForm.scheduledAt).toISOString() : ''
+          };
         };
+
+        const previewBroadcast = async () => {
+          setBusy('broadcast-preview'); setError('');
+          try {
+            const data = await adminApi('/admin/broadcasts/preview', {
+              method:'POST', body:JSON.stringify(buildBroadcastPayload())
+            });
+            setBroadcastPreview(data);
+          } catch (e) { setError(e.message || 'Broadcast preview failed.'); }
+          finally { setBusy(''); }
+        };
+
+        const saveBroadcast = async () => {
+          setBusy('broadcast-save'); setError('');
+          try {
+            await adminApi('/admin/broadcasts', {
+              method:'POST', body:JSON.stringify(buildBroadcastPayload())
+            });
+            flash(broadcastForm.scheduledAt ? 'Broadcast scheduled.' : 'Broadcast draft created.');
+            setBroadcastForm({title:'',message:'',destination:'mini_app',audienceType:'all',audienceLimit:'10',telegramIds:'',priority:'normal',scheduledAt:''});
+            setBroadcastPreview(null); setBroadcastComposerOpen(false);
+            setBroadcastMode(broadcastForm.scheduledAt ? 'scheduled' : 'create');
+            await loadAll(true);
+          } catch (e) { setError(e.message || 'Broadcast could not be created.'); }
+          finally { setBusy(''); }
+        };
+
+        const sendBroadcast = async item => {
+          if (broadcastSendConfirm.id !== item.id || broadcastSendConfirm.text !== 'SEND MAI BROADCAST') return;
+          await runAction(`broadcast-send-${item.id}`, `/admin/broadcasts/${item.id}/send`, {confirmation:'SEND MAI BROADCAST'});
+          setBroadcastSendConfirm({id:null,text:''});
+        };
+
+        const deleteBroadcast = async item => {
+          if (broadcastDeleteConfirm !== item.id) { setBroadcastDeleteConfirm(item.id); return; }
+          setBusy(`broadcast-delete-${item.id}`); setError('');
+          try {
+            await adminApi(`/admin/broadcasts/${item.id}`, {method:'DELETE',body:JSON.stringify({confirmation:'DELETE BROADCAST HISTORY'})});
+            flash('Broadcast history archived safely.'); setBroadcastDeleteConfirm(null); await loadAll(true);
+          } catch (e) { setError(e.message || 'Broadcast history could not be deleted.'); }
+          finally { setBusy(''); }
+        };
+
+        const visibleBroadcasts = broadcasts.filter(item => {
+          if (broadcastMode === 'sent') return ['sent','failed'].includes(item.status);
+          if (broadcastMode === 'scheduled') return item.status === 'scheduled';
+          return ['draft','sending'].includes(item.status);
+        });
+
         return (
           <>
-            <section className="adminSection">
-              <div className="adminSectionHead"><div><span>MESSAGE CENTER</span><h3>Broadcast Message</h3></div><button onClick={createBroadcast} disabled={!!busy}>Create Broadcast</button></div>
-              <div className="adminActions"><button className={broadcastMode==='create'?'good':''} onClick={()=>setBroadcastMode('create')}>Create / Drafts</button><button className={broadcastMode==='scheduled'?'good':''} onClick={()=>setBroadcastMode('scheduled')}>Scheduled</button><button className={broadcastMode==='sent'?'good':''} onClick={()=>setBroadcastMode('sent')}>Sent History</button></div>
+            <section className="adminSection adminBroadcastEngine">
+              <div className="adminSectionHead">
+                <div><span>SECURE MESSAGE CENTER</span><h3>Broadcast Message</h3></div>
+                <button className="adminPrimaryAction" onClick={()=>{setBroadcastComposerOpen(true);setBroadcastMode('create');setBroadcastPreview(null);}} disabled={!!busy}>＋ Create Broadcast</button>
+              </div>
+              <p className="adminFootnote">Send server-authoritative announcements to the Mini App, Telegram Bot, or both. Wallet-holder ranking uses actual connected-wallet MAI Jetton holdings — never the in-game balance.</p>
+              <div className="adminActions adminBroadcastTabs">
+                <button className={broadcastMode==='create'?'good':''} onClick={()=>setBroadcastMode('create')}>✦ Create / Drafts</button>
+                <button className={broadcastMode==='scheduled'?'good':''} onClick={()=>setBroadcastMode('scheduled')}>◷ Scheduled</button>
+                <button className={broadcastMode==='sent'?'good':''} onClick={()=>setBroadcastMode('sent')}>✓ Sent History</button>
+              </div>
             </section>
+
+            {broadcastMode==='create' && broadcastComposerOpen && <section className="adminSection adminBroadcastComposer">
+              <div className="adminTaskComposerHero"><div className="adminTaskComposerIcon">📣</div><div><span>NEW BROADCAST</span><h3>Compose Secure Message</h3><p>Choose exactly who should receive this message, preview the audience, then save or schedule it.</p></div></div>
+              <div className="adminTaskFormGrid">
+                <label className="adminTaskField adminTaskWide"><span>Broadcast Title</span><input maxLength={120} value={broadcastForm.title} onChange={e=>{setBroadcastForm({...broadcastForm,title:e.target.value});setBroadcastPreview(null);}} placeholder="Important MAI Network update" /></label>
+                <label className="adminTaskField adminTaskWide"><span>Message</span><textarea maxLength={3500} value={broadcastForm.message} onChange={e=>{setBroadcastForm({...broadcastForm,message:e.target.value});setBroadcastPreview(null);}} placeholder="Write the message users should receive…" /></label>
+                <label className="adminTaskField"><span>Destination</span><select value={broadcastForm.destination} onChange={e=>setBroadcastForm({...broadcastForm,destination:e.target.value})}><option value="mini_app">Mini App</option><option value="telegram">Telegram Bot</option><option value="both">Mini App + Telegram</option></select></label>
+                <label className="adminTaskField"><span>Audience</span><select value={broadcastForm.audienceType} onChange={e=>{setBroadcastForm({...broadcastForm,audienceType:e.target.value});setBroadcastPreview(null);}}><option value="all">All Users</option><option value="top_inviters">Top Inviters</option><option value="top_wallet_holders">Top MAI Wallet Holders</option><option value="specific">Specific Telegram IDs</option></select></label>
+                {['top_inviters','top_wallet_holders'].includes(broadcastForm.audienceType) && <label className="adminTaskField"><span>Top User Count</span><select value={broadcastForm.audienceLimit} onChange={e=>{setBroadcastForm({...broadcastForm,audienceLimit:e.target.value});setBroadcastPreview(null);}}><option value="10">Top 10</option><option value="25">Top 25</option><option value="50">Top 50</option><option value="100">Top 100</option><option value="250">Top 250</option><option value="500">Top 500</option></select></label>}
+                {broadcastForm.audienceType==='specific' && <label className="adminTaskField adminTaskWide"><span>Telegram IDs</span><textarea value={broadcastForm.telegramIds} onChange={e=>{setBroadcastForm({...broadcastForm,telegramIds:e.target.value});setBroadcastPreview(null);}} placeholder={'123456789\n987654321\nOne ID per line or comma-separated'} /></label>}
+                <label className="adminTaskField"><span>Priority</span><select value={broadcastForm.priority} onChange={e=>setBroadcastForm({...broadcastForm,priority:e.target.value})}><option value="normal">Normal</option><option value="important">Important</option><option value="critical">Critical</option></select></label>
+                <label className="adminTaskField"><span>Schedule (optional)</span><input type="datetime-local" value={broadcastForm.scheduledAt} onChange={e=>setBroadcastForm({...broadcastForm,scheduledAt:e.target.value})} /></label>
+              </div>
+              <div className="adminBroadcastSafety"><b>🛡 SERVER-AUTHORITATIVE</b><span>Unknown audiences fail closed. Top holders are ranked from actual connected-wallet MAI holdings.</span></div>
+              {broadcastPreview && <div className="adminBroadcastPreview"><div><span>Estimated Recipients</span><strong>{fmt(broadcastPreview.count)}</strong></div><div><span>Destination</span><strong>{destinationLabel(broadcastForm.destination)}</strong></div><div><span>Audience</span><strong>{audienceLabel(broadcastForm)}</strong></div></div>}
+              <div className="adminActions adminTaskSubmit"><button onClick={()=>{setBroadcastComposerOpen(false);setBroadcastPreview(null);}}>Cancel</button><button className="warn" disabled={!!busy || !broadcastForm.title.trim() || !broadcastForm.message.trim()} onClick={previewBroadcast}>{busy==='broadcast-preview'?'Checking…':'◎ Preview Audience'}</button><button className="good" disabled={!!busy || !broadcastPreview} onClick={saveBroadcast}>{busy==='broadcast-save'?'Saving…':broadcastForm.scheduledAt?'◷ Schedule Broadcast':'✓ Save Draft'}</button></div>
+            </section>}
+
             <div className="adminList">
-              {broadcasts.filter(x=>broadcastMode==='sent'?x.status==='sent':broadcastMode==='scheduled'?x.status==='scheduled':x.status!=='sent'&&x.status!=='scheduled').map(item=>(
-                <article className="adminListCard" key={item.id}>
-                  <div className="adminListTop"><div className="adminBadgeIcon">📣</div><div className="adminGrow"><b>{item.title}</b><span>{item.destination} · {item.audience_type}</span></div><Status>{item.status}</Status></div>
-                  <p className="adminFootnote">{item.message}</p>
-                  <div className="adminDataGrid"><div><span>Targeted</span><b>{fmt(item.targeted_count)}</b></div><div><span>Delivered</span><b>{fmt(item.delivered_count)}</b></div><div><span>Failed</span><b>{fmt(item.failed_count)}</b></div><div><span>Sent</span><b>{when(item.sent_at)}</b></div></div>
-                  {item.status!=='sent' && <div className="adminActions"><button className="good" onClick={()=>{const c=promptValue('Type SEND MAI BROADCAST to confirm:'); if(c==='SEND MAI BROADCAST')runAction(`broadcast-send-${item.id}`,`/admin/broadcasts/${item.id}/send`,{confirmation:c});}}>Preview / Confirm / Send</button></div>}
+              {visibleBroadcasts.map(item=>(
+                <article className="adminListCard adminBroadcastCard" key={item.id}>
+                  <div className="adminListTop"><div className="adminBadgeIcon">📣</div><div className="adminGrow"><b>{item.title}</b><span>{destinationLabel(item.destination)} · {audienceLabel(item)}</span></div><Status>{item.status}</Status></div>
+                  <p className="adminFootnote adminBroadcastMessage">{item.message}</p>
+                  <div className="adminDataGrid"><div><span>Targeted</span><b>{fmt(item.targeted_count)}</b></div><div><span>Delivered</span><b>{fmt(item.delivered_count)}</b></div><div><span>Failed</span><b>{fmt(item.failed_count)}</b></div><div><span>{item.status==='scheduled'?'Scheduled':'Sent'}</span><b>{when(item.status==='scheduled'?item.scheduled_at:item.sent_at)}</b></div></div>
+                  {['draft','failed'].includes(item.status) && <>
+                    {broadcastSendConfirm.id===item.id && <div className="adminBroadcastConfirm"><span>Type <b>SEND MAI BROADCAST</b> to unlock sending.</span><input value={broadcastSendConfirm.text} onChange={e=>setBroadcastSendConfirm({id:item.id,text:e.target.value})} placeholder="SEND MAI BROADCAST" /></div>}
+                    <div className="adminActions"><button className="good" disabled={!!busy} onClick={()=>broadcastSendConfirm.id===item.id?sendBroadcast(item):setBroadcastSendConfirm({id:item.id,text:''})}>{busy===`broadcast-send-${item.id}`?'Sending…':broadcastSendConfirm.id===item.id?'Confirm & Send':'Preview / Confirm / Send'}</button>{broadcastSendConfirm.id===item.id && <button onClick={()=>setBroadcastSendConfirm({id:null,text:''})}>Cancel</button>}</div>
+                  </>}
+                  {['sent','failed'].includes(item.status) && <div className="adminActions"><button className="danger adminDeleteAction" disabled={!!busy} onClick={()=>deleteBroadcast(item)}>{busy===`broadcast-delete-${item.id}`?'Deleting…':broadcastDeleteConfirm===item.id?'Confirm Delete History':'Delete'}</button>{broadcastDeleteConfirm===item.id && <button onClick={()=>setBroadcastDeleteConfirm(null)}>Cancel</button>}</div>}
                 </article>
               ))}
-              {!broadcasts.length && <Empty text="No broadcasts yet." />}
+              {!visibleBroadcasts.length && <Empty text={broadcastMode==='scheduled'?'No scheduled broadcasts.':broadcastMode==='sent'?'No sent broadcast history.':'No broadcast drafts yet.'} />}
             </div>
           </>
         );
