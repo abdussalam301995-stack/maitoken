@@ -182,6 +182,7 @@ export default function Tasks({ initData, onUserUpdate }) {
   const [managedTasks, setManagedTasks] = useState([]);
   const [missions, setMissions] = useState([]);
   const [managedLoading, setManagedLoading] = useState(false);
+  const [managedNow, setManagedNow] = useState(Date.now());
 
   const loadTasks = async () => {
     try {
@@ -607,65 +608,62 @@ export default function Tasks({ initData, onUserUpdate }) {
     if (tab === 'Missions') loadMissions();
   }, [tab]);
 
+  useEffect(() => {
+    if (tab !== 'Tasks' || !managedTasks.some(task => task.gateReadyAt && !task.gateReady && task.user_state !== 'claimed')) return;
+    const id = setInterval(() => setManagedNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [tab, managedTasks]);
+
+  const openManagedTaskLink = task => {
+    if (!task.target_url) return;
+    const webApp = window.Telegram?.WebApp;
+    if (task.task_type === 'telegram_join' && webApp?.openTelegramLink) {
+      webApp.openTelegramLink(task.target_url);
+    } else if (webApp?.openLink) {
+      webApp.openLink(task.target_url);
+    } else {
+      window.open(task.target_url, '_blank', 'noopener,noreferrer');
+    }
+  };
+
   const managedTaskAction = async task => {
     if (busy) return;
-
     const state = String(task.user_state || 'go').toLowerCase();
-
     if (state === 'claimed') return;
 
     setBusy(`managed-${task.id}`);
     setMessage('');
 
     try {
-      if (
-        state !== 'claim' &&
-        task.target_url
-      ) {
-        const webApp = window.Telegram?.WebApp;
+      const gated = ['telegram_join', 'telegram_bot'].includes(String(task.task_type));
 
-        if (
-          task.task_type === 'telegram_join' &&
-          webApp?.openTelegramLink
-        ) {
-          webApp.openTelegramLink(task.target_url);
-        } else if (webApp?.openLink) {
-          webApp.openLink(task.target_url);
-        } else {
-          window.open(
-            task.target_url,
-            '_blank',
-            'noopener,noreferrer'
-          );
-        }
+      // First tap is JOIN/GO only: record the start on the server before opening
+      // Telegram. Verification is deliberately a separate action after 10s.
+      if (state !== 'claim' && gated && !task.gateStarted) {
+        const data = await api(`/api/managed-tasks/${task.id}/start`, { method: 'POST', initData });
+        openManagedTaskLink(task);
+        setMessage(data.message || 'Task opened. Wait 10 seconds, then verify.');
+        await loadManagedTasks();
+        return;
       }
 
-      const endpoint =
-        state === 'claim'
-          ? `/api/managed-tasks/${task.id}/claim`
-          : `/api/managed-tasks/${task.id}/verify`;
-
-      const data = await api(endpoint, {
-        method: 'POST',
-        initData
-      });
-
-      if (data.user) {
-        onUserUpdate?.(data.user);
+      if (state !== 'claim' && !gated && task.target_url) {
+        openManagedTaskLink(task);
       }
 
-      setMessage(
-        data.message ||
-        (
-          state === 'claim'
-            ? `+${Number(data.reward || task.reward || 0).toFixed(4)} MAI received.`
-            : 'Task verified. Claim your reward.'
-        )
-      );
+      const endpoint = state === 'claim'
+        ? `/api/managed-tasks/${task.id}/claim`
+        : `/api/managed-tasks/${task.id}/verify`;
 
+      const data = await api(endpoint, { method: 'POST', initData });
+      if (data.user) onUserUpdate?.(data.user);
+      setMessage(data.message || (state === 'claim'
+        ? `+${Number(data.reward || task.reward || 0).toFixed(4)} MAI received.`
+        : 'Task verified. Claim your reward.'));
       await loadManagedTasks();
     } catch (e) {
       setMessage(e.message);
+      await loadManagedTasks();
     } finally {
       setBusy('');
     }
@@ -938,14 +936,27 @@ export default function Tasks({ initData, onUserUpdate }) {
             const state =
               String(task.user_state || 'go').toLowerCase();
 
+            const gated = ['telegram_join', 'telegram_bot'].includes(String(task.task_type));
+            const gateRemaining = task.gateReadyAt
+              ? Math.max(0, Math.ceil((new Date(task.gateReadyAt).getTime() - managedNow) / 1000))
+              : Number(task.gateRemainingSeconds || 0);
+            const waiting = gated && task.gateStarted && state !== 'claim' && gateRemaining > 0;
             const label =
               state === 'claimed'
                 ? 'COMPLETED ✓'
                 : state === 'claim'
                   ? 'CLAIM'
                   : busy === `managed-${task.id}`
-                    ? 'CHECKING…'
-                    : 'GO / VERIFY';
+                    ? 'WORKING…'
+                    : waiting
+                      ? `${gateRemaining}s`
+                      : gated && task.gateStarted
+                        ? 'VERIFY'
+                        : task.task_type === 'telegram_join'
+                          ? 'JOIN'
+                          : task.task_type === 'telegram_bot'
+                            ? 'GO'
+                            : 'GO / VERIFY';
 
             return (
               <div
@@ -972,6 +983,7 @@ export default function Tasks({ initData, onUserUpdate }) {
                   className={`task-btn ${state === 'claimed' ? 'done' : ''}`}
                   disabled={
                     state === 'claimed' ||
+                    waiting ||
                     busy === `managed-${task.id}`
                   }
                   onClick={() => managedTaskAction(task)}

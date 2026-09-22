@@ -3818,6 +3818,19 @@ if (
       );
       CREATE INDEX IF NOT EXISTS idx_managed_task_completion_user ON managed_task_completions(telegram_id, claimed_at DESC);
 
+      -- Records the server-side start time for link-based managed tasks.
+      -- This is intentionally separate from reward/completion evidence: opening a
+      -- link is not proof of third-party bot activity, but it gives us an
+      -- authoritative 10-second minimum interaction gate before verification.
+      CREATE TABLE IF NOT EXISTS managed_task_engagements(
+        telegram_id BIGINT NOT NULL,
+        task_id BIGINT NOT NULL REFERENCES managed_tasks(id) ON DELETE CASCADE,
+        started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY(telegram_id, task_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_managed_task_engagement_task ON managed_task_engagements(task_id, started_at DESC);
+
       CREATE TABLE IF NOT EXISTS managed_missions(
         id BIGSERIAL PRIMARY KEY,
         title TEXT NOT NULL,
@@ -6709,9 +6722,29 @@ await pool.query(`
       return true;
     }
 
+    const MANAGED_LINK_GATE_SECONDS = 10;
+
+    async function managedTaskGate(task, userId, db = pool) {
+      const row = (await db.query(
+        `SELECT started_at FROM managed_task_engagements WHERE telegram_id=$1 AND task_id=$2 LIMIT 1`,
+        [userId, task.id]
+      )).rows[0];
+      if (!row?.started_at) return { started:false, ready:false, remainingSeconds:MANAGED_LINK_GATE_SECONDS };
+      const startedAt = new Date(row.started_at);
+      const readyAt = new Date(startedAt.getTime() + MANAGED_LINK_GATE_SECONDS * 1000);
+      const remainingSeconds = Math.max(0, Math.ceil((readyAt.getTime() - Date.now()) / 1000));
+      return { started:true, ready:remainingSeconds === 0, startedAt:startedAt.toISOString(), readyAt:readyAt.toISOString(), remainingSeconds };
+    }
+
     async function managedTaskVerification(task, userId) {
       const rules = task?.rule_config || {};
       const type = String(task?.task_type || '');
+
+      if (type === 'telegram_join' || type === 'telegram_bot') {
+        const gate = await managedTaskGate(task, userId);
+        if (!gate.started) return { verified:false, gateRequired:true, remainingSeconds:MANAGED_LINK_GATE_SECONDS, message:'Open the task first, then wait 10 seconds.' };
+        if (!gate.ready) return { verified:false, gateRequired:true, remainingSeconds:gate.remainingSeconds, readyAt:gate.readyAt, message:`Please wait ${gate.remainingSeconds}s before verification.` };
+      }
 
       if (type === 'telegram_join') {
         if (!task.telegram_chat_id) return { verified:false, message:'Telegram chat is not configured.' };
@@ -6720,12 +6753,17 @@ await pool.query(`
       }
 
       if (type === 'telegram_bot') {
-        // Telegram Bot API cannot prove that an arbitrary third-party bot was started.
-        // Only MAI-owned bot activity can be verified when an explicit server event is configured.
+        // Telegram cannot prove /start activity for an arbitrary third-party bot.
+        // External bots therefore use the explicit 10-second server gate. MAI-owned
+        // integrations can opt into stronger event verification from Admin.
+        const mode = String(rules.verificationMode || 'external_gate').trim();
+        if (mode !== 'mai_event') {
+          return { verified:true, verification:'external_gate', message:'10-second task gate completed.' };
+        }
         const eventType = String(rules.eventType || '').trim();
-        if (!eventType) return { verified:false, message:'This bot task needs a verifiable MAI server event before it can be claimed.' };
+        if (!eventType) return { verified:false, message:'MAI event verification is selected but no server event type is configured.' };
         const q = await pool.query(`SELECT 1 FROM transactions WHERE telegram_id=$1 AND type=$2 LIMIT 1`, [userId,eventType]);
-        return { verified:q.rowCount > 0, message:q.rowCount ? 'Bot activity verified.' : 'Required bot activity is not recorded yet.' };
+        return { verified:q.rowCount > 0, message:q.rowCount ? 'MAI bot activity verified.' : 'Required MAI bot activity is not recorded yet.' };
       }
 
       if (type === 'visit_link') {
@@ -6790,6 +6828,9 @@ await pool.query(`
           }
         }
         const c=(await pool.query(`SELECT verified_at,claimed_at,reward_snapshot FROM managed_task_completions WHERE telegram_id=$1 AND task_id=$2 AND period_key=$3 LIMIT 1`,[userId,t.id,period])).rows[0];
+        const gate=['telegram_join','telegram_bot'].includes(String(t.task_type))
+          ? await managedTaskGate(t,userId)
+          : null;
         out.push({
           id:String(t.id), title:t.title, description:t.description, icon:t.icon,
           type:t.task_type, reward:safeNumber(t.reward), link:t.target_url,
@@ -6797,7 +6838,9 @@ await pool.query(`
           completionCount:used, remaining:limit===null?null:Math.max(0,limit-used),
           startsAt:t.starts_at, endsAt:t.ends_at,
           verified:!!c?.verified_at, completed:!!c?.claimed_at,
-          state:c?.claimed_at ? 'claimed' : c?.verified_at ? 'claim' : 'verify', nextEligibleAt
+          state:c?.claimed_at ? 'claimed' : c?.verified_at ? 'claim' : 'verify', nextEligibleAt,
+          gateStarted:!!gate?.started, gateReady:!!gate?.ready, gateReadyAt:gate?.readyAt||null,
+          gateRemainingSeconds:gate?.remainingSeconds??null
         });
       }
       return out;
@@ -6843,6 +6886,22 @@ await pool.query(`
       try { res.json({success:true,missions:await managedMissionListForUser(req.auth.id)}); } catch(e){ next(e); }
     });
 
+    app.post('/api/managed-tasks/:id/start', authenticate, rateLimit(30,60000), async (req,res,next)=>{
+      try {
+        const task=(await pool.query(`SELECT * FROM managed_tasks WHERE id=$1 LIMIT 1`,[req.params.id])).rows[0];
+        if(!task || !managedTaskIsLive(task)) return res.status(404).json({success:false,message:'Task is not active.'});
+        if(!['telegram_join','telegram_bot'].includes(String(task.task_type))) return res.status(400).json({success:false,message:'This task does not use the 10-second link gate.'});
+        const period=await managedPeriodKeyForUser(task,req.auth.id);
+        if(period===null) return res.status(409).json({success:false,message:'Task cooldown is still active.'});
+        const used=(await pool.query(`SELECT COUNT(*)::int AS c FROM managed_task_completions WHERE task_id=$1 AND claimed_at IS NOT NULL`,[task.id])).rows[0]?.c||0;
+        if(task.claim_limit!=null && used>=safeInteger(task.claim_limit,0)) return res.status(409).json({success:false,message:'Task limit has been reached.'});
+        await pool.query(`INSERT INTO managed_task_engagements(telegram_id,task_id,started_at,updated_at) VALUES($1,$2,NOW(),NOW())
+          ON CONFLICT(telegram_id,task_id) DO UPDATE SET started_at=NOW(),updated_at=NOW()`,[req.auth.id,task.id]);
+        const gate=await managedTaskGate(task,req.auth.id);
+        res.json({success:true,gateSeconds:MANAGED_LINK_GATE_SECONDS,readyAt:gate.readyAt,message:'Task opened. Wait 10 seconds, then verify.'});
+      } catch(e){ next(e); }
+    });
+
     app.post('/api/managed-tasks/:id/verify', authenticate, rateLimit(20,60000), async (req,res,next)=>{
       try {
         const q=await pool.query(`SELECT * FROM managed_tasks WHERE id=$1 LIMIT 1`,[req.params.id]);
@@ -6878,6 +6937,7 @@ await pool.query(`
         const reward=safeNumber(c.reward_snapshot);
         await client.query(`UPDATE users SET balance=balance+$2,updated_at=NOW() WHERE telegram_id=$1`,[req.auth.id,reward]);
         await client.query(`UPDATE managed_task_completions SET claimed_at=NOW() WHERE id=$1`,[c.id]);
+        await client.query(`DELETE FROM managed_task_engagements WHERE telegram_id=$1 AND task_id=$2`,[req.auth.id,task.id]);
         await client.query(`INSERT INTO transactions(telegram_id,type,amount,reference,metadata) VALUES($1,'managed_task',$2,$3,$4)`,[req.auth.id,reward,`task:${task.id}:${period}`,{taskId:String(task.id),title:task.title,period}]);
         await client.query('COMMIT');
         res.json({success:true,reward,user:await buildUser(req.auth.id),tasks:await managedTaskListForUser(req.auth.id)});
@@ -6919,7 +6979,7 @@ await pool.query(`
       const status=['draft','active','paused'].includes(b.status)?b.status:'draft';
       const rules=(b.ruleConfig && typeof b.ruleConfig==='object' && !Array.isArray(b.ruleConfig))?b.ruleConfig:{};
       if(status==='active' && type==='telegram_join' && !String(b.telegramChatId||'').trim()) return res.status(400).json({success:false,message:'Telegram chat ID / @username is required before publishing.'});
-      if(status==='active' && type==='telegram_bot' && !String(rules.eventType||'').trim()) return res.status(400).json({success:false,message:'A verified MAI server event is required before publishing this bot task.'});
+      if(status==='active' && type==='telegram_bot' && String(rules.verificationMode||'external_gate')==='mai_event' && !String(rules.eventType||'').trim()) return res.status(400).json({success:false,message:'MAI-owned event verification requires a server event type before publishing.'});
       if(status==='active' && ['visit_link','custom'].includes(type)) return res.status(400).json({success:false,message:'This task type has no secure automatic verifier yet. Save it as draft until a verifier is configured.'});
       const r=await pool.query(`INSERT INTO managed_tasks(title,description,icon,task_type,reward,target_url,telegram_chat_id,rule_config,recurrence,refresh_hours,claim_limit,status,starts_at,ends_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,[title,String(b.description||'').slice(0,1000),String(b.icon||'✦').slice(0,16),type,reward,b.targetUrl||null,b.telegramChatId||null,rules,recurrence,refreshHours,claimLimit,status,b.startsAt||null,b.endsAt||null,req.admin?.telegramId||null]);
       await pool.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,metadata,ip_hash) VALUES($1,'task_created','managed_task',$2,$3,$4)`,[req.admin?.telegramId||null,String(r.rows[0].id),{title,type,reward,status,recurrence,refreshHours,claimLimit},hash(req.ip).slice(0,32)]);
