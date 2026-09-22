@@ -956,6 +956,7 @@ if (
 
           'GET',
           'POST',
+          'DELETE',
           'OPTIONS'
 
         ],
