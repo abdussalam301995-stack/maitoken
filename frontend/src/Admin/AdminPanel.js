@@ -149,6 +149,8 @@
       const [moduleStatus, setModuleStatus] = useState(null);
       const [taskMode, setTaskMode] = useState('tasks');
       const [taskComposerOpen, setTaskComposerOpen] = useState(false);
+      const [missionComposerOpen, setMissionComposerOpen] = useState(false);
+      const [missionForm, setMissionForm] = useState({title:'',description:'',completionBonus:'0',taskIds:[],featured:false,startsAt:'',endsAt:''});
       const [taskForm, setTaskForm] = useState({
         title:'', targetUrl:'', reward:'', taskType:'telegram_join', telegramChatId:'',
         description:'', limitMode:'all', customLimit:'', refreshMode:'once', customHours:'',
@@ -1073,19 +1075,28 @@
           const key=`${kind}-delete-${item.id}`; setBusy(key); setError('');
           try{await adminApi(`/admin/${kind==='task'?'tasks':'missions'}/${item.id}`,{method:'DELETE'});flash(`${label} history removed.`);await loadAll(true);}catch(e){setError(e.message||`Could not delete ${label.toLowerCase()} history.`);}finally{setBusy('');}
         };
-        const createMission = async () => {
-          const title = promptValue('Mission title:'); if (!title) return;
-          const ids = promptValue('Task IDs separated by commas:',managedTasks.map(x=>x.id).slice(0,3).join(',')).split(',').map(x=>x.trim()).filter(Boolean);
-          const validTaskIds=new Set(managedTasks.map(x=>String(x.id))); const missingIds=ids.filter(id=>!validTaskIds.has(String(id)));
-          if(missingIds.length){setError(`Selected task does not exist: ${missingIds.join(', ')}`);return;}
-          const completionBonus=Number(promptValue('Completion bonus MAI:','0'));
-          await runAction('create-mission','/admin/missions',{title,taskIds:ids,completionBonus:Number.isFinite(completionBonus)?completionBonus:0,status:'draft'});
+        const setMissionField=(key,value)=>setMissionForm(old=>({...old,[key]:value}));
+        const resetMissionForm=()=>setMissionForm({title:'',description:'',completionBonus:'0',taskIds:[],featured:false,startsAt:'',endsAt:''});
+        const toggleMissionTask=id=>setMissionForm(old=>{const key=String(id);const selected=(old.taskIds||[]).map(String);return {...old,taskIds:selected.includes(key)?selected.filter(x=>x!==key):[...selected,key]};});
+        const createMission = async (status='draft') => {
+          const title=String(missionForm.title||'').trim();
+          const completionBonus=Number(missionForm.completionBonus||0);
+          const taskIds=(missionForm.taskIds||[]).map(String);
+          if(!title){setError('Mission title is required.');return;}
+          if(!taskIds.length){setError('Select at least one task for this mission.');return;}
+          if(!Number.isFinite(completionBonus)||completionBonus<0){setError('Mission completion bonus must be 0 MAI or greater.');return;}
+          if(missionForm.startsAt&&missionForm.endsAt&&new Date(missionForm.endsAt)<=new Date(missionForm.startsAt)){setError('Mission end time must be after the start time.');return;}
+          setBusy('create-mission');setError('');
+          try{
+            await adminApi('/admin/missions',{method:'POST',body:JSON.stringify({title,description:String(missionForm.description||'').trim(),taskIds,completionBonus,featured:!!missionForm.featured,startsAt:missionForm.startsAt||null,endsAt:missionForm.endsAt||null,status})});
+            flash(status==='active'?'Mission published.':'Mission draft created.');resetMissionForm();setMissionComposerOpen(false);setTaskMode('missions');await loadAll(true);
+          }catch(e){setError(e.message||'Could not create mission.');}finally{setBusy('');}
         };
         const refreshLabel=item=>{const sec=Number(item.cooldown_seconds||0);if(sec>0)return sec%3600===0?`Every ${sec/3600}H`:`Every ${(sec/3600).toFixed(1)}H`;return item.recurrence==='daily'?'Daily':'Once';};
         return (
           <>
             <section className="adminSection taskEngineHero">
-              <div className="adminSectionHead"><div><span>TASK ENGINE</span><h3>Tasks & Missions</h3><p className="adminFootnote">Server-authoritative rewards, limits and recurring eligibility.</p></div><div className="adminActions"><button className="taskPrimaryBtn" onClick={()=>setTaskComposerOpen(v=>!v)} disabled={!!busy}>{taskComposerOpen?'Close Creator':'✦ Create Task'}</button><button onClick={createMission} disabled={!!busy}>◆ Create Mission</button></div></div>
+              <div className="adminSectionHead"><div><span>TASK ENGINE</span><h3>Tasks & Missions</h3><p className="adminFootnote">Server-authoritative rewards, limits and recurring eligibility.</p></div><div className="adminActions"><button className="taskPrimaryBtn" onClick={()=>{setTaskComposerOpen(v=>!v);setMissionComposerOpen(false)}} disabled={!!busy}>{taskComposerOpen?'Close Creator':'✦ Create Task'}</button><button className="missionPrimaryBtn" onClick={()=>{setMissionComposerOpen(v=>!v);setTaskComposerOpen(false)}} disabled={!!busy}>{missionComposerOpen?'Close Mission':'◆ Create Mission'}</button></div></div>
               <div className="adminMiniStats"><div><span>Tasks</span><b>{managedTasks.length}</b></div><div><span>Active Tasks</span><b>{managedTasks.filter(x=>x.status==='active').length}</b></div><div><span>Missions</span><b>{managedMissions.length}</b></div></div>
               <div className="adminActions taskModeTabs"><button className={taskMode==='tasks'?'good':''} onClick={()=>setTaskMode('tasks')}>Active Tasks</button><button className={taskMode==='missions'?'good':''} onClick={()=>setTaskMode('missions')}>Missions</button><button className={taskMode==='history'?'good':''} onClick={()=>setTaskMode('history')}>History</button></div>
             </section>
@@ -1109,6 +1120,24 @@
               </div>
               <div className="taskBudgetStrip"><div><span>Audience</span><b>{taskForm.limitMode==='all'?'All Users':`${Number.isFinite(claimLimit)?claimLimit:0} total claims`}</b></div><div><span>Refresh</span><b>{taskForm.refreshMode==='once'?'One-time':Number.isFinite(refreshHours)?`Every ${refreshHours}h`:'Custom'}</b></div><div><span>Max Reward Budget</span><b>{taskForm.limitMode==='all'?'Unlimited':Number.isFinite(claimLimit)&&Number.isFinite(Number(taskForm.reward))?`${fmt(claimLimit*Number(taskForm.reward))} MAI`:'—'}</b></div></div>
               <div className="taskComposerActions"><button className="taskSecondaryBtn" onClick={()=>{resetTaskForm();setTaskComposerOpen(false)}} disabled={!!busy}>Cancel</button><button className="taskDraftBtn" onClick={()=>createTask('draft')} disabled={!!busy}>{busy==='create-task'?'Saving…':'Save Draft'}</button><button className="taskPublishBtn" onClick={()=>createTask('active')} disabled={!!busy}>{busy==='create-task'?'Publishing…':'Publish Task'}</button></div>
+            </section>}
+            {missionComposerOpen && <section className="adminSection missionComposer">
+              <div className="taskComposerTitle"><div className="taskComposerIcon missionComposerIcon">◆</div><div><span>MISSION BUILDER</span><h3>Create Mission</h3><p>Bundle verified tasks into one premium challenge and reward users after the full mission is completed.</p></div></div>
+              <div className="taskFormGrid missionFormGrid">
+                <label className="taskField taskFieldWide"><span>Mission Title <em>Required</em></span><input value={missionForm.title} onChange={e=>setMissionField('title',e.target.value)} placeholder="e.g. MAI Starter Mission" maxLength="120" /></label>
+                <label className="taskField"><span>Completion Bonus MAI</span><input type="number" min="0" step="0.00000001" value={missionForm.completionBonus} onChange={e=>setMissionField('completionBonus',e.target.value)} placeholder="20" /></label>
+                <label className="missionFeaturedToggle"><input type="checkbox" checked={!!missionForm.featured} onChange={e=>setMissionField('featured',e.target.checked)} /><span><b>Featured Mission</b><small>Highlight this mission in the user experience.</small></span></label>
+                <label className="taskField"><span>Starts At</span><input type="datetime-local" value={missionForm.startsAt} onChange={e=>setMissionField('startsAt',e.target.value)} /></label>
+                <label className="taskField"><span>Ends At</span><input type="datetime-local" value={missionForm.endsAt} onChange={e=>setMissionField('endsAt',e.target.value)} /></label>
+                <label className="taskField taskFieldWide"><span>Description</span><textarea value={missionForm.description} onChange={e=>setMissionField('description',e.target.value)} placeholder="Explain the mission goal and what users receive after completing every selected task." maxLength="1000" /></label>
+              </div>
+              <div className="missionTaskPickerHead"><div><span>MISSION TASKS</span><b>Select the tasks users must complete</b></div><strong>{(missionForm.taskIds||[]).length} selected</strong></div>
+              <div className="missionTaskPicker">
+                {managedTasks.filter(x=>x.status!=='ended').map(item=>{const selected=(missionForm.taskIds||[]).map(String).includes(String(item.id));return <button type="button" key={item.id} className={`missionTaskOption ${selected?'selected':''}`} onClick={()=>toggleMissionTask(item.id)}><span className="missionTaskCheck">{selected?'✓':'+'}</span><span className="missionTaskInfo"><b>{item.title}</b><small>#{item.id} · {String(item.task_type||'task').replaceAll('_',' ')} · {fmt(item.reward)} MAI</small></span><Status>{item.status}</Status></button>})}
+                {!managedTasks.filter(x=>x.status!=='ended').length&&<div className="missionEmptyTasks">Create at least one managed task before building a mission.</div>}
+              </div>
+              <div className="missionSummaryStrip"><div><span>Selected Tasks</span><b>{(missionForm.taskIds||[]).length}</b></div><div><span>Task Rewards</span><b>{fmt(managedTasks.filter(x=>(missionForm.taskIds||[]).map(String).includes(String(x.id))).reduce((sum,x)=>sum+Number(x.reward||0),0))} MAI</b></div><div><span>Mission Bonus</span><b>{fmt(Number(missionForm.completionBonus||0))} MAI</b></div></div>
+              <div className="taskComposerActions missionComposerActions"><button className="taskSecondaryBtn" onClick={()=>{resetMissionForm();setMissionComposerOpen(false)}} disabled={!!busy}>Cancel</button><button className="taskDraftBtn" onClick={()=>createMission('draft')} disabled={!!busy}>{busy==='create-mission'?'Saving…':'Save Draft'}</button><button className="taskPublishBtn" onClick={()=>createMission('active')} disabled={!!busy||!(missionForm.taskIds||[]).length}>{busy==='create-mission'?'Publishing…':'Publish Mission'}</button></div>
             </section>}
             {taskMode==='tasks'&&<div className="adminList">{managedTasks.map(item=>{const limit=item.claim_limit==null?null:Number(item.claim_limit);const used=Number(item.completion_count||0);return <article className="adminListCard taskPremiumCard" key={item.id}><div className="adminListTop"><div className="adminBadgeIcon taskPremiumIcon">{item.icon||'✓'}</div><div className="adminGrow"><b>{item.title}</b><span>#{item.id} · {String(item.task_type||'task').replaceAll('_',' ')}</span></div><Status>{item.status}</Status></div><div className="adminDataGrid"><div><span>Reward</span><b>{fmt(item.reward)} MAI</b></div><div><span>Claims Used</span><b>{fmt(used)}{limit!==null?` / ${fmt(limit)}`:''}</b></div><div><span>Audience</span><b>{limit===null?'All Users':`${Math.max(0,limit-used)} left`}</b></div><div><span>Refresh</span><b>{refreshLabel(item)}</b></div></div>{item.target_url&&<div className="taskLinkLine"><span>↗</span><code>{item.target_url}</code></div>}<div className="adminActions"><>{item.status!=='active'&&<button className="good" onClick={()=>runAction(`task-active-${item.id}`,`/admin/tasks/${item.id}/status`,{status:'active'})}>Activate</button>}{item.status==='active'&&<button className="warn" onClick={()=>runAction(`task-pause-${item.id}`,`/admin/tasks/${item.id}/status`,{status:'paused'})}>Pause</button>}{item.status!=='ended'&&<button className="danger" onClick={()=>runAction(`task-end-${item.id}`,`/admin/tasks/${item.id}/status`,{status:'ended'})}>End</button>}{item.status==='ended'&&<button className="taskDeleteBtn" disabled={busy===`task-delete-${item.id}`} onClick={()=>deleteModuleHistory('task',item)}>{busy===`task-delete-${item.id}`?'Deleting…':'⌫ Delete'}</button>}</></div></article>})}{!managedTasks.length&&<Empty text="No managed tasks yet." />}</div>}
             {taskMode==='missions'&&<div className="adminList">{managedMissions.map(item=><article className="adminListCard taskPremiumCard" key={item.id}><div className="adminListTop"><div className="adminBadgeIcon">{item.icon||'◆'}</div><div className="adminGrow"><b>{item.title}</b><span>#{item.id} · {(item.tasks||[]).length} tasks</span></div><Status>{item.status}</Status></div><div className="adminDataGrid"><div><span>Bonus</span><b>{fmt(item.completion_bonus)} MAI</b></div><div><span>Featured</span><b>{item.featured?'YES':'NO'}</b></div><div><span>Starts</span><b>{when(item.starts_at)}</b></div><div><span>Ends</span><b>{when(item.ends_at)}</b></div></div><div className="adminActions">{item.status!=='active'&&<button className="good" onClick={()=>runAction(`mission-active-${item.id}`,`/admin/missions/${item.id}/status`,{status:'active'})}>Activate</button>}{item.status==='active'&&<button className="warn" onClick={()=>runAction(`mission-pause-${item.id}`,`/admin/missions/${item.id}/status`,{status:'paused'})}>Pause</button>}{item.status!=='ended'&&<button className="danger" onClick={()=>runAction(`mission-end-${item.id}`,`/admin/missions/${item.id}/status`,{status:'ended'})}>End</button>}{item.status==='ended'&&<button className="taskDeleteBtn" disabled={busy===`mission-delete-${item.id}`} onClick={()=>deleteModuleHistory('mission',item)}>{busy===`mission-delete-${item.id}`?'Deleting…':'⌫ Delete'}</button>}</div></article>)}{!managedMissions.length&&<Empty text="No missions yet." />}</div>}

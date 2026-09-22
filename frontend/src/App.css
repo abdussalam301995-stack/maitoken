@@ -12157,3 +12157,66 @@ body.maiAdminOpen .adminPanel.adminV4 {
   .adminV4 .taskComposerActions { grid-template-columns:1fr; }
   .adminV4 .taskPublishBtn { grid-column:auto; }
 }
+
+
+/* =========================================================
+   MAI ADMIN — PREMIUM TASK + MISSION CREATOR FINAL UI FIX
+   UI only: fixes native-select contrast, action buttons and
+   adds the Mission Builder. No reward/claim/backend logic.
+   ========================================================= */
+.adminV4 .taskComposer,
+.adminV4 .missionComposer{
+  position:relative;
+  isolation:isolate;
+  width:100%;
+  max-height:calc(100dvh - 190px);
+  overflow-x:hidden;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+  scroll-padding-bottom:120px;
+  padding:22px!important;
+  border:1px solid rgba(91,224,242,.24)!important;
+  border-radius:22px!important;
+  background:radial-gradient(circle at 88% 0,rgba(65,220,242,.105),transparent 31%),linear-gradient(145deg,rgba(6,25,38,.99),rgba(3,13,22,.99))!important;
+  box-shadow:0 22px 60px rgba(0,0,0,.26),inset 0 1px 0 rgba(255,255,255,.025);
+}
+.adminV4 .missionComposer{margin-top:16px}
+.adminV4 .taskComposer *,.adminV4 .missionComposer *{box-sizing:border-box}
+.adminV4 .taskComposerTitle h3{font-size:21px!important;font-weight:900!important;letter-spacing:-.35px;color:#f2fdff!important}
+.adminV4 .taskComposerTitle p{font-size:12px!important;line-height:1.55!important;color:#87a8b7!important}
+.adminV4 .taskField>span{font-size:10px!important;font-weight:900!important;letter-spacing:.72px!important;color:#9cb7c4!important}
+.adminV4 .taskField input,.adminV4 .taskField select,.adminV4 .taskField textarea{
+  min-height:48px!important;padding:12px 14px!important;border:1px solid rgba(100,205,225,.20)!important;border-radius:13px!important;
+  color:#effcff!important;background:#071923!important;font-size:13px!important;font-weight:650!important;line-height:1.35!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.018)!important;transition:border-color .18s ease,box-shadow .18s ease,background .18s ease!important;
+}
+.adminV4 .taskField input::placeholder,.adminV4 .taskField textarea::placeholder{color:#607b89!important;opacity:1}
+.adminV4 .taskField input:focus,.adminV4 .taskField select:focus,.adminV4 .taskField textarea:focus{border-color:rgba(84,232,247,.64)!important;background:#081d28!important;box-shadow:0 0 0 3px rgba(53,230,242,.075)!important}
+/* Native option popups are OS/browser rendered; force readable dark/light-safe option colors. */
+.adminV4 .taskField select{color-scheme:dark;appearance:auto!important;-webkit-appearance:menulist!important}
+.adminV4 .taskField select option{color:#eefcff!important;background:#0a1d28!important;font-size:13px!important;font-weight:650!important}
+.adminV4 .taskField select option:checked{color:#06161d!important;background:#9cf7ff!important}
+.adminV4 .taskComposerActions{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:10px!important;margin-top:20px!important;padding:2px 0 6px!important}
+.adminV4 .taskComposerActions button{display:flex!important;align-items:center!important;justify-content:center!important;width:100%!important;min-width:0!important;min-height:46px!important;padding:11px 16px!important;border-radius:13px!important;font-size:12px!important;font-weight:900!important;letter-spacing:.25px!important;opacity:1!important;text-shadow:none!important;transition:transform .16s ease,filter .16s ease,border-color .16s ease!important}
+.adminV4 .taskComposerActions button:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.06)}
+.adminV4 .taskComposerActions .taskSecondaryBtn{color:#c3d7df!important;background:rgba(123,157,170,.08)!important;border:1px solid rgba(146,183,197,.18)!important}
+.adminV4 .taskComposerActions .taskDraftBtn{color:#c9fbff!important;background:linear-gradient(135deg,rgba(28,91,109,.58),rgba(12,52,67,.72))!important;border:1px solid rgba(93,222,239,.31)!important}
+.adminV4 .taskComposerActions .taskPublishBtn{color:#031419!important;background:linear-gradient(135deg,#c3fbff 0%,#68eef7 48%,#28c5d9 100%)!important;border:1px solid rgba(196,252,255,.76)!important;box-shadow:0 8px 22px rgba(31,194,213,.16)!important}
+.adminV4 .taskComposerActions button:disabled{cursor:not-allowed!important;opacity:.46!important;transform:none!important;filter:none!important}
+.adminV4 .missionPrimaryBtn{border-color:rgba(143,123,255,.26)!important;background:linear-gradient(145deg,rgba(104,78,202,.16),rgba(44,34,94,.13))!important;color:#ddd6ff!important}
+.adminV4 .missionComposerIcon{color:#e5ddff!important;border-color:rgba(159,139,255,.30)!important;background:linear-gradient(145deg,rgba(135,105,255,.18),rgba(73,55,154,.08))!important;box-shadow:0 0 30px rgba(112,87,225,.10)}
+.adminV4 .missionFormGrid{margin-bottom:20px}
+.adminV4 .missionFeaturedToggle{display:flex;align-items:center;gap:12px;min-height:48px;padding:10px 13px;border:1px solid rgba(151,132,244,.20);border-radius:13px;background:rgba(108,86,204,.055);cursor:pointer}
+.adminV4 .missionFeaturedToggle input{width:18px!important;height:18px!important;min-height:0!important;margin:0!important;accent-color:#7deef6;flex:0 0 auto}
+.adminV4 .missionFeaturedToggle span{display:flex;flex-direction:column;gap:2px;min-width:0}.adminV4 .missionFeaturedToggle b{font-size:11px;color:#e8faff}.adminV4 .missionFeaturedToggle small{font-size:9px;color:#7797a6;line-height:1.35}
+.adminV4 .missionTaskPickerHead{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin:3px 0 10px;padding-top:17px;border-top:1px solid rgba(111,205,222,.10)}
+.adminV4 .missionTaskPickerHead span{display:block;margin-bottom:4px;color:#66e8f4;font-size:9px;font-weight:950;letter-spacing:1.25px}.adminV4 .missionTaskPickerHead b{font-size:13px;color:#e9faff}.adminV4 .missionTaskPickerHead strong{padding:6px 9px;border-radius:999px;color:#bff9ff;background:rgba(53,230,242,.08);border:1px solid rgba(103,232,249,.17);font-size:10px;white-space:nowrap}
+.adminV4 .missionTaskPicker{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;max-height:280px;overflow-y:auto;padding:2px 4px 2px 0;scrollbar-width:thin;scrollbar-color:rgba(103,232,249,.25) transparent}
+.adminV4 .missionTaskOption{display:flex!important;align-items:center!important;gap:10px!important;width:100%!important;min-width:0!important;min-height:66px!important;padding:11px!important;text-align:left!important;border:1px solid rgba(107,185,205,.14)!important;border-radius:14px!important;background:linear-gradient(145deg,rgba(11,34,46,.88),rgba(5,20,29,.92))!important;color:#eafcff!important;box-shadow:none!important}
+.adminV4 .missionTaskOption:hover{border-color:rgba(103,232,249,.34)!important}.adminV4 .missionTaskOption.selected{border-color:rgba(103,232,249,.55)!important;background:linear-gradient(145deg,rgba(22,72,86,.75),rgba(8,35,46,.94))!important;box-shadow:inset 0 0 0 1px rgba(103,232,249,.08)!important}
+.adminV4 .missionTaskCheck{display:grid;place-items:center;width:30px;height:30px;flex:0 0 30px;border-radius:9px;color:#bdfaff;background:rgba(53,230,242,.08);border:1px solid rgba(103,232,249,.18);font-size:14px;font-weight:950}.adminV4 .missionTaskOption.selected .missionTaskCheck{color:#04171c;background:#75edf5;border-color:#aaf8fd}
+.adminV4 .missionTaskInfo{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px}.adminV4 .missionTaskInfo b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#effcff}.adminV4 .missionTaskInfo small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px;color:#7899a8;text-transform:capitalize}.adminV4 .missionTaskOption .adminStatus{flex:0 0 auto}
+.adminV4 .missionEmptyTasks{grid-column:1/-1;padding:24px;border:1px dashed rgba(112,190,209,.18);border-radius:14px;text-align:center;color:#7898a6;font-size:11px;background:rgba(7,25,35,.55)}
+.adminV4 .missionSummaryStrip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:16px}.adminV4 .missionSummaryStrip>div{padding:12px 13px;border:1px solid rgba(139,123,230,.13);border-radius:12px;background:rgba(102,81,188,.045)}.adminV4 .missionSummaryStrip span{display:block;margin-bottom:5px;color:#7f9caa;font-size:9px;font-weight:850;text-transform:uppercase;letter-spacing:.55px}.adminV4 .missionSummaryStrip b{display:block;color:#edfaff;font-size:12px;overflow-wrap:anywhere}
+@media(max-width:700px){.adminV4 .taskComposer,.adminV4 .missionComposer{max-height:calc(100dvh - 126px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));padding:16px!important}.adminV4 .taskComposerActions{grid-template-columns:1fr!important}.adminV4 .taskPublishBtn{grid-column:auto!important}.adminV4 .missionTaskPicker{grid-template-columns:1fr}.adminV4 .missionSummaryStrip{grid-template-columns:1fr}.adminV4 .missionTaskPickerHead{align-items:flex-start;flex-direction:column}}
