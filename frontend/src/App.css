@@ -12086,3 +12086,74 @@ body.maiAdminOpen .adminPanel.adminV4 {
     scroll-padding-bottom: 120px;
   }
 }
+
+
+/* =========================================================
+   MAI ADMIN — TASK CREATOR LAYOUT FIX (ce08f9b)
+   Matches the current taskComposer/taskField class names.
+   UI-only: no task, reward, payout, wallet or backend logic.
+   ========================================================= */
+.adminV4 .taskComposer {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+  max-height: calc(100dvh - 190px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scroll-padding-bottom: 110px;
+  padding: 22px !important;
+  border-color: rgba(53,230,242,.25) !important;
+  background: radial-gradient(circle at 92% 0,rgba(53,230,242,.10),transparent 30%),linear-gradient(145deg,rgba(8,29,42,.99),rgba(4,15,24,.99)) !important;
+}
+.adminV4 .taskComposer * { box-sizing: border-box; }
+.adminV4 .taskComposerTitle { display:flex; align-items:center; gap:13px; margin-bottom:20px; }
+.adminV4 .taskComposerIcon { display:grid; place-items:center; width:48px; height:48px; flex:0 0 48px; border-radius:15px; color:#b9fbff; font-size:22px; background:linear-gradient(145deg,rgba(53,230,242,.17),rgba(53,230,242,.05)); border:1px solid rgba(103,232,249,.28); }
+.adminV4 .taskComposerTitle span { display:block; color:var(--admin-cyan); font-size:10px; font-weight:950; letter-spacing:1.5px; }
+.adminV4 .taskComposerTitle h3 { margin:3px 0 2px !important; font-size:20px !important; }
+.adminV4 .taskComposerTitle p { margin:0; color:var(--admin-soft); font-size:12px; line-height:1.5; }
+.adminV4 .taskFormGrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px 18px; width:100%; align-items:start; }
+.adminV4 .taskField { display:flex; flex-direction:column; gap:7px; min-width:0; width:100%; margin:0; }
+.adminV4 .taskFieldWide { grid-column:1 / -1; }
+.adminV4 .taskField > span { display:block; min-height:16px; color:#a9bcc8; font-size:11px; font-weight:900; line-height:1.35; letter-spacing:.45px; text-transform:uppercase; }
+.adminV4 .taskField > span em { color:#ffe28b; font-size:9px; font-style:normal; letter-spacing:.25px; }
+.adminV4 .taskField input,
+.adminV4 .taskField select,
+.adminV4 .taskField textarea { display:block; width:100% !important; max-width:100%; min-width:0; min-height:46px; margin:0 !important; padding:11px 13px !important; border-radius:12px; border:1px solid rgba(111,205,222,.18); outline:none; color:#eefcff; background:linear-gradient(180deg,rgba(3,16,25,.94),rgba(5,21,31,.94)); font:inherit; }
+.adminV4 .taskField textarea { min-height:104px; resize:vertical; line-height:1.5; }
+.adminV4 .taskField select { appearance:auto; }
+.adminV4 .taskField input:focus,
+.adminV4 .taskField select:focus,
+.adminV4 .taskField textarea:focus { border-color:rgba(103,232,249,.58); box-shadow:0 0 0 3px rgba(53,230,242,.08); }
+.adminV4 .taskField small { display:block; margin:0; color:var(--admin-soft); font-size:10px; line-height:1.45; }
+.adminV4 .taskBudgetStrip { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:18px; }
+.adminV4 .taskBudgetStrip > div { min-width:0; padding:12px 13px; border:1px solid rgba(103,232,249,.13); border-radius:12px; background:rgba(103,232,249,.045); }
+.adminV4 .taskBudgetStrip span { display:block; margin-bottom:5px; color:var(--admin-soft); font-size:9px; font-weight:850; text-transform:uppercase; letter-spacing:.55px; }
+.adminV4 .taskBudgetStrip b { display:block; color:#eafcff; font-size:12px; line-height:1.35; overflow-wrap:anywhere; }
+.adminV4 .taskComposerActions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:9px; margin-top:18px; padding-bottom:5px; }
+.adminV4 .taskComposerActions button { min-width:126px; min-height:42px; }
+.adminV4 .taskPublishBtn { color:#031419 !important; background:linear-gradient(135deg,#9cf7ff,#35e6f2 55%,#19b8d0) !important; border-color:rgba(156,247,255,.65) !important; }
+.adminV4 .taskComposer::-webkit-scrollbar { width:7px; }
+.adminV4 .taskComposer::-webkit-scrollbar-track { background:transparent; }
+.adminV4 .taskComposer::-webkit-scrollbar-thumb { border-radius:999px; background:rgba(103,232,249,.28); }
+
+@media (max-width: 959px) {
+  .adminV4 .taskComposer { max-height:calc(100dvh - 132px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)); padding:18px !important; }
+}
+@media (max-width: 700px) {
+  .adminV4 .taskFormGrid { grid-template-columns:1fr; gap:13px; }
+  .adminV4 .taskFieldWide { grid-column:auto; }
+  .adminV4 .taskBudgetStrip { grid-template-columns:1fr; }
+  .adminV4 .taskComposerTitle { align-items:flex-start; }
+  .adminV4 .taskComposerActions { display:grid; grid-template-columns:1fr 1fr; }
+  .adminV4 .taskComposerActions button { width:100%; min-width:0; }
+  .adminV4 .taskPublishBtn { grid-column:1 / -1; }
+}
+@media (max-width: 420px) {
+  .adminV4 .taskComposer { max-height:calc(100dvh - 118px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)); padding:14px !important; scroll-padding-bottom:130px; }
+  .adminV4 .taskComposerIcon { width:42px; height:42px; flex-basis:42px; }
+  .adminV4 .taskComposerTitle h3 { font-size:18px !important; }
+  .adminV4 .taskComposerActions { grid-template-columns:1fr; }
+  .adminV4 .taskPublishBtn { grid-column:auto; }
+}
