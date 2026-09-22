@@ -20283,6 +20283,9 @@ app.post(
                 COUNT(*) FILTER(
                   WHERE referred_by IS NOT NULL
                 )::int AS total_invited,
+                COUNT(DISTINCT referred_by) FILTER(
+                  WHERE referred_by IS NOT NULL
+                )::int AS active_inviters,
                 COUNT(*) FILTER(
                   WHERE referred_by IS NOT NULL
                     AND referral_qualified=TRUE
@@ -20324,6 +20327,46 @@ app.post(
             )
           ).rows;
 
+          const inviters = (
+            await pool.query(
+              `
+              SELECT
+                u.telegram_id,
+                u.username,
+                u.first_name,
+                u.created_at,
+                COUNT(c.telegram_id)::int AS total_invites,
+                COUNT(c.telegram_id) FILTER(
+                  WHERE c.referral_qualified=TRUE
+                )::int AS successful_invites,
+                COUNT(c.telegram_id) FILTER(
+                  WHERE c.referral_qualified=FALSE
+                )::int AS pending_invites,
+                ROW_NUMBER() OVER(
+                  ORDER BY
+                    COUNT(c.telegram_id) DESC,
+                    COUNT(c.telegram_id) FILTER(WHERE c.referral_qualified=TRUE) DESC,
+                    u.telegram_id ASC
+                )::int AS rank
+              FROM users u
+              JOIN users c
+                ON c.referred_by=u.telegram_id
+              GROUP BY
+                u.telegram_id,
+                u.username,
+                u.first_name,
+                u.created_at
+              HAVING COUNT(c.telegram_id) > 0
+              ORDER BY
+                total_invites DESC,
+                successful_invites DESC,
+                u.telegram_id ASC
+              LIMIT 1000
+              `
+            )
+          ).rows;
+
+
           const rewardTotals = (
             await pool.query(
               `
@@ -20340,6 +20383,7 @@ app.post(
           res.json({
             success:true,
             overview,
+            inviters,
             users,
             rewardTotals
           });

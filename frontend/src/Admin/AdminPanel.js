@@ -168,6 +168,8 @@
         showOnHome:true, featured:true, allowMultipleEntries:false
       });
       const [broadcastMode, setBroadcastMode] = useState('create');
+      const [inviteMode, setInviteMode] = useState('inviters');
+      const [inviteSearch, setInviteSearch] = useState('');
       const [broadcastComposerOpen, setBroadcastComposerOpen] = useState(false);
       const [broadcastPreview, setBroadcastPreview] = useState(null);
       const [broadcastSendConfirm, setBroadcastSendConfirm] = useState({id:null,text:''});
@@ -1470,32 +1472,60 @@
       const renderInvites = () => {
         const o=referralAdmin?.overview || {};
         const rewardTotals=referralAdmin?.rewardTotals || [];
+        const inviters=referralAdmin?.inviters || [];
+        const referrals=referralAdmin?.users || [];
+        const q=String(inviteSearch||'').trim().toLowerCase();
+        const matches=item=>!q || String(item.telegram_id||'').includes(q) || String(item.username||'').toLowerCase().includes(q) || String(item.first_name||'').toLowerCase().includes(q) || String(item.referred_by||'').includes(q);
+        const activeInviters=inviters.filter(matches);
+        const referralRows=referrals.filter(item=>{
+          if(inviteMode==='successful'&&!item.referral_qualified)return false;
+          if(inviteMode==='pending'&&item.referral_qualified)return false;
+          return matches(item);
+        });
+        const list=inviteMode==='inviters'?activeInviters:referralRows;
         return (
           <>
-            <section className="adminSection">
-              <div className="adminSectionHead"><div><span>REFERRAL CONTROL CENTER</span><h3>Active Invites</h3></div></div>
-              <div className="adminMiniStats">
-                <div><span>Total Invited</span><b>{fmt(o.total_invited)}</b></div>
-                <div><span>Successful</span><b>{fmt(o.successful)}</b></div>
-                <div><span>Pending</span><b>{fmt(o.pending)}</b></div>
+            <section className="adminSection inviteControlHero">
+              <div className="adminSectionHead"><div><span>REFERRAL CONTROL CENTER</span><h3>Active Inviters</h3><p className="adminFootnote">See who is actively growing MAI, how many users they invited, and how many referrals became successful.</p></div><div className="inviteLivePill"><i /> LIVE REFERRAL DATA</div></div>
+              <div className="inviteOverviewGrid">
+                <div className="inviteMetricCard primary"><span>ACTIVE INVITERS</span><b>{fmt(o.active_inviters ?? inviters.length)}</b><small>Users with at least 1 invite</small></div>
+                <div className="inviteMetricCard"><span>TOTAL INVITED</span><b>{fmt(o.total_invited)}</b><small>Referral links recorded</small></div>
+                <div className="inviteMetricCard success"><span>SUCCESSFUL</span><b>{fmt(o.successful)}</b><small>Fully qualified referrals</small></div>
+                <div className="inviteMetricCard pending"><span>PENDING</span><b>{fmt(o.pending)}</b><small>Still completing requirements</small></div>
               </div>
-              <p className="adminFootnote">Successful invite = required activity completed + the invitee has invited at least one valid new user. Network/device overlap is a review signal only, never proof of fraud.</p>
+              <div className="inviteToolbar">
+                <div className="inviteModeTabs">
+                  <button className={inviteMode==='inviters'?'active':''} onClick={()=>setInviteMode('inviters')}>👥 Active Inviters</button>
+                  <button className={inviteMode==='successful'?'active':''} onClick={()=>setInviteMode('successful')}>✓ Successful</button>
+                  <button className={inviteMode==='pending'?'active':''} onClick={()=>setInviteMode('pending')}>◷ Pending</button>
+                  <button className={inviteMode==='all'?'active':''} onClick={()=>setInviteMode('all')}>≡ All Referrals</button>
+                </div>
+                <label className="inviteSearchBox"><span>⌕</span><input value={inviteSearch} onChange={e=>setInviteSearch(e.target.value)} placeholder="Search username / UID / inviter…" /></label>
+              </div>
+              <p className="inviteRuleNote"><b>Successful rule:</b> required activity completed + the invitee has invited at least one valid new user. Network/device overlap remains a review signal only.</p>
             </section>
-            <div className="adminList">
-              {(referralAdmin?.users || []).map(item=>(
-                <article className="adminListCard" key={item.telegram_id}>
-                  <div className="adminListTop"><div className="adminBadgeIcon">👥</div><div className="adminGrow"><b>@{item.username || 'unknown'}</b><span>UID {item.telegram_id} · invited by {item.referred_by}</span></div><Status>{item.referral_qualified?'successful':'pending'}</Status></div>
-                  <div className="adminDataGrid"><div><span>Total Invites</span><b>{fmt(item.total_invites)}</b></div><div><span>Successful</span><b>{fmt(item.successful_invites)}</b></div><div><span>Joined</span><b>{when(item.created_at)}</b></div></div>
+
+            <div className="inviteResultHead"><div><span>{inviteMode==='inviters'?'ACTIVE INVITER RANKING':inviteMode==='successful'?'SUCCESSFUL REFERRALS':inviteMode==='pending'?'PENDING REFERRALS':'ALL REFERRALS'}</span><b>{list.length} shown</b></div>{inviteSearch&&<button onClick={()=>setInviteSearch('')}>Clear Search</button>}</div>
+            <div className="adminList invitePremiumList">
+              {inviteMode==='inviters' ? activeInviters.map((item,index)=>(
+                <article className="adminListCard invitePremiumCard" key={item.telegram_id}>
+                  <div className="inviteRank">#{item.rank || index+1}</div>
+                  <div className="adminListTop"><div className="adminBadgeIcon inviteAvatar">👥</div><div className="adminGrow"><b>@{item.username || item.first_name || 'unknown'}</b><span>UID {item.telegram_id}</span></div><span className="inviteStatus active">ACTIVE INVITER</span></div>
+                  <div className="inviteCardStats"><div><span>Total Invites</span><b>{fmt(item.total_invites)}</b></div><div><span>Successful</span><b>{fmt(item.successful_invites)}</b></div><div><span>Pending</span><b>{fmt(item.pending_invites)}</b></div><div><span>Joined MAI</span><b>{when(item.created_at)}</b></div></div>
+                </article>
+              )) : referralRows.map(item=>(
+                <article className="adminListCard invitePremiumCard" key={item.telegram_id}>
+                  <div className="adminListTop"><div className="adminBadgeIcon inviteAvatar">{item.referral_qualified?'✓':'◷'}</div><div className="adminGrow"><b>@{item.username || item.first_name || 'unknown'}</b><span>UID {item.telegram_id} · invited by {item.referred_by}</span></div><span className={`inviteStatus ${item.referral_qualified?'successful':'pending'}`}>{item.referral_qualified?'SUCCESSFUL':'PENDING'}</span></div>
+                  <div className="inviteCardStats"><div><span>Own Invites</span><b>{fmt(item.total_invites)}</b></div><div><span>Successful Invites</span><b>{fmt(item.successful_invites)}</b></div><div><span>Joined MAI</span><b>{when(item.created_at)}</b></div></div>
                 </article>
               ))}
-              {!(referralAdmin?.users || []).length && <Empty text="No referral records yet." />}
+              {!list.length && <Empty text={inviteSearch?'No matching referral records.':inviteMode==='inviters'?'No active inviters yet.':'No referral records in this view.'} />}
             </div>
-            <section className="adminSection">
-              <div className="adminSectionHead"><div><span>REWARD LEDGER</span><h3>Referral Rewards</h3></div></div>
-              <div className="adminMiniStats">
-                {rewardTotals.map((x,i)=><div key={`${x.reward_type}-${x.status}-${i}`}><span>{x.reward_type} · {x.status}</span><b>{fmt(x.amount)} MAI</b></div>)}
-              </div>
-            </section>
+
+            {!!rewardTotals.length && <section className="adminSection inviteRewardLedger">
+              <div className="adminSectionHead"><div><span>REWARD LEDGER</span><h3>Referral Rewards</h3><p className="adminFootnote">Server-side referral reward totals. This section does not change reward qualification or payout logic.</p></div></div>
+              <div className="adminMiniStats">{rewardTotals.map((x,i)=><div key={`${x.reward_type}-${x.status}-${i}`}><span>{String(x.reward_type||'reward').replaceAll('_',' ')} · {x.status}</span><b>{fmt(x.amount)} MAI</b></div>)}</div>
+            </section>}
           </>
         );
       };
