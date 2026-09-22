@@ -12025,3 +12025,64 @@ body.maiAdminOpen .adminPanel.adminV4 {
 @media(max-width:640px){.adminV4 .adminTaskFormGrid{grid-template-columns:1fr}.adminV4 .adminTaskField.adminTaskWide{grid-column:auto}.adminV4 .adminTaskComposerHero{align-items:flex-start}.adminV4 .adminTaskComposerIcon{width:43px;height:43px;flex-basis:43px}.adminV4 .adminTaskComposerHero h3{font-size:18px!important}.adminV4 .adminTaskSafety{align-items:flex-start;flex-direction:column}.adminV4 .adminTaskSafety span{text-align:left}.adminV4 .adminTaskSubmit{display:grid!important;grid-template-columns:1fr 1fr!important}.adminV4 .adminTaskSubmit button{min-width:0!important;width:100%!important}.adminV4 .adminDeleteAction{margin-left:0!important}.adminV4 .adminTaskCard .adminActions{gap:7px!important}.adminV4 .adminTaskCard .adminActions button{flex:1 1 auto!important}}
 @media(max-width:380px){.adminV4 .adminTaskSubmit{grid-template-columns:1fr!important}.adminV4 .adminTaskComposer{padding:12px!important}.adminV4 .adminTaskField input,.adminV4 .adminTaskField select,.adminV4 .adminTaskField textarea{font-size:13px}.adminV4 .adminTaskCard .adminActions{display:grid!important;grid-template-columns:1fr 1fr!important}.adminV4 .adminTaskCard .adminActions button{width:100%!important}}
 .adminV4 .adminTaskVerifierWarning{padding:11px 12px;border-radius:12px;color:#ffd7a1;background:rgba(255,174,74,.07);border:1px solid rgba(255,174,74,.18);font-size:12px;line-height:1.5}
+
+/* =========================================================
+   MAI ADMIN — TASK CREATOR VIEWPORT / SCROLL FIX
+   Keeps the creator fully reachable on desktop, mobile and
+   Telegram WebView without changing backend/task logic.
+   ========================================================= */
+.adminV4 .adminTaskComposer {
+  width: 100% !important;
+  max-height: calc(100dvh - 170px) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(103, 232, 249, 0.34) transparent;
+  scroll-padding-bottom: 96px;
+}
+
+.adminV4 .adminTaskComposer::-webkit-scrollbar {
+  width: 7px;
+}
+
+.adminV4 .adminTaskComposer::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.adminV4 .adminTaskComposer::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(103, 232, 249, 0.28);
+}
+
+.adminV4 .adminTaskFormGrid,
+.adminV4 .adminTaskSafety,
+.adminV4 .adminTaskSubmit {
+  position: relative;
+  z-index: 1;
+}
+
+.adminV4 .adminTaskSubmit {
+  padding-bottom: 4px;
+}
+
+@media (min-width: 960px) {
+  .adminV4 .adminTaskComposer {
+    max-height: calc(100dvh - 190px) !important;
+  }
+}
+
+@media (max-width: 959px) {
+  .adminV4 .adminTaskComposer {
+    max-height: calc(100dvh - 132px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) !important;
+    padding-bottom: max(18px, env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .adminV4 .adminTaskComposer {
+    max-height: calc(100dvh - 118px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) !important;
+    scroll-padding-bottom: 120px;
+  }
+}
