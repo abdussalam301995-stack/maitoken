@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import './friends.css';
 
-const DEFAULT_BOT_USERNAME = 'maitoken_bot';
+const DEFAULT_BOT_USERNAME = 'mai_accesstoken_bot';
 
 function getTelegramWebApp() {
   if (
