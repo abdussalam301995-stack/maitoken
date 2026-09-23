@@ -12268,3 +12268,101 @@ body.maiAdminOpen .adminPanel.adminV4 {
 .inviteRewardLedger{margin-top:16px;border-color:rgba(98,155,214,.16)}
 @media(max-width:900px){.inviteOverviewGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.inviteToolbar{align-items:stretch;flex-direction:column}.inviteSearchBox{max-width:none;width:100%;min-width:0}.inviteCardStats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){.inviteControlHero{padding:14px!important}.inviteControlHero .adminSectionHead{align-items:flex-start;gap:10px}.inviteLivePill{font-size:8px;padding:6px 8px}.inviteOverviewGrid{gap:7px}.inviteMetricCard{padding:12px}.inviteMetricCard b{font-size:20px}.inviteMetricCard small{font-size:9px}.inviteModeTabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}.inviteModeTabs button{padding:9px 7px;font-size:10px}.inviteResultHead{align-items:flex-start}.invitePremiumCard{padding:13px!important}.invitePremiumCard .adminListTop{align-items:flex-start}.invitePremiumCard .adminGrow span{font-size:9px;word-break:break-word}.inviteStatus{font-size:8px;padding:5px 7px}.inviteCardStats{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.inviteCardStats>div{padding:9px}.inviteRank{font-size:20px;opacity:.7}}
+
+
+/* =========================================================
+   MAI ADMIN — INVITE SUBVIEW BACK + MOBILE MODULE SCROLL FIX
+   UI/navigation only. Keeps server/reward/payout logic untouched.
+   ========================================================= */
+.adminV4 .inviteResultActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.adminV4 .inviteBackMain {
+  min-height: 36px;
+  padding: 8px 12px !important;
+  border: 1px solid rgba(103,232,249,.28) !important;
+  border-radius: 11px !important;
+  color: #bff8ff !important;
+  background: linear-gradient(135deg,rgba(103,232,249,.11),rgba(45,212,191,.055)) !important;
+  font-size: 10px !important;
+  font-weight: 900 !important;
+  letter-spacing: .02em;
+}
+
+.adminV4 .inviteBackMain:active {
+  transform: translateY(1px);
+}
+
+@media (max-width: 959px) {
+  body.maiAdminOpen,
+  body.maiAdminOpen #root,
+  body.maiAdminOpen .adminPanel.adminV4 {
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+  }
+
+  .adminV4 .adminWorkspace {
+    display: flex !important;
+    flex-direction: column !important;
+    min-height: 0 !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
+  .adminV4 .adminContent {
+    position: relative !important;
+    flex: 1 1 0 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow-x: hidden !important;
+    overflow-y: scroll !important;
+    -webkit-overflow-scrolling: touch !important;
+    overscroll-behavior-y: auto !important;
+    touch-action: pan-y !important;
+    scroll-behavior: auto !important;
+    padding-bottom: max(88px, calc(68px + env(safe-area-inset-bottom))) !important;
+  }
+
+  .adminV4 .adminContent > *,
+  .adminV4 .adminSection,
+  .adminV4 .adminList,
+  .adminV4 .invitePremiumList,
+  .adminV4 .broadcastComposer,
+  .adminV4 .giveawayComposer,
+  .adminV4 .taskComposer,
+  .adminV4 .missionComposer {
+    touch-action: pan-y !important;
+  }
+
+  .adminV4 .inviteResultHead {
+    align-items: flex-start !important;
+    gap: 10px !important;
+  }
+
+  .adminV4 .inviteResultActions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .adminV4 .inviteBackMain {
+    min-height: 40px;
+  }
+}
+
+@media (max-width: 520px) {
+  .adminV4 .inviteResultActions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .adminV4 .inviteResultActions button {
+    width: 100%;
+  }
+}

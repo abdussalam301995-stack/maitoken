@@ -1505,7 +1505,13 @@
               <p className="inviteRuleNote"><b>Successful rule:</b> required activity completed + the invitee has invited at least one valid new user. Network/device overlap remains a review signal only.</p>
             </section>
 
-            <div className="inviteResultHead"><div><span>{inviteMode==='inviters'?'ACTIVE INVITER RANKING':inviteMode==='successful'?'SUCCESSFUL REFERRALS':inviteMode==='pending'?'PENDING REFERRALS':'ALL REFERRALS'}</span><b>{list.length} shown</b></div>{inviteSearch&&<button onClick={()=>setInviteSearch('')}>Clear Search</button>}</div>
+            <div className="inviteResultHead">
+              <div><span>{inviteMode==='inviters'?'ACTIVE INVITER RANKING':inviteMode==='successful'?'SUCCESSFUL REFERRALS':inviteMode==='pending'?'PENDING REFERRALS':'ALL REFERRALS'}</span><b>{list.length} shown</b></div>
+              <div className="inviteResultActions">
+                {inviteMode!=='inviters' && <button className="inviteBackMain" type="button" onClick={()=>{setInviteMode('inviters');setInviteSearch('');}}>← Back to Active Invites</button>}
+                {inviteSearch&&<button type="button" onClick={()=>setInviteSearch('')}>Clear Search</button>}
+              </div>
+            </div>
             <div className="adminList invitePremiumList">
               {inviteMode==='inviters' ? activeInviters.map((item,index)=>(
                 <article className="adminListCard invitePremiumCard" key={item.telegram_id}>
