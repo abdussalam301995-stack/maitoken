@@ -12472,3 +12472,69 @@ body.maiAdminOpen .adminPanel.adminV4 {
 @media(max-width:380px){
   .adminV4 .adminLaunchTabs{grid-template-columns:1fr!important}
 }
+/* =========================================================
+   MAI ADMIN MOBILE — FINAL NATURAL PAGE SCROLL FIX
+   Keep this block LAST in App.css.
+   ========================================================= */
+@media (max-width: 959px) {
+
+  body.maiAdminOpen,
+  body.maiAdminOpen #root,
+  body.maiAdminOpen .adminPanel.adminV4 {
+    height: auto !important;
+    min-height: 100dvh !important;
+    max-height: none !important;
+    overflow-x: hidden !important;
+    overflow-y: visible !important;
+  }
+
+  .adminV4 .adminWorkspace {
+    display: block !important;
+    height: auto !important;
+    min-height: 100dvh !important;
+    max-height: none !important;
+    overflow-x: hidden !important;
+    overflow-y: visible !important;
+  }
+
+  .adminV4 .adminContent {
+    display: block !important;
+    position: relative !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow-x: hidden !important;
+    overflow-y: visible !important;
+    overscroll-behavior: auto !important;
+    touch-action: auto !important;
+    -webkit-overflow-scrolling: auto !important;
+    padding-bottom: max(
+      110px,
+      calc(90px + env(safe-area-inset-bottom))
+    ) !important;
+  }
+
+  .adminV4 .taskComposer,
+  .adminV4 .missionComposer,
+  .adminV4 .giveawayComposer,
+  .adminV4 .adminBroadcastComposer,
+  .adminV4 .launchMobileComposer,
+  .adminV4 .adminTaskComposer,
+  .adminV4 .adminLaunchHero,
+  .adminV4 .adminLaunchPanel,
+  .adminV4 .adminLaunchProtected {
+    height: auto !important;
+    max-height: none !important;
+    overscroll-behavior: auto !important;
+    touch-action: auto !important;
+  }
+
+  .adminV4 .taskComposer,
+  .adminV4 .missionComposer,
+  .adminV4 .giveawayComposer,
+  .adminV4 .adminBroadcastComposer,
+  .adminV4 .launchMobileComposer,
+  .adminV4 .adminTaskComposer {
+    overflow: visible !important;
+  }
+}
