@@ -12538,3 +12538,148 @@ body.maiAdminOpen .adminPanel.adminV4 {
     overflow: visible !important;
   }
 }
+
+/* =========================================================
+   MAI ADMIN — FINAL DESKTOP SCROLL + FORM VISIBILITY FIX
+   2026-09-23
+   Keep this block LAST in App.css.
+
+   Goals:
+   - AdminContent is the single vertical scroll surface on desktop.
+   - Creator/composer cards do not create frozen nested scroll areas.
+   - Native form controls remain readable in Chromium/Telegram WebView.
+   - Preserve the working natural-page mobile scroll rules above.
+   ========================================================= */
+
+/* ---------- Readable admin form controls ---------- */
+.adminV4 input,
+.adminV4 textarea,
+.adminV4 select {
+  color-scheme: dark;
+}
+
+.adminV4 select,
+.adminV4 .taskField select,
+.adminV4 .adminLaunchField select {
+  color: #eefcff !important;
+  background-color: #071a25 !important;
+  border-color: rgba(111, 205, 222, .22) !important;
+  -webkit-text-fill-color: #eefcff !important;
+}
+
+.adminV4 select option,
+.adminV4 select optgroup {
+  color: #eefcff !important;
+  background: #0a1d28 !important;
+  -webkit-text-fill-color: #eefcff !important;
+}
+
+.adminV4 select option:checked {
+  color: #04171c !important;
+  background: #9cf7ff !important;
+  -webkit-text-fill-color: #04171c !important;
+}
+
+.adminV4 input,
+.adminV4 textarea {
+  caret-color: #67e8f9;
+}
+
+.adminV4 input::placeholder,
+.adminV4 textarea::placeholder {
+  color: #648592 !important;
+  opacity: 1 !important;
+}
+
+.adminV4 input:-webkit-autofill,
+.adminV4 input:-webkit-autofill:hover,
+.adminV4 input:-webkit-autofill:focus,
+.adminV4 textarea:-webkit-autofill,
+.adminV4 select:-webkit-autofill {
+  -webkit-text-fill-color: #eefcff !important;
+  -webkit-box-shadow: 0 0 0 1000px #071a25 inset !important;
+  box-shadow: 0 0 0 1000px #071a25 inset !important;
+  caret-color: #67e8f9 !important;
+}
+
+.adminV4 input[type="date"],
+.adminV4 input[type="time"],
+.adminV4 input[type="datetime-local"] {
+  color-scheme: dark !important;
+}
+
+.adminV4 input[type="date"]::-webkit-calendar-picker-indicator,
+.adminV4 input[type="time"]::-webkit-calendar-picker-indicator,
+.adminV4 input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  opacity: .82;
+  filter: invert(1);
+  cursor: pointer;
+}
+
+/* ---------- Desktop / desktop-view scrolling ---------- */
+@media (min-width: 960px) {
+  body.maiAdminOpen .adminPanel.adminV4 {
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
+  .adminV4 .adminWorkspace {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .adminV4 .adminTopbar {
+    flex: 0 0 auto !important;
+  }
+
+  .adminV4 .adminContent {
+    position: relative !important;
+    flex: 1 1 0 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior-y: auto !important;
+    scrollbar-gutter: stable;
+    padding-bottom: 90px !important;
+  }
+
+  /* One vertical scroller only: adminContent.
+     This avoids wheel/touch getting trapped inside creator cards. */
+  .adminV4 .taskComposer,
+  .adminV4 .missionComposer,
+  .adminV4 .giveawayComposer,
+  .adminV4 .adminBroadcastComposer,
+  .adminV4 .broadcastComposer,
+  .adminV4 .launchMobileComposer,
+  .adminV4 .adminTaskComposer,
+  .adminV4 .adminLaunchHero,
+  .adminV4 .adminLaunchPanel,
+  .adminV4 .adminLaunchProtected {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    overscroll-behavior: auto !important;
+    touch-action: auto !important;
+  }
+
+  /* Keep deliberately small inner pickers scrollable. */
+  .adminV4 .missionTaskPicker,
+  .adminV4 .adminTableWrap,
+  .adminV4 .adminGroupTableWrap {
+    overflow: auto !important;
+  }
+}
+
+/* ---------- Extra safety for browser "Desktop site" emulation ---------- */
+@media (min-width: 960px) and (max-height: 900px) {
+  .adminV4 .adminContent {
+    padding-bottom: 120px !important;
+  }
+}
