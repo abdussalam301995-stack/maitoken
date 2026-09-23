@@ -13992,3 +13992,57 @@ body.maiAdminOpen .adminPanel.adminV4 {
     grid-template-columns: 1fr !important;
   }
 }
+
+
+/* =========================================================
+   MAI ADMIN — SAFE SOFT DELETE BUTTON
+   Bright red is reserved for explicit Delete actions.
+   ========================================================= */
+
+.adminV4 .adminSoftDeleteBtn {
+  width: 100%;
+  min-height: 46px;
+  margin-top: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 99, 118, .82) !important;
+  border-radius: 13px !important;
+  background: linear-gradient(135deg, #ff304f 0%, #e5092f 100%) !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 820;
+  letter-spacing: .015em;
+  cursor: pointer;
+  box-shadow:
+    0 12px 30px rgba(229, 9, 47, .28),
+    inset 0 1px 0 rgba(255, 255, 255, .22) !important;
+  transition:
+    transform .16s ease,
+    filter .16s ease,
+    box-shadow .16s ease;
+}
+
+@media (hover: hover) {
+  .adminV4 .adminSoftDeleteBtn:not(:disabled):hover {
+    transform: translateY(-1px);
+    filter: brightness(1.11) saturate(1.08);
+    box-shadow:
+      0 15px 36px rgba(229, 9, 47, .36),
+      inset 0 1px 0 rgba(255, 255, 255, .24) !important;
+  }
+}
+
+.adminV4 .adminSoftDeleteBtn:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+.adminV4 .adminSoftDeleteBtn:disabled {
+  opacity: .48 !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+  filter: none !important;
+}

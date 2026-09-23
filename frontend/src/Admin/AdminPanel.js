@@ -306,6 +306,29 @@
         }
       };
 
+      const softDeleteAdminRecord = async (key, path, label) => {
+        const confirmed = window.confirm(
+          `Delete ${label}?\n\n` +
+          'This will only hide the record from this Admin Panel view. ' +
+          'Payment, transaction, payout and audit history will remain preserved.'
+        );
+
+        if (!confirmed) return;
+
+        setBusy(key);
+        setError('');
+
+        try {
+          await adminApi(path, { method: 'DELETE' });
+          flash('Record hidden. Financial and audit history preserved.');
+          await loadAll(true);
+        } catch (e) {
+          setError(e.message || 'Delete action failed.');
+        } finally {
+          setBusy('');
+        }
+      };
+
       const openUser = async telegramId => {
         setSelectedUser(String(telegramId));
         setUserDetail(null);
@@ -387,34 +410,44 @@
         );
       }, [users, search]);
 
+      const visibleCampaigns = campaigns.filter(
+        item => !item.admin_hidden
+      );
+
       const paidCampaigns = campaigns.filter(
-        item => String(item.payment_status).toLowerCase() === 'paid'
+        item =>
+          !item.payment_admin_hidden &&
+          String(item.payment_status).toLowerCase() === 'paid'
       );
 
       const paymentRows = useMemo(() => {
-        const promotionPayments = campaigns.map(item => ({
-          key: `campaign-${item.id}`,
-          kind: 'Promotion',
-          id: item.id,
-          user: item.owner_id,
-          method: item.payment_method,
-          amount: item.payment_amount,
-          status: item.payment_status,
-          tx: item.payment_tx_hash,
-          created: item.created_at
-        }));
+        const promotionPayments = campaigns
+          .filter(item => !item.payment_admin_hidden)
+          .map(item => ({
+            key: `campaign-${item.id}`,
+            kind: 'Promotion',
+            id: item.id,
+            user: item.owner_id,
+            method: item.payment_method,
+            amount: item.payment_amount,
+            status: item.payment_status,
+            tx: item.payment_tx_hash,
+            created: item.created_at
+          }));
 
-        const withdrawalPayments = withdrawals.map(item => ({
-          key: `withdrawal-${item.id}`,
-          kind: 'Withdrawal',
-          id: item.id,
-          user: item.telegram_id,
-          method: 'MAI',
-          amount: item.amount,
-          status: item.status,
-          tx: item.tx_hash,
-          created: item.created_at
-        }));
+        const withdrawalPayments = withdrawals
+          .filter(item => !item.payment_admin_hidden)
+          .map(item => ({
+            key: `withdrawal-${item.id}`,
+            kind: 'Withdrawal',
+            id: item.id,
+            user: item.telegram_id,
+            method: 'MAI',
+            amount: item.amount,
+            status: item.status,
+            tx: item.tx_hash,
+            created: item.created_at
+          }));
 
         return [...promotionPayments, ...withdrawalPayments]
           .sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0));
@@ -722,7 +755,7 @@
 
       const renderPromotions = () => (
         <div className="adminList">
-          {campaigns.map(item => (
+          {visibleCampaigns.map(item => (
             <article className="adminListCard" key={item.id}>
               <div className="adminListTop">
                 <div className="adminBadgeIcon">🚀</div>
@@ -780,9 +813,22 @@
                   Approval is locked until the backend verifies payment on-chain.
                 </p>
               )}
+
+              <button
+                type="button"
+                className="adminSoftDeleteBtn"
+                disabled={!!busy}
+                onClick={() => softDeleteAdminRecord(
+                  `campaign-hide-${item.id}`,
+                  `/admin/campaigns/${item.id}`,
+                  `Promotion #${item.id}`
+                )}
+              >
+                {busy === `campaign-hide-${item.id}` ? 'Deleting…' : '⌫ Delete'}
+              </button>
             </article>
           ))}
-          {!campaigns.length && <Empty text="No promotion campaigns." />}
+          {!visibleCampaigns.length && <Empty text="No promotion campaigns." />}
         </div>
       );
 
@@ -891,6 +937,21 @@
                   <span>Transaction</span>
                   <code>{short(row.tx, 12, 8)}</code>
                 </div>
+
+                <button
+                  type="button"
+                  className="adminSoftDeleteBtn"
+                  disabled={!!busy}
+                  onClick={() => softDeleteAdminRecord(
+                    `payment-hide-${row.kind}-${row.id}`,
+                    row.kind === 'Promotion'
+                      ? `/admin/payments/promotion/${row.id}`
+                      : `/admin/payments/withdrawal/${row.id}`,
+                    `${row.kind} #${row.id}`
+                  )}
+                >
+                  {busy === `payment-hide-${row.kind}-${row.id}` ? 'Deleting…' : '⌫ Delete'}
+                </button>
               </article>
             ))}
             {!paymentRows.length && <Empty text="No payment records available in the current admin APIs." />}

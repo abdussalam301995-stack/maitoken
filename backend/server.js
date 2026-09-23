@@ -3348,6 +3348,18 @@ if (
         NOT NULL
         DEFAULT 0;
 
+      -- Admin soft-delete flags only control Admin Panel visibility.
+      -- Campaign/payment/blockchain evidence remains permanently stored.
+      ALTER TABLE campaigns
+        ADD COLUMN IF NOT EXISTS admin_hidden BOOLEAN
+        NOT NULL
+        DEFAULT FALSE;
+
+      ALTER TABLE campaigns
+        ADD COLUMN IF NOT EXISTS payment_admin_hidden BOOLEAN
+        NOT NULL
+        DEFAULT FALSE;
+
       CREATE UNIQUE INDEX IF NOT EXISTS
         campaigns_payment_tx_hash_unique_idx
         ON campaigns(payment_tx_hash)
@@ -3591,6 +3603,15 @@ if (
       await pool.query(`
         ALTER TABLE withdrawals
         ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMPTZ;
+      `);
+
+      // Admin Payments soft-delete only hides the row from the Payments view.
+      // It never changes payout status, locked balance, tx hash or W5 evidence.
+      await pool.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS payment_admin_hidden BOOLEAN
+        NOT NULL
+        DEFAULT FALSE;
       `);
 
       await pool.query(`
@@ -14815,6 +14836,83 @@ await pool.query(`
 
 
     /* =========================================================
+       ADMIN PAYMENT VIEW — WITHDRAWAL SOFT DELETE
+
+       This never removes or changes the withdrawal itself.
+       W5 payout state, locked balance, tx hash and audit evidence remain intact.
+       ========================================================= */
+
+    app.delete(
+      '/admin/payments/withdrawal/:id',
+      authenticate,
+      admin,
+      async (req, res, next) => {
+        const withdrawalId = String(req.params.id || '').trim();
+
+        if (!withdrawalId || withdrawalId.length > 128) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid withdrawal id'
+          });
+        }
+
+        try {
+          const result = await pool.query(
+            `
+            UPDATE withdrawals
+            SET payment_admin_hidden=TRUE
+            WHERE id=$1
+            RETURNING id, telegram_id, status, tx_hash, payout_mode
+            `,
+            [withdrawalId]
+          );
+
+          if (!result.rowCount) {
+            return res.status(404).json({
+              success: false,
+              message: 'Withdrawal payment record not found'
+            });
+          }
+
+          const row = result.rows[0];
+
+          await pool.query(
+            `
+            INSERT INTO admin_audit_logs(
+              admin_id, action, target_type, target_id, reason, metadata, ip_hash
+            )
+            VALUES($1,$2,$3,$4,$5,$6,$7)
+            `,
+            [
+              req.admin?.telegramId || null,
+              'withdrawal_payment_admin_hidden',
+              'withdrawal_payment',
+              String(withdrawalId),
+              'Hidden from Payments Admin view',
+              {
+                preservedHistory: true,
+                telegramId: String(row.telegram_id),
+                status: row.status,
+                payoutMode: row.payout_mode || 'manual',
+                hasTransactionHash: !!row.tx_hash
+              },
+              hash(req.ip).slice(0,32)
+            ]
+          );
+
+          res.json({
+            success: true,
+            hidden: true,
+            preservedHistory: true
+          });
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+
+    /* =========================================================
        MAI AUTO PAYOUT — W5 / JETTON WORKER
 
        State flow:
@@ -17200,6 +17298,150 @@ app.get(
 
       }
 
+    );
+
+
+    /* =========================================================
+       ADMIN CAMPAIGN / PAYMENT SOFT DELETE
+
+       These endpoints never hard-delete financial or campaign rows.
+       They only hide records from the relevant Admin Panel view.
+       ========================================================= */
+
+    app.delete(
+      '/admin/campaigns/:id',
+      authenticate,
+      admin,
+      async (req, res, next) => {
+        const campaignId = safeInteger(req.params.id, 0);
+
+        if (campaignId <= 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid campaign id'
+          });
+        }
+
+        try {
+          const result = await pool.query(
+            `
+            UPDATE campaigns
+            SET admin_hidden=TRUE
+            WHERE id=$1
+            RETURNING id, status, payment_status, payment_tx_hash
+            `,
+            [campaignId]
+          );
+
+          if (!result.rowCount) {
+            return res.status(404).json({
+              success: false,
+              message: 'Campaign not found'
+            });
+          }
+
+          const row = result.rows[0];
+
+          await pool.query(
+            `
+            INSERT INTO admin_audit_logs(
+              admin_id, action, target_type, target_id, reason, metadata, ip_hash
+            )
+            VALUES($1,$2,$3,$4,$5,$6,$7)
+            `,
+            [
+              req.admin?.telegramId || null,
+              'campaign_admin_hidden',
+              'campaign',
+              String(campaignId),
+              'Hidden from Promotions Admin view',
+              {
+                preservedHistory: true,
+                status: row.status,
+                paymentStatus: row.payment_status,
+                hasTransactionHash: !!row.payment_tx_hash
+              },
+              hash(req.ip).slice(0,32)
+            ]
+          );
+
+          res.json({
+            success: true,
+            hidden: true,
+            preservedHistory: true
+          });
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+    app.delete(
+      '/admin/payments/promotion/:id',
+      authenticate,
+      admin,
+      async (req, res, next) => {
+        const campaignId = safeInteger(req.params.id, 0);
+
+        if (campaignId <= 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid campaign id'
+          });
+        }
+
+        try {
+          const result = await pool.query(
+            `
+            UPDATE campaigns
+            SET payment_admin_hidden=TRUE
+            WHERE id=$1
+            RETURNING id, status, payment_status, payment_tx_hash
+            `,
+            [campaignId]
+          );
+
+          if (!result.rowCount) {
+            return res.status(404).json({
+              success: false,
+              message: 'Promotion payment record not found'
+            });
+          }
+
+          const row = result.rows[0];
+
+          await pool.query(
+            `
+            INSERT INTO admin_audit_logs(
+              admin_id, action, target_type, target_id, reason, metadata, ip_hash
+            )
+            VALUES($1,$2,$3,$4,$5,$6,$7)
+            `,
+            [
+              req.admin?.telegramId || null,
+              'promotion_payment_admin_hidden',
+              'campaign_payment',
+              String(campaignId),
+              'Hidden from Payments Admin view',
+              {
+                preservedHistory: true,
+                status: row.status,
+                paymentStatus: row.payment_status,
+                hasTransactionHash: !!row.payment_tx_hash
+              },
+              hash(req.ip).slice(0,32)
+            ]
+          );
+
+          res.json({
+            success: true,
+            hidden: true,
+            preservedHistory: true
+          });
+        } catch (error) {
+          next(error);
+        }
+      }
     );
 
 
