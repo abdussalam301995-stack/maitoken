@@ -66,7 +66,7 @@ export default function Friends({
 
   const inviteLink =
     telegramId
-      ? `https://t.me/${botUsername}?startapp=r_${telegramId}`
+      ? `https://t.me/${botUsername}/app?startapp=r_${telegramId}`
       : '';
 
   const authHeaders = () => {
