@@ -66,7 +66,7 @@ export default function Friends({
 
   const inviteLink =
     telegramId
-      ? `https://t.me/${botUsername}?start=r_${telegramId}`
+      ? `https://t.me/${botUsername}?startapp=r_${telegramId}`
       : '';
 
   const authHeaders = () => {
@@ -324,7 +324,7 @@ export default function Friends({
     if (!inviteLink) return;
 
     const message =
-      'Join MAI Network with my invite link.';
+      '🚀 Join MAI Network — Mine • Invite • Earn. Start your MAI journey with me!';
 
     const shareUrl =
       `https://t.me/share/url?url=${encodeURIComponent(
