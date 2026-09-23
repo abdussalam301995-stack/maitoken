@@ -12366,3 +12366,109 @@ body.maiAdminOpen .adminPanel.adminV4 {
     width: 100%;
   }
 }
+
+
+/* =========================================================
+   MAI PREMIUM LAUNCH CONTROL + MOBILE CREATOR SCROLL
+   ========================================================= */
+.adminV4 .adminLaunchHero,
+.adminV4 .adminLaunchPanel,
+.adminV4 .adminLaunchProtected{
+  position:relative;
+  overflow:hidden;
+  border-color:rgba(103,232,249,.20)!important;
+  background:
+    radial-gradient(circle at 94% 0,rgba(53,230,242,.10),transparent 31%),
+    linear-gradient(145deg,rgba(8,27,40,.99),rgba(4,14,23,.99))!important;
+}
+.adminV4 .adminLaunchHero:after{
+  content:"";position:absolute;right:-80px;top:-110px;width:210px;height:210px;border-radius:50%;
+  background:rgba(53,230,242,.06);filter:blur(8px);pointer-events:none
+}
+.adminV4 .adminLaunchTabs{position:relative;z-index:1;margin-top:14px!important}
+.adminV4 .adminLaunchTabs button{min-width:150px}
+.adminV4 .adminLaunchMeter{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0
+}
+.adminV4 .adminLaunchMeter>div,
+.adminV4 .adminCorrectionUser{
+  padding:13px;border-radius:13px;background:rgba(103,232,249,.045);
+  border:1px solid rgba(103,232,249,.12)
+}
+.adminV4 .adminLaunchMeter span{display:block;color:var(--admin-soft);font-size:10px;font-weight:850;text-transform:uppercase;letter-spacing:.55px}
+.adminV4 .adminLaunchMeter b{display:block;margin-top:5px;color:#eaffff;font-size:16px}
+.adminV4 .adminLaunchWarning{
+  margin:13px 0;padding:13px 14px;border-radius:13px;
+  border:1px solid rgba(255,190,80,.18);background:rgba(255,190,80,.055)
+}
+.adminV4 .adminLaunchWarning b{color:var(--admin-amber);font-size:10px;letter-spacing:1px}
+.adminV4 .adminLaunchWarning p{margin:6px 0 0;color:var(--admin-soft);font-size:12px;line-height:1.55}
+.adminV4 .adminLaunchField{display:flex;flex-direction:column;gap:7px;margin-top:12px}
+.adminV4 .adminLaunchField>span{color:#a9bcc8;font-size:10px;font-weight:900;letter-spacing:.65px;text-transform:uppercase}
+.adminV4 .adminLaunchField input,
+.adminV4 .adminLaunchField textarea{
+  width:100%;min-height:46px;padding:11px 13px;border-radius:12px;outline:none;
+  color:#eefcff;background:linear-gradient(180deg,rgba(3,16,25,.94),rgba(5,21,31,.94));
+  border:1px solid rgba(111,205,222,.18)
+}
+.adminV4 .adminLaunchField textarea{min-height:92px;resize:vertical;line-height:1.5}
+.adminV4 .adminLaunchField input:focus,
+.adminV4 .adminLaunchField textarea:focus{
+  border-color:rgba(103,232,249,.55);box-shadow:0 0 0 3px rgba(53,230,242,.08)
+}
+.adminV4 .adminLaunchConfirm{
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,.8fr) auto;gap:10px;align-items:center;
+  margin-top:15px;padding:13px;border-radius:14px;border:1px solid rgba(255,94,112,.18);background:rgba(255,94,112,.045)
+}
+.adminV4 .adminLaunchConfirm b{display:block;color:#ff9aa7;font-size:10px;letter-spacing:1px}
+.adminV4 .adminLaunchConfirm span{display:block;margin-top:4px;color:var(--admin-soft);font-size:11px;line-height:1.4}
+.adminV4 .adminLaunchConfirm input{
+  min-height:44px;padding:10px 12px;border-radius:11px;outline:none;color:#fff;background:#061721;border:1px solid rgba(255,94,112,.22)
+}
+.adminV4 .adminLaunchComplete{margin-top:14px;padding:14px;border-radius:13px;border:1px solid rgba(80,235,177,.18);background:rgba(80,235,177,.055)}
+.adminV4 .adminLaunchComplete b{display:block;color:#8ff5ca}.adminV4 .adminLaunchComplete span{display:block;margin-top:4px;color:var(--admin-cyan);font-size:12px}.adminV4 .adminLaunchComplete p{margin:7px 0 0;color:var(--admin-soft);font-size:12px}
+.adminV4 .adminCorrectionSearch{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end}
+.adminV4 .adminCorrectionSearch .adminLaunchField{margin:0}
+.adminV4 .adminCorrectionUser{display:flex;align-items:center;gap:11px;margin-top:14px}
+.adminV4 .adminCorrectionChoices{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:14px 0}
+.adminV4 .adminCorrectionChoices button{min-height:44px}
+.adminV4 .adminCorrectionHistory{border-color:rgba(103,232,249,.13)!important}
+
+@media(max-width:950px){
+  /* Use the main Telegram/WebView scroll surface on mobile.
+     Nested max-height scrollers are deliberately removed because they can
+     freeze while the on-screen keyboard is open. */
+  .adminV4 .taskComposer,
+  .adminV4 .missionComposer,
+  .adminV4 .giveawayComposer,
+  .adminV4 .adminBroadcastComposer,
+  .adminV4 .launchMobileComposer{
+    max-height:none!important;
+    height:auto!important;
+    overflow:visible!important;
+    overscroll-behavior:auto!important;
+    -webkit-overflow-scrolling:auto!important;
+    touch-action:pan-y!important;
+    padding-bottom:max(24px,calc(18px + env(safe-area-inset-bottom)))!important;
+  }
+  .adminV4 .adminTaskComposer{max-height:none!important;overflow:visible!important}
+  .adminV4 .adminContent{
+    overflow-y:auto!important;
+    touch-action:pan-y!important;
+    -webkit-overflow-scrolling:touch!important;
+  }
+}
+
+@media(max-width:640px){
+  .adminV4 .adminLaunchTabs{display:grid!important;grid-template-columns:1fr 1fr!important}
+  .adminV4 .adminLaunchTabs button{min-width:0;width:100%}
+  .adminV4 .adminLaunchMeter{grid-template-columns:1fr}
+  .adminV4 .adminLaunchConfirm{grid-template-columns:1fr}
+  .adminV4 .adminLaunchConfirm button{width:100%}
+  .adminV4 .adminCorrectionSearch{grid-template-columns:1fr}
+  .adminV4 .adminCorrectionSearch button{width:100%}
+  .adminV4 .adminCorrectionChoices{grid-template-columns:1fr}
+}
+@media(max-width:380px){
+  .adminV4 .adminLaunchTabs{grid-template-columns:1fr!important}
+}

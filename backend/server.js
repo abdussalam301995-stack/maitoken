@@ -18311,6 +18311,26 @@ app.post(
       `);
 
       await pool.query(`
+        CREATE TABLE IF NOT EXISTS mai_account_corrections(
+          id BIGSERIAL PRIMARY KEY,
+          telegram_id BIGINT NOT NULL,
+          action TEXT NOT NULL CHECK (action IN ('reset_balance','compensation')),
+          before_balance NUMERIC(30,8) NOT NULL DEFAULT 0,
+          change_amount NUMERIC(30,8) NOT NULL DEFAULT 0,
+          after_balance NUMERIC(30,8) NOT NULL DEFAULT 0,
+          reason TEXT NOT NULL,
+          reference TEXT NOT NULL UNIQUE,
+          created_by TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_mai_account_corrections_user_created
+        ON mai_account_corrections(telegram_id, created_at DESC)
+      `);
+
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS mai_launch_snapshots(
           id BIGSERIAL PRIMARY KEY,
           snapshot_key TEXT NOT NULL UNIQUE,
@@ -20283,9 +20303,6 @@ app.post(
                 COUNT(*) FILTER(
                   WHERE referred_by IS NOT NULL
                 )::int AS total_invited,
-                COUNT(DISTINCT referred_by) FILTER(
-                  WHERE referred_by IS NOT NULL
-                )::int AS active_inviters,
                 COUNT(*) FILTER(
                   WHERE referred_by IS NOT NULL
                     AND referral_qualified=TRUE
@@ -20327,46 +20344,6 @@ app.post(
             )
           ).rows;
 
-          const inviters = (
-            await pool.query(
-              `
-              SELECT
-                u.telegram_id,
-                u.username,
-                u.first_name,
-                u.created_at,
-                COUNT(c.telegram_id)::int AS total_invites,
-                COUNT(c.telegram_id) FILTER(
-                  WHERE c.referral_qualified=TRUE
-                )::int AS successful_invites,
-                COUNT(c.telegram_id) FILTER(
-                  WHERE c.referral_qualified=FALSE
-                )::int AS pending_invites,
-                ROW_NUMBER() OVER(
-                  ORDER BY
-                    COUNT(c.telegram_id) DESC,
-                    COUNT(c.telegram_id) FILTER(WHERE c.referral_qualified=TRUE) DESC,
-                    u.telegram_id ASC
-                )::int AS rank
-              FROM users u
-              JOIN users c
-                ON c.referred_by=u.telegram_id
-              GROUP BY
-                u.telegram_id,
-                u.username,
-                u.first_name,
-                u.created_at
-              HAVING COUNT(c.telegram_id) > 0
-              ORDER BY
-                total_invites DESC,
-                successful_invites DESC,
-                u.telegram_id ASC
-              LIMIT 1000
-              `
-            )
-          ).rows;
-
-
           const rewardTotals = (
             await pool.query(
               `
@@ -20383,7 +20360,6 @@ app.post(
           res.json({
             success:true,
             overview,
-            inviters,
             users,
             rewardTotals
           });
@@ -20397,6 +20373,176 @@ app.post(
        LAUNCH CONTROL
        ------------------------- */
 
+    const LAUNCH_TEST_RESET_LIMIT = 10;
+
+    function normalizeAdminCorrectionKey(value) {
+      const key = String(value || '').trim();
+      return /^[A-Za-z0-9:_-]{16,120}$/.test(key) ? key : '';
+    }
+
+    async function getLaunchTestResetState(client = pool) {
+      const row = (
+        await client.query(
+          `SELECT value FROM mai_system_state WHERE key='prelaunch_test_reset'`
+        )
+      ).rows[0];
+
+      const value = row?.value || {};
+      return {
+        count: Math.max(0, safeInteger(value.count, 0)),
+        limit: LAUNCH_TEST_RESET_LIMIT,
+        lastResetAt: value.lastResetAt || null,
+        lastSnapshotKey: value.lastSnapshotKey || null,
+        lastExecutedBy: value.lastExecutedBy || null
+      };
+    }
+
+    async function buildLaunchPreview(client = pool) {
+      const summary = (
+        await client.query(
+          `
+          SELECT
+            COUNT(*)::int AS users,
+            COALESCE(SUM(balance),0) AS game_balance,
+            COUNT(*) FILTER(
+              WHERE referred_by IS NOT NULL
+            )::int AS referral_links,
+            COUNT(*) FILTER(
+              WHERE referral_qualified=TRUE
+            )::int AS successful_referrals
+          FROM users
+          `
+        )
+      ).rows[0];
+
+      const rewards = (
+        await client.query(
+          `
+          SELECT COALESCE(SUM(amount),0) AS amount
+          FROM mai_referral_reward_events
+          WHERE status='available'
+          `
+        )
+      ).rows[0];
+
+      return {
+        ...summary,
+        unclaimedReferralRewards: safeNumber(rewards.amount),
+        hardProtected: [
+          'Telegram identity',
+          'bound wallet',
+          'security/risk history',
+          'ban/suspension state',
+          'audit logs',
+          'withdrawal/payout history',
+          'transaction hashes',
+          'locked withdrawal balance',
+          'blockchain balances/assets'
+        ]
+      };
+    }
+
+    async function archiveLaunchState(client, snapshotKey, actor, kind, sequence = null) {
+      const userSummary = (
+        await client.query(
+          `
+          SELECT
+            COUNT(*)::int AS users,
+            COALESCE(SUM(balance),0)::numeric AS game_balance
+          FROM users
+          `
+        )
+      ).rows[0];
+
+      const referralSummary = (
+        await client.query(
+          `
+          SELECT COUNT(*)::int AS referral_events
+          FROM mai_referral_reward_events
+          `
+        )
+      ).rows[0];
+
+      const summary = {
+        users: safeInteger(userSummary?.users, 0),
+        gameBalance: safeNumber(userSummary?.game_balance),
+        referralEvents: safeInteger(referralSummary?.referral_events, 0),
+        storage: 'normalized_v1',
+        kind,
+        sequence
+      };
+
+      await client.query(
+        `
+        INSERT INTO mai_launch_snapshots(
+          snapshot_key, created_by, summary, users_snapshot, referrals_snapshot
+        )
+        VALUES($1,$2,$3,$4,$5)
+        `,
+        [
+          snapshotKey,
+          actor,
+          JSON.stringify(summary),
+          JSON.stringify({storage:'mai_launch_snapshot_users'}),
+          JSON.stringify({storage:'mai_launch_snapshot_referral_events'})
+        ]
+      );
+
+      await client.query(
+        `
+        INSERT INTO mai_launch_snapshot_users(
+          snapshot_key, telegram_id, balance, locked_balance, referred_by,
+          referral_assigned_at, referral_qualified, wallet_address,
+          account_status, suspended_until, admin_note
+        )
+        SELECT
+          $1, telegram_id, balance, locked_balance, referred_by,
+          referral_assigned_at, referral_qualified, wallet_address,
+          account_status, suspended_until, admin_note
+        FROM users
+        `,
+        [snapshotKey]
+      );
+
+      await client.query(
+        `
+        INSERT INTO mai_launch_snapshot_referral_events(
+          snapshot_key, event_id, inviter_id, referred_user_id, reward_type,
+          amount, source_reference, status, claim_reference, claimed_at, created_at
+        )
+        SELECT
+          $1, id, inviter_id, referred_user_id, reward_type,
+          amount, source_reference, status, claim_reference, claimed_at, created_at
+        FROM mai_referral_reward_events
+        `,
+        [snapshotKey]
+      );
+
+      return summary;
+    }
+
+    async function resetPrelaunchGameState(client) {
+      await client.query(
+        `
+        UPDATE users
+        SET
+          balance=0,
+          referred_by=NULL,
+          referral_assigned_at=NULL,
+          referral_qualified=FALSE,
+          updated_at=NOW()
+        `
+      );
+
+      await client.query(
+        `
+        UPDATE mai_referral_reward_events
+        SET status='archived_prelaunch'
+        WHERE status='available'
+        `
+      );
+    }
+
     app.get(
       '/admin/launch-control',
       authenticate,
@@ -20405,58 +20551,425 @@ app.post(
         try {
           await ensureMaiV5Schema();
 
-          const state =
-            await getOfficialLaunchState();
-
-          const summary = (
-            await pool.query(
+          const [state, testReset, preview, corrections] = await Promise.all([
+            getOfficialLaunchState(),
+            getLaunchTestResetState(),
+            buildLaunchPreview(),
+            pool.query(
               `
               SELECT
-                COUNT(*)::int AS users,
-                COALESCE(SUM(balance),0) AS game_balance,
-                COUNT(*) FILTER(
-                  WHERE referred_by IS NOT NULL
-                )::int AS referral_links,
-                COUNT(*) FILTER(
-                  WHERE referral_qualified=TRUE
-                )::int AS successful_referrals
-              FROM users
+                id, telegram_id, action, before_balance, change_amount,
+                after_balance, reason, reference, created_by, created_at
+              FROM mai_account_corrections
+              ORDER BY created_at DESC
+              LIMIT 30
               `
             )
-          ).rows[0];
-
-          const rewards = (
-            await pool.query(
-              `
-              SELECT
-                COALESCE(SUM(amount),0) AS amount
-              FROM mai_referral_reward_events
-              WHERE status='available'
-              `
-            )
-          ).rows[0];
+          ]);
 
           res.json({
             success:true,
             state,
-            preview:{
-              ...summary,
-              unclaimedReferralRewards:
-                safeNumber(rewards.amount),
-              hardProtected:[
-                'Telegram identity',
-                'bound wallet',
-                'security/risk history',
-                'ban/suspension state',
-                'audit logs',
-                'withdrawal/payout history',
-                'transaction hashes',
-                'blockchain balances/assets'
-              ]
-            }
+            testReset,
+            preview,
+            corrections: corrections.rows
           });
         } catch (error) {
           next(error);
+        }
+      }
+    );
+
+    app.get(
+      '/admin/launch-control/account/:telegramId',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        try {
+          await ensureMaiV5Schema();
+          const telegramId = String(req.params.telegramId || '').trim();
+          if (!/^\d+$/.test(telegramId)) {
+            return res.status(400).json({success:false,message:'Invalid Telegram ID'});
+          }
+
+          const user = (
+            await pool.query(
+              `
+              SELECT
+                telegram_id, username, first_name, last_name,
+                balance, locked_balance, wallet_address,
+                account_status, suspended_until, referral_qualified,
+                created_at
+              FROM users
+              WHERE telegram_id=$1
+              LIMIT 1
+              `,
+              [telegramId]
+            )
+          ).rows[0];
+
+          if (!user) {
+            return res.status(404).json({success:false,message:'User not found'});
+          }
+
+          res.json({success:true,user});
+        } catch (error) {
+          next(error);
+        }
+      }
+    );
+
+    app.post(
+      '/admin/launch-control/test-reset',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        const confirmation = String(req.body?.confirmation || '');
+        if (confirmation !== 'TEST RESET MAI NETWORK') {
+          return res.status(409).json({
+            success:false,
+            message:'Type TEST RESET MAI NETWORK exactly to confirm'
+          });
+        }
+
+        const client = await pool.connect();
+        try {
+          await ensureMaiV5Schema();
+          await client.query('BEGIN');
+
+          const official = (
+            await client.query(
+              `SELECT value FROM mai_system_state WHERE key='official_launch' FOR UPDATE`
+            )
+          ).rows[0]?.value || {};
+
+          if (official.launched) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+              success:false,
+              message:'Test Reset is permanently disabled after Official Launch'
+            });
+          }
+
+          const currentRow = (
+            await client.query(
+              `SELECT value FROM mai_system_state WHERE key='prelaunch_test_reset' FOR UPDATE`
+            )
+          ).rows[0];
+
+          const currentCount = Math.max(0, safeInteger(currentRow?.value?.count, 0));
+          if (currentCount >= LAUNCH_TEST_RESET_LIMIT) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+              success:false,
+              message:`Pre-launch Test Reset limit reached (${LAUNCH_TEST_RESET_LIMIT}/${LAUNCH_TEST_RESET_LIMIT})`
+            });
+          }
+
+          const nextCount = currentCount + 1;
+          const actor = adminActor(req);
+          const resetAt = new Date().toISOString();
+          const snapshotKey = `test-reset:${nextCount}:${Date.now()}`;
+
+          const summary = await archiveLaunchState(
+            client, snapshotKey, actor, 'test_reset', nextCount
+          );
+
+          await resetPrelaunchGameState(client);
+
+          await client.query(
+            `
+            INSERT INTO mai_system_state(key,value,updated_at)
+            VALUES('prelaunch_test_reset',$1,NOW())
+            ON CONFLICT(key)
+            DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()
+            `,
+            [JSON.stringify({
+              count:nextCount,
+              limit:LAUNCH_TEST_RESET_LIMIT,
+              lastResetAt:resetAt,
+              lastSnapshotKey:snapshotKey,
+              lastExecutedBy:actor
+            })]
+          );
+
+          await client.query(
+            `
+            INSERT INTO admin_audit_logs(
+              admin_id,action,target_type,target_id,reason,metadata,ip_hash
+            )
+            VALUES($1,'prelaunch_test_reset','launch_control',$2,$3,$4,$5)
+            `,
+            [
+              req.admin?.telegramId || null,
+              String(nextCount),
+              String(req.body?.reason || 'Pre-launch test reset').slice(0,500),
+              {snapshotKey,resetAt,summary,count:nextCount,limit:LAUNCH_TEST_RESET_LIMIT},
+              hash(req.ip).slice(0,32)
+            ]
+          );
+
+          await client.query('COMMIT');
+
+          await logSecurity(req,'prelaunch_test_reset','warn',{
+            snapshotKey, resetAt, count:nextCount, limit:LAUNCH_TEST_RESET_LIMIT
+          });
+
+          res.json({
+            success:true,
+            count:nextCount,
+            limit:LAUNCH_TEST_RESET_LIMIT,
+            resetAt,
+            snapshotKey,
+            summary
+          });
+        } catch (error) {
+          try { await client.query('ROLLBACK'); } catch {}
+          next(error);
+        } finally {
+          client.release();
+        }
+      }
+    );
+
+    app.post(
+      '/admin/launch-control/account/:telegramId/reset-balance',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        const telegramId = String(req.params.telegramId || '').trim();
+        const reason = String(req.body?.reason || '').trim().slice(0,500);
+        const confirmation = String(req.body?.confirmation || '');
+        const idempotencyKey = normalizeAdminCorrectionKey(req.body?.idempotencyKey);
+
+        if (!idempotencyKey) {
+          return res.status(400).json({success:false,message:'A valid idempotency key is required'});
+        }
+        if (!/^\d+$/.test(telegramId)) {
+          return res.status(400).json({success:false,message:'Invalid Telegram ID'});
+        }
+        if (reason.length < 5) {
+          return res.status(400).json({success:false,message:'A clear reason is required'});
+        }
+        if (confirmation !== `RESET ${telegramId}`) {
+          return res.status(409).json({
+            success:false,
+            message:`Type RESET ${telegramId} exactly to confirm`
+          });
+        }
+
+        const client = await pool.connect();
+        try {
+          await ensureMaiV5Schema();
+          await client.query('BEGIN');
+
+          const reference = `admin-reset:${idempotencyKey}`;
+          const prior = (
+            await client.query(
+              `SELECT telegram_id,before_balance,after_balance,reference
+               FROM mai_account_corrections
+               WHERE reference=$1
+               LIMIT 1`,
+              [reference]
+            )
+          ).rows[0];
+
+          if (prior) {
+            await client.query('COMMIT');
+            return res.json({
+              success:true,
+              replayed:true,
+              telegramId:String(prior.telegram_id),
+              beforeBalance:safeNumber(prior.before_balance),
+              afterBalance:safeNumber(prior.after_balance),
+              reference:prior.reference
+            });
+          }
+
+          const user = (
+            await client.query(
+              `SELECT telegram_id,balance,locked_balance,wallet_address FROM users WHERE telegram_id=$1 FOR UPDATE`,
+              [telegramId]
+            )
+          ).rows[0];
+
+          if (!user) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({success:false,message:'User not found'});
+          }
+
+          const before = safeNumber(user.balance);
+
+          await client.query(
+            `UPDATE users SET balance=0,updated_at=NOW() WHERE telegram_id=$1`,
+            [telegramId]
+          );
+
+          await client.query(
+            `
+            INSERT INTO transactions(telegram_id,type,amount,reference,metadata)
+            VALUES($1,'admin_balance_reset',$2,$3,$4)
+            `,
+            [telegramId, -before, reference, {reason,beforeBalance:before,afterBalance:0}]
+          );
+
+          await client.query(
+            `
+            INSERT INTO mai_account_corrections(
+              telegram_id,action,before_balance,change_amount,after_balance,
+              reason,reference,created_by
+            )
+            VALUES($1,'reset_balance',$2,$3,0,$4,$5,$6)
+            `,
+            [telegramId,before,-before,reason,reference,adminActor(req)]
+          );
+
+          await client.query(
+            `
+            INSERT INTO admin_audit_logs(
+              admin_id,action,target_type,target_id,reason,metadata,ip_hash
+            )
+            VALUES($1,'user_ingame_balance_reset','user',$2,$3,$4,$5)
+            `,
+            [
+              req.admin?.telegramId || null, telegramId, reason,
+              {beforeBalance:before,afterBalance:0,reference,lockedBalance:safeNumber(user.locked_balance)},
+              hash(req.ip).slice(0,32)
+            ]
+          );
+
+          await client.query('COMMIT');
+          await logSecurity(req,'user_ingame_balance_reset','warn',{telegramId,beforeBalance:before,reference});
+          res.json({success:true,telegramId,beforeBalance:before,afterBalance:0,reference});
+        } catch (error) {
+          try { await client.query('ROLLBACK'); } catch {}
+          next(error);
+        } finally {
+          client.release();
+        }
+      }
+    );
+
+    app.post(
+      '/admin/launch-control/account/:telegramId/compensate',
+      authenticate,
+      admin,
+      async (req,res,next) => {
+        const telegramId = String(req.params.telegramId || '').trim();
+        const reason = String(req.body?.reason || '').trim().slice(0,500);
+        const amount = safeNumber(req.body?.amount);
+        const confirmation = String(req.body?.confirmation || '');
+        const idempotencyKey = normalizeAdminCorrectionKey(req.body?.idempotencyKey);
+
+        if (!idempotencyKey) {
+          return res.status(400).json({success:false,message:'A valid idempotency key is required'});
+        }
+        if (!/^\d+$/.test(telegramId)) {
+          return res.status(400).json({success:false,message:'Invalid Telegram ID'});
+        }
+        if (!(amount > 0) || amount > 1000000000) {
+          return res.status(400).json({success:false,message:'Compensation must be greater than 0 and within the safe limit'});
+        }
+        if (reason.length < 5) {
+          return res.status(400).json({success:false,message:'A clear reason is required'});
+        }
+        if (confirmation !== `ADD ${amount} MAI TO ${telegramId}`) {
+          return res.status(409).json({
+            success:false,
+            message:`Type ADD ${amount} MAI TO ${telegramId} exactly to confirm`
+          });
+        }
+
+        const client = await pool.connect();
+        try {
+          await ensureMaiV5Schema();
+          await client.query('BEGIN');
+
+          const reference = `admin-compensation:${idempotencyKey}`;
+          const prior = (
+            await client.query(
+              `SELECT telegram_id,before_balance,change_amount,after_balance,reference
+               FROM mai_account_corrections
+               WHERE reference=$1
+               LIMIT 1`,
+              [reference]
+            )
+          ).rows[0];
+
+          if (prior) {
+            await client.query('COMMIT');
+            return res.json({
+              success:true,
+              replayed:true,
+              telegramId:String(prior.telegram_id),
+              beforeBalance:safeNumber(prior.before_balance),
+              amount:safeNumber(prior.change_amount),
+              afterBalance:safeNumber(prior.after_balance),
+              reference:prior.reference
+            });
+          }
+
+          const user = (
+            await client.query(
+              `SELECT telegram_id,balance,locked_balance,wallet_address FROM users WHERE telegram_id=$1 FOR UPDATE`,
+              [telegramId]
+            )
+          ).rows[0];
+
+          if (!user) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({success:false,message:'User not found'});
+          }
+
+          const before = safeNumber(user.balance);
+          const after = before + amount;
+
+          await client.query(
+            `UPDATE users SET balance=balance+$2,updated_at=NOW() WHERE telegram_id=$1`,
+            [telegramId,amount]
+          );
+
+          await client.query(
+            `
+            INSERT INTO transactions(telegram_id,type,amount,reference,metadata)
+            VALUES($1,'admin_compensation',$2,$3,$4)
+            `,
+            [telegramId,amount,reference,{reason,beforeBalance:before,afterBalance:after}]
+          );
+
+          await client.query(
+            `
+            INSERT INTO mai_account_corrections(
+              telegram_id,action,before_balance,change_amount,after_balance,
+              reason,reference,created_by
+            )
+            VALUES($1,'compensation',$2,$3,$4,$5,$6,$7)
+            `,
+            [telegramId,before,amount,after,reason,reference,adminActor(req)]
+          );
+
+          await client.query(
+            `
+            INSERT INTO admin_audit_logs(
+              admin_id,action,target_type,target_id,reason,metadata,ip_hash
+            )
+            VALUES($1,'user_compensation_added','user',$2,$3,$4,$5)
+            `,
+            [
+              req.admin?.telegramId || null, telegramId, reason,
+              {beforeBalance:before,amount,afterBalance:after,reference,lockedBalance:safeNumber(user.locked_balance)},
+              hash(req.ip).slice(0,32)
+            ]
+          );
+
+          await client.query('COMMIT');
+          await logSecurity(req,'user_compensation_added','warn',{telegramId,amount,reference});
+          res.json({success:true,telegramId,beforeBalance:before,amount,afterBalance:after,reference});
+        } catch (error) {
+          try { await client.query('ROLLBACK'); } catch {}
+          next(error);
+        } finally {
+          client.release();
         }
       }
     );
@@ -20466,21 +20979,16 @@ app.post(
       authenticate,
       admin,
       async (req,res,next) => {
-        const confirmation =
-          String(req.body?.confirmation || '');
+        const confirmation = String(req.body?.confirmation || '');
 
-        if (
-          confirmation !==
-          'LAUNCH MAI NETWORK'
-        ) {
+        if (confirmation !== 'LAUNCH MAI NETWORK') {
           return res.status(409).json({
             success:false,
             message:'Type LAUNCH MAI NETWORK exactly to confirm'
           });
         }
 
-        const client =
-          await pool.connect();
+        const client = await pool.connect();
 
         try {
           await ensureMaiV5Schema();
@@ -20505,198 +21013,51 @@ app.post(
             });
           }
 
-          // Build only compact aggregate metadata in Node.js. The full
-          // pre-launch records are archived row-by-row by PostgreSQL below.
-          const userSummary = (
-            await client.query(
-              `
-              SELECT
-                COUNT(*)::int AS users,
-                COALESCE(SUM(balance),0)::numeric AS game_balance
-              FROM users
-              `
-            )
-          ).rows[0];
-
-          const referralSummary = (
-            await client.query(
-              `
-              SELECT COUNT(*)::int AS referral_events
-              FROM mai_referral_reward_events
-              `
-            )
-          ).rows[0];
-
-          const snapshotKey =
-            `official-launch:${Date.now()}`;
-
-          const summary = {
-            users:safeInteger(userSummary?.users,0),
-            gameBalance:safeNumber(userSummary?.game_balance),
-            referralEvents:safeInteger(referralSummary?.referral_events,0),
-            storage:'normalized_v1'
-          };
-
-          await client.query(
-            `
-            INSERT INTO mai_launch_snapshots(
-              snapshot_key,
-              created_by,
-              summary,
-              users_snapshot,
-              referrals_snapshot
-            )
-            VALUES($1,$2,$3,$4,$5)
-            `,
-            [
-              snapshotKey,
-              adminActor(req),
-              JSON.stringify(summary),
-              JSON.stringify({storage:'mai_launch_snapshot_users'}),
-              JSON.stringify({storage:'mai_launch_snapshot_referral_events'})
-            ]
+          const actor = adminActor(req);
+          const officialLaunchAt = new Date().toISOString();
+          const snapshotKey = `official-launch:${Date.now()}`;
+          const summary = await archiveLaunchState(
+            client, snapshotKey, actor, 'official_launch', null
           );
 
-          await client.query(
-            `
-            INSERT INTO mai_launch_snapshot_users(
-              snapshot_key,
-              telegram_id,
-              balance,
-              locked_balance,
-              referred_by,
-              referral_assigned_at,
-              referral_qualified,
-              wallet_address,
-              account_status,
-              suspended_until,
-              admin_note
-            )
-            SELECT
-              $1,
-              telegram_id,
-              balance,
-              locked_balance,
-              referred_by,
-              referral_assigned_at,
-              referral_qualified,
-              wallet_address,
-              account_status,
-              suspended_until,
-              admin_note
-            FROM users
-            `,
-            [snapshotKey]
-          );
+          await resetPrelaunchGameState(client);
 
           await client.query(
             `
-            INSERT INTO mai_launch_snapshot_referral_events(
-              snapshot_key,
-              event_id,
-              inviter_id,
-              referred_user_id,
-              reward_type,
-              amount,
-              source_reference,
-              status,
-              claim_reference,
-              claimed_at,
-              created_at
-            )
-            SELECT
-              $1,
-              id,
-              inviter_id,
-              referred_user_id,
-              reward_type,
-              amount,
-              source_reference,
-              status,
-              claim_reference,
-              claimed_at,
-              created_at
-            FROM mai_referral_reward_events
-            `,
-            [snapshotKey]
-          );
-
-          /*
-           * Official launch reset:
-           * - main in-game balance -> 0
-           * - referral relationships/progress -> fresh
-           * - referral reward buckets -> archived
-           *
-           * HARD PROTECTED:
-           * wallet/security/bans/audit/withdrawals/tx hashes/
-           * blockchain assets are not touched.
-           *
-           * locked_balance is intentionally NOT reset here.
-           * A non-zero lock belongs to the protected withdrawal
-           * accounting domain and must never be erased by launch.
-           */
-          await client.query(
-            `
-            UPDATE users
-            SET
-              balance=0,
-              referred_by=NULL,
-              referral_assigned_at=NULL,
-              referral_qualified=FALSE,
-              updated_at=NOW()
-            `
-          );
-
-          await client.query(
-            `
-            UPDATE mai_referral_reward_events
-            SET status='archived_prelaunch'
-            WHERE status='available'
-            `
-          );
-
-          const officialLaunchAt =
-            new Date().toISOString();
-
-          await client.query(
-            `
-            INSERT INTO mai_system_state(
-              key,
-              value,
-              updated_at
-            )
-            VALUES(
-              'official_launch',
-              $1,
-              NOW()
-            )
+            INSERT INTO mai_system_state(key,value,updated_at)
+            VALUES('official_launch',$1,NOW())
             ON CONFLICT(key)
-            DO UPDATE SET
-              value=EXCLUDED.value,
-              updated_at=NOW()
+            DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()
+            `,
+            [JSON.stringify({
+              launched:true,
+              officialLaunchAt,
+              snapshotKey,
+              executedBy:actor
+            })]
+          );
+
+          await client.query(
+            `
+            INSERT INTO admin_audit_logs(
+              admin_id,action,target_type,target_id,reason,metadata,ip_hash
+            )
+            VALUES($1,'official_launch_executed','launch_control',$2,$3,$4,$5)
             `,
             [
-              JSON.stringify({
-                launched:true,
-                officialLaunchAt,
-                snapshotKey,
-                executedBy:adminActor(req)
-              })
+              req.admin?.telegramId || null,
+              snapshotKey,
+              'One-time MAI Network Official Launch',
+              {snapshotKey,officialLaunchAt,summary},
+              hash(req.ip).slice(0,32)
             ]
           );
 
           await client.query('COMMIT');
 
-          await logSecurity(
-            req,
-            'official_launch_executed',
-            'warn',
-            {
-              snapshotKey,
-              officialLaunchAt,
-              users:summary.users
-            }
-          );
+          await logSecurity(req,'official_launch_executed','warn',{
+            snapshotKey, officialLaunchAt, users:summary.users
+          });
 
           res.json({
             success:true,

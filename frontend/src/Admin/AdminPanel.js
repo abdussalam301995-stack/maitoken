@@ -146,6 +146,16 @@
       const [broadcasts, setBroadcasts] = useState([]);
       const [referralAdmin, setReferralAdmin] = useState(null);
       const [launchControl, setLaunchControl] = useState(null);
+      const [launchMode, setLaunchMode] = useState('overview');
+      const [launchConfirm, setLaunchConfirm] = useState('');
+      const [launchTestReason, setLaunchTestReason] = useState('');
+      const [correctionUserId, setCorrectionUserId] = useState('');
+      const [correctionUser, setCorrectionUser] = useState(null);
+      const [correctionAction, setCorrectionAction] = useState('compensation');
+      const [correctionAmount, setCorrectionAmount] = useState('');
+      const [correctionReason, setCorrectionReason] = useState('');
+      const [correctionConfirm, setCorrectionConfirm] = useState('');
+      const [correctionRequestKey, setCorrectionRequestKey] = useState('');
       const [moduleStatus, setModuleStatus] = useState(null);
       const [taskMode, setTaskMode] = useState('tasks');
       const [taskComposerOpen, setTaskComposerOpen] = useState(false);
@@ -1270,7 +1280,7 @@
             </section>
 
             {giveawayMode==='create' && (
-              <section className="adminSection">
+              <section className="adminSection giveawayComposer">
                 <div className="adminSectionHead"><div><span>NEW CAMPAIGN</span><h3>Create Giveaway</h3></div></div>
                 <div className="adminDataGrid">
                   <label style={labelStyle}><span>Title</span><input style={fieldStyle} value={giveawayForm.title} onChange={e=>setGiveawayField('title',e.target.value)} placeholder="MAI Community Giveaway" /></label>
@@ -1539,19 +1549,186 @@
       const renderLaunch = () => {
         const preview=launchControl?.preview || {};
         const state=launchControl?.state || {};
-        const execute=async()=>{
-          const c=promptValue('DANGER: Type LAUNCH MAI NETWORK exactly to archive pre-launch state and execute the one-time official reset:');
-          if(c!=='LAUNCH MAI NETWORK')return;
-          await runAction('official-launch','/admin/launch-control/execute',{confirmation:c});
+        const testReset=launchControl?.testReset || {count:0,limit:10};
+        const corrections=launchControl?.corrections || [];
+        const remaining=Math.max(0,Number(testReset.limit||10)-Number(testReset.count||0));
+
+        const refreshLaunch=async()=>{ await loadAll(true); };
+
+        const findCorrectionUser=async()=>{
+          const id=String(correctionUserId||'').trim();
+          if(!/^\d+$/.test(id)){ setError('Enter a valid Telegram ID.'); return; }
+          setBusy('correction-search'); setError('');
+          try{
+            const data=await adminApi(`/admin/launch-control/account/${id}`);
+            setCorrectionUser(data.user || null);
+            setCorrectionConfirm('');
+          }catch(e){ setCorrectionUser(null); setError(e.message || 'User lookup failed'); }
+          finally{ setBusy(''); }
         };
+
+        const executeTestReset=async()=>{
+          if(launchConfirm!=='TEST RESET MAI NETWORK'){ setError('Type TEST RESET MAI NETWORK exactly.'); return; }
+          if(String(launchTestReason||'').trim().length<5){ setError('Add a clear reason for this test reset.'); return; }
+          await runAction('launch-test-reset','/admin/launch-control/test-reset',{
+            confirmation:launchConfirm,
+            reason:String(launchTestReason||'').trim()
+          });
+          setLaunchConfirm(''); setLaunchTestReason('');
+        };
+
+        const executeOfficial=async()=>{
+          if(launchConfirm!=='LAUNCH MAI NETWORK'){ setError('Type LAUNCH MAI NETWORK exactly.'); return; }
+          await runAction('official-launch','/admin/launch-control/execute',{confirmation:launchConfirm});
+          setLaunchConfirm('');
+        };
+
+        const makeCorrectionKey=()=>{
+          if(correctionRequestKey) return correctionRequestKey;
+          const uuid=globalThis.crypto?.randomUUID?.();
+          const key=uuid ? `admin-correction:${uuid}` : `admin-correction:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+          setCorrectionRequestKey(key);
+          return key;
+        };
+
+        const applyCorrection=async()=>{
+          if(!correctionUser?.telegram_id){ setError('Search and select a user first.'); return; }
+          const id=String(correctionUser.telegram_id);
+          const reason=String(correctionReason||'').trim();
+          if(reason.length<5){ setError('A clear correction reason is required.'); return; }
+
+          const idempotencyKey=makeCorrectionKey();
+          const actionKey=correctionAction==='reset_balance'?`correction-reset-${id}`:`correction-add-${id}`;
+          setBusy(actionKey);
+          setError('');
+
+          try{
+            if(correctionAction==='reset_balance'){
+              if(correctionConfirm!==`RESET ${id}`) throw new Error(`Type RESET ${id} exactly.`);
+              await adminApi(`/admin/launch-control/account/${id}/reset-balance`,{
+                method:'POST',
+                body:JSON.stringify({reason,confirmation:correctionConfirm,idempotencyKey})
+              });
+            }else{
+              const amount=Number(correctionAmount||0);
+              if(!(amount>0)) throw new Error('Compensation amount must be greater than 0.');
+              if(correctionConfirm!==`ADD ${amount} MAI TO ${id}`) throw new Error(`Type ADD ${amount} MAI TO ${id} exactly.`);
+              await adminApi(`/admin/launch-control/account/${id}/compensate`,{
+                method:'POST',
+                body:JSON.stringify({amount,reason,confirmation:correctionConfirm,idempotencyKey})
+              });
+            }
+
+            flash('Account correction completed.');
+            await loadAll(true);
+            setCorrectionConfirm('');
+            setCorrectionReason('');
+            setCorrectionAmount('');
+            setCorrectionUser(null);
+            setCorrectionUserId('');
+            setCorrectionRequestKey('');
+          }catch(e){
+            // Keep the same idempotency key after timeout/network failure.
+            // Retrying the same correction cannot credit/reset the account twice.
+            setError(e.message || 'Account correction failed.');
+          }finally{
+            setBusy('');
+          }
+        };
+
         return (
           <>
-            <section className="adminSection">
-              <div className="adminSectionHead"><div><span>OFFICIAL LAUNCH</span><h3>Launch Control</h3></div><Status>{state.launched?'completed':'pending'}</Status></div>
-              <div className="adminMiniStats"><div><span>Users Affected</span><b>{fmt(preview.users)}</b></div><div><span>In-game MAI Reset</span><b>{fmt(preview.game_balance)} MAI</b></div><div><span>Referral Links</span><b>{fmt(preview.referral_links)}</b></div><div><span>Unclaimed Referral Rewards</span><b>{fmt(preview.unclaimedReferralRewards)} MAI</b></div></div>
-              {state.launched ? <p className="adminFootnote">MAI NETWORK — OFFICIALLY LAUNCHED · {when(state.officialLaunchAt)}. The destructive launch action is permanently disabled.</p> : <div className="adminActions"><button className="danger" disabled={!!busy} onClick={execute}>Execute Official Launch</button></div>}
+            <section className="adminSection adminLaunchHero">
+              <div className="adminSectionHead">
+                <div><span>MAI NETWORK / CONTROL VAULT</span><h3>Launch Control</h3><p className="adminFootnote">Protected pre-launch testing, one-time official launch, and auditable individual account corrections.</p></div>
+                <Status>{state.launched?'completed':'pending'}</Status>
+              </div>
+              <div className="adminLaunchTabs adminActions">
+                <button className={launchMode==='overview'?'good':''} onClick={()=>setLaunchMode('overview')}>Overview</button>
+                <button className={launchMode==='test'?'good':''} onClick={()=>setLaunchMode('test')}>Test Reset · {testReset.count||0}/{testReset.limit||10}</button>
+                <button className={launchMode==='correction'?'good':''} onClick={()=>setLaunchMode('correction')}>Account Correction</button>
+                <button className={launchMode==='history'?'good':''} onClick={()=>setLaunchMode('history')}>Correction History</button>
+              </div>
             </section>
-            <section className="adminSection"><div className="adminSectionHead"><div><span>HARD PROTECTED</span><h3>Never reset by Launch Control</h3></div></div><div className="adminRiskFlags">{(preview.hardProtected || []).map(x=><span key={x}>{x}</span>)}</div></section>
+
+            {launchMode==='overview' && <>
+              <section className="adminSection adminLaunchPanel">
+                <div className="adminSectionHead"><div><span>OFFICIAL LAUNCH</span><h3>One-Time Network Launch</h3></div><Status>{state.launched?'completed':'pending'}</Status></div>
+                <div className="adminMiniStats">
+                  <div><span>Users Affected</span><b>{fmt(preview.users)}</b></div>
+                  <div><span>In-game MAI Reset</span><b>{fmt(preview.game_balance)} MAI</b></div>
+                  <div><span>Referral Links</span><b>{fmt(preview.referral_links)}</b></div>
+                  <div><span>Unclaimed Referral Rewards</span><b>{fmt(preview.unclaimedReferralRewards)} MAI</b></div>
+                </div>
+                {state.launched ? (
+                  <div className="adminLaunchComplete"><b>MAI NETWORK — OFFICIALLY LAUNCHED</b><span>{when(state.officialLaunchAt)}</span><p>The destructive official launch and all pre-launch Test Resets are permanently disabled.</p></div>
+                ) : (
+                  <div className="adminLaunchConfirm">
+                    <div><b>FINAL ACTION</b><span>This is the real one-time launch. Test Reset remains available only before this action.</span></div>
+                    <input value={launchConfirm} onChange={e=>setLaunchConfirm(e.target.value)} placeholder="Type LAUNCH MAI NETWORK" />
+                    <button className="danger" disabled={!!busy || launchConfirm!=='LAUNCH MAI NETWORK'} onClick={executeOfficial}>Execute Official Launch</button>
+                  </div>
+                )}
+              </section>
+              <section className="adminSection adminLaunchProtected">
+                <div className="adminSectionHead"><div><span>HARD PROTECTED</span><h3>Never Reset by Launch Control</h3><p className="adminFootnote">These accounting, security and blockchain domains stay untouched.</p></div></div>
+                <div className="adminRiskFlags">{(preview.hardProtected || []).map(x=><span key={x}>{x}</span>)}</div>
+              </section>
+            </>}
+
+            {launchMode==='test' && <section className="adminSection adminLaunchPanel launchMobileComposer">
+              <div className="adminSectionHead"><div><span>PRE-LAUNCH LAB</span><h3>Test Reset</h3><p className="adminFootnote">A production-safe rehearsal reset. Every run creates a database snapshot and audit record first.</p></div><Status>{state.launched?'locked':remaining>0?'active':'limit reached'}</Status></div>
+              <div className="adminLaunchMeter"><div><span>Used</span><b>{testReset.count||0} / {testReset.limit||10}</b></div><div><span>Remaining</span><b>{remaining}</b></div><div><span>Last Reset</span><b>{when(testReset.lastResetAt)}</b></div></div>
+              <div className="adminLaunchWarning"><b>TEST RESET EFFECT</b><p>Resets in-game balance and referral progress to fresh state. Wallet assets, locked withdrawal balance, payout/withdrawal history, security state and blockchain data remain protected.</p></div>
+              <label className="adminLaunchField"><span>Reason / Test Note</span><textarea value={launchTestReason} onChange={e=>setLaunchTestReason(e.target.value)} placeholder="Example: Final referral and reward reset rehearsal before public launch" /></label>
+              <label className="adminLaunchField"><span>Strong Confirmation</span><input value={launchConfirm} onChange={e=>setLaunchConfirm(e.target.value)} placeholder="TEST RESET MAI NETWORK" /></label>
+              <div className="adminActions"><button className="danger" disabled={!!busy || state.launched || remaining<=0 || launchConfirm!=='TEST RESET MAI NETWORK'} onClick={executeTestReset}>{busy==='launch-test-reset'?'Resetting…':`Run Test Reset · ${remaining} left`}</button></div>
+            </section>}
+
+            {launchMode==='correction' && <section className="adminSection adminLaunchPanel launchMobileComposer">
+              <div className="adminSectionHead"><div><span>ACCOUNT CORRECTION CENTER</span><h3>Protected User Adjustment</h3><p className="adminFootnote">Search one Telegram account, review it first, then reset only its in-game balance or add a documented compensation.</p></div></div>
+              <div className="adminCorrectionSearch">
+                <label className="adminLaunchField"><span>Telegram ID</span><input inputMode="numeric" value={correctionUserId} onChange={e=>{setCorrectionUserId(e.target.value.replace(/\D/g,''));setCorrectionUser(null);setCorrectionRequestKey('');}} placeholder="Enter Telegram ID" /></label>
+                <button className="good" disabled={!!busy || !correctionUserId} onClick={findCorrectionUser}>{busy==='correction-search'?'Searching…':'Search User'}</button>
+              </div>
+
+              {correctionUser && <>
+                <div className="adminCorrectionUser">
+                  <div className="adminBadgeIcon">👤</div>
+                  <div className="adminGrow"><b>@{correctionUser.username || correctionUser.first_name || 'unknown'}</b><span>UID {correctionUser.telegram_id} · {correctionUser.account_status || 'active'}</span></div>
+                  <Status>{correctionUser.suspended_until?'suspended':'verified'}</Status>
+                </div>
+                <div className="adminMiniStats">
+                  <div><span>In-game Balance</span><b>{fmt(correctionUser.balance)} MAI</b></div>
+                  <div><span>Locked Balance</span><b>{fmt(correctionUser.locked_balance)} MAI</b></div>
+                  <div><span>Wallet</span><b>{correctionUser.wallet_address?'BOUND':'NOT BOUND'}</b></div>
+                  <div><span>Referral Qualified</span><b>{correctionUser.referral_qualified?'YES':'NO'}</b></div>
+                </div>
+
+                <div className="adminCorrectionChoices">
+                  <button className={correctionAction==='compensation'?'good':''} onClick={()=>{setCorrectionAction('compensation');setCorrectionConfirm('');setCorrectionRequestKey('');}}>＋ Add Compensation</button>
+                  <button className={correctionAction==='reset_balance'?'danger':''} onClick={()=>{setCorrectionAction('reset_balance');setCorrectionConfirm('');setCorrectionRequestKey('');}}>↺ Reset In-game Balance</button>
+                </div>
+
+                {correctionAction==='compensation' && <label className="adminLaunchField"><span>Compensation Amount (MAI)</span><input type="number" min="0" step="any" value={correctionAmount} onChange={e=>{setCorrectionAmount(e.target.value);setCorrectionConfirm('');setCorrectionRequestKey('');}} placeholder="500" /></label>}
+                <label className="adminLaunchField"><span>Required Reason</span><textarea value={correctionReason} onChange={e=>{setCorrectionReason(e.target.value);setCorrectionRequestKey('');}} placeholder="Explain the bug, incident, evidence, or correction reason." /></label>
+                <div className="adminLaunchWarning"><b>PROTECTED DOMAINS</b><p>This action never changes the user's wallet MAI, locked withdrawal balance, payout history, blockchain transactions, identity, ban/security history or wallet binding.</p></div>
+                <label className="adminLaunchField"><span>Strong Confirmation</span><input value={correctionConfirm} onChange={e=>setCorrectionConfirm(e.target.value)} placeholder={correctionAction==='reset_balance'?`RESET ${correctionUser.telegram_id}`:`ADD ${Number(correctionAmount||0)} MAI TO ${correctionUser.telegram_id}`} /></label>
+                <div className="adminActions"><button className={correctionAction==='reset_balance'?'danger':'good'} disabled={!!busy || !correctionReason.trim() || !correctionConfirm} onClick={applyCorrection}>{busy?.startsWith('correction-')?'Applying…':correctionAction==='reset_balance'?'Confirm Balance Reset':'Confirm Compensation'}</button></div>
+              </>}
+            </section>}
+
+            {launchMode==='history' && <section className="adminSection adminLaunchPanel">
+              <div className="adminSectionHead"><div><span>AUDIT TRAIL</span><h3>Correction History</h3><p className="adminFootnote">Latest protected account adjustments. Records are retained for accountability.</p></div><button onClick={refreshLaunch} disabled={!!busy}>Refresh</button></div>
+              <div className="adminList">
+                {corrections.map(item=><article className="adminListCard adminCorrectionHistory" key={item.id}>
+                  <div className="adminListTop"><div className="adminBadgeIcon">{item.action==='compensation'?'＋':'↺'}</div><div className="adminGrow"><b>UID {item.telegram_id}</b><span>{item.action==='compensation'?'Compensation':'In-game Balance Reset'} · {when(item.created_at)}</span></div><Status>{item.action==='compensation'?'credited':'reset'}</Status></div>
+                  <div className="adminDataGrid"><div><span>Before</span><b>{fmt(item.before_balance)} MAI</b></div><div><span>Change</span><b>{Number(item.change_amount)>0?'+':''}{fmt(item.change_amount)} MAI</b></div><div><span>After</span><b>{fmt(item.after_balance)} MAI</b></div><div><span>Admin</span><b>{item.created_by || 'server-admin'}</b></div></div>
+                  <p className="adminFootnote">{item.reason}</p>
+                </article>)}
+                {!corrections.length && <Empty text="No account corrections yet." />}
+              </div>
+            </section>}
           </>
         );
       };
