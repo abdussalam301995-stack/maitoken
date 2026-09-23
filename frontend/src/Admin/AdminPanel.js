@@ -1112,7 +1112,7 @@
             flash(status==='active'?'Mission published.':'Mission draft created.');resetMissionForm();setMissionComposerOpen(false);setTaskMode(status==='active'?'missions':'history');await loadAll(true);
           }catch(e){setError(e.message||'Could not create mission.');}finally{setBusy('');}
         };
-        const refreshLabel=item=>{const sec=Number(item.cooldown_seconds||0);if(sec>0)return sec%3600===0?`Every ${sec/3600}H`:`Every ${(sec/3600).toFixed(1)}H`;return item.recurrence==='daily'?'Daily':'Once';};
+        const refreshLabel=item=>{const hours=Number(item.refresh_hours||0);if(item.recurrence==='interval'&&hours>0)return `Every ${Number.isInteger(hours)?hours:hours.toFixed(1)}H`;return item.recurrence==='daily'?'Daily':'Once';};
         return (
           <>
             <section className="adminSection taskEngineHero">
