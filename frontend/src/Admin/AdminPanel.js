@@ -1084,7 +1084,7 @@
           if(taskForm.taskType==='telegram_bot'){ruleConfig.verificationMode=taskForm.botVerification||'external_gate';if(ruleConfig.verificationMode==='mai_event')ruleConfig.eventType=String(taskForm.botEventType||'').trim();}
           setBusy('create-task'); setError('');
           try{
-            await adminApi('/admin/tasks',{method:'POST',body:JSON.stringify({title,description:String(taskForm.description||'').trim(),taskType:taskForm.taskType,reward,targetUrl:String(taskForm.targetUrl||'').trim()||null,telegramChatId:String(taskForm.telegramChatId||'').trim()||null,ruleConfig,recurrence:taskForm.taskType==='daily_mission'&&taskForm.refreshMode==='once'?'daily':'once',claimLimit,cooldownSeconds:taskForm.refreshMode==='once'?0:Math.round(refreshHours*3600),status})});
+            await adminApi('/admin/tasks',{method:'POST',body:JSON.stringify({title,description:String(taskForm.description||'').trim(),taskType:taskForm.taskType,reward,targetUrl:String(taskForm.targetUrl||'').trim()||null,telegramChatId:String(taskForm.telegramChatId||'').trim()||null,ruleConfig,recurrence:taskForm.taskType==='daily_mission'&&taskForm.refreshMode==='once'?'daily':taskForm.refreshMode==='once'?'once':'interval',refreshHours:taskForm.refreshMode==='once'?null:refreshHours,claimLimit,status})});
             flash(status==='active'?'Task published.':'Task draft created.'); resetTaskForm(); setTaskComposerOpen(false); setTaskMode(status==='active'?'tasks':'history'); await loadAll(true);
           }catch(e){setError(e.message||'Could not create task.');}finally{setBusy('');}
         };
