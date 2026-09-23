@@ -12683,3 +12683,96 @@ body.maiAdminOpen .adminPanel.adminV4 {
     padding-bottom: 120px !important;
   }
 }
+/* =========================================================
+   MAI ADMIN — ACCOUNT CORRECTION BUTTON VISIBILITY FIX
+   Keep this block LAST.
+   ========================================================= */
+
+/* Search User */
+.adminV4 .adminCorrectionSearch > button {
+  min-height: 46px !important;
+  padding: 11px 20px !important;
+  border-radius: 12px !important;
+
+  color: #062027 !important;
+  -webkit-text-fill-color: #062027 !important;
+
+  background: linear-gradient(
+    135deg,
+    #67e8f9,
+    #2dd4bf
+  ) !important;
+
+  border: 1px solid rgba(103, 232, 249, .55) !important;
+
+  font-weight: 900 !important;
+  opacity: 1;
+}
+
+/* Search button while disabled */
+.adminV4 .adminCorrectionSearch > button:disabled {
+  color: #8aa3ad !important;
+  -webkit-text-fill-color: #8aa3ad !important;
+
+  background: #102833 !important;
+  border-color: rgba(111, 205, 222, .14) !important;
+
+  opacity: .58 !important;
+}
+
+/* Compensation / Reset selectors */
+.adminV4 .adminCorrectionChoices > button {
+  min-height: 48px !important;
+  padding: 11px 16px !important;
+  border-radius: 12px !important;
+
+  color: #c9e4ec !important;
+  -webkit-text-fill-color: #c9e4ec !important;
+
+  background: linear-gradient(
+    180deg,
+    rgba(11, 37, 50, .98),
+    rgba(6, 26, 37, .98)
+  ) !important;
+
+  border: 1px solid rgba(103, 232, 249, .18) !important;
+
+  font-weight: 850 !important;
+  opacity: 1 !important;
+}
+
+/* Selected Add Compensation */
+.adminV4 .adminCorrectionChoices > button.good {
+  color: #06241f !important;
+  -webkit-text-fill-color: #06241f !important;
+
+  background: linear-gradient(
+    135deg,
+    #6ee7b7,
+    #2dd4bf
+  ) !important;
+
+  border-color: rgba(110, 231, 183, .6) !important;
+}
+
+/* Selected Reset Balance */
+.adminV4 .adminCorrectionChoices > button.danger {
+  color: #fff1f3 !important;
+  -webkit-text-fill-color: #fff1f3 !important;
+
+  background: linear-gradient(
+    135deg,
+    rgba(190, 45, 67, .96),
+    rgba(125, 30, 48, .98)
+  ) !important;
+
+  border-color: rgba(255, 110, 128, .5) !important;
+}
+
+/* Hover — desktop */
+@media (hover: hover) {
+  .adminV4 .adminCorrectionSearch > button:not(:disabled):hover,
+  .adminV4 .adminCorrectionChoices > button:hover {
+    filter: brightness(1.08);
+  }
+}
