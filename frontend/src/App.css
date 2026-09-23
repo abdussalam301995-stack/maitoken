@@ -12776,3 +12776,1219 @@ body.maiAdminOpen .adminPanel.adminV4 {
     filter: brightness(1.08);
   }
 }
+
+
+/* =========================================================
+   MAI ADMIN V5 — WORLD CLASS FINTECH COMMAND CENTER
+   Visual-only override. Scoped to .adminV4 so the public Mini App
+   and Admin business logic remain untouched.
+   ========================================================= */
+
+.adminPanel.adminV4 {
+  --adm-bg: #05070d;
+  --adm-bg-2: #080d16;
+  --adm-panel: rgba(13, 20, 32, .82);
+  --adm-panel-2: rgba(17, 26, 41, .9);
+  --adm-panel-3: rgba(22, 34, 52, .78);
+  --adm-line: rgba(148, 163, 184, .13);
+  --adm-line-strong: rgba(96, 165, 250, .24);
+  --adm-text: #f8fafc;
+  --adm-muted: #8c9bad;
+  --adm-accent: #38bdf8;
+  --adm-accent-2: #6366f1;
+  --adm-accent-soft: rgba(56, 189, 248, .11);
+  --adm-good: #34d399;
+  --adm-warn: #fbbf24;
+  --adm-danger: #ff304f;
+  --adm-danger-2: #e5092f;
+  --adm-shadow: 0 24px 70px rgba(0, 0, 0, .32);
+  --adm-card-shadow: 0 14px 40px rgba(0, 0, 0, .18);
+
+  background:
+    radial-gradient(circle at 12% -8%, rgba(59, 130, 246, .16), transparent 30%),
+    radial-gradient(circle at 88% 0%, rgba(99, 102, 241, .12), transparent 28%),
+    radial-gradient(circle at 62% 110%, rgba(14, 165, 233, .08), transparent 34%),
+    linear-gradient(145deg, #04060b 0%, #070c14 48%, #050810 100%) !important;
+  color: var(--adm-text);
+  font-family: Inter, "SF Pro Display", "SF Pro Text", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  letter-spacing: -.01em;
+}
+
+.adminV4 .adminSidebar {
+  flex-basis: 258px;
+  width: 258px;
+  border-right: 1px solid rgba(148, 163, 184, .11);
+  background:
+    linear-gradient(180deg, rgba(10, 15, 25, .97), rgba(5, 9, 16, .985)) !important;
+  box-shadow: 22px 0 60px rgba(0, 0, 0, .24);
+  backdrop-filter: blur(28px) saturate(135%);
+}
+
+.adminV4 .adminBrand {
+  min-height: 86px;
+  padding: 18px 18px;
+  border-bottom-color: rgba(148, 163, 184, .10);
+}
+
+.adminV4 .adminBrandMark {
+  width: 46px;
+  height: 46px;
+  flex-basis: 46px;
+  border: 1px solid rgba(125, 211, 252, .34);
+  border-radius: 15px;
+  background:
+    linear-gradient(145deg, rgba(56, 189, 248, .22), rgba(99, 102, 241, .16)) !important;
+  color: #f0f9ff;
+  font-size: 20px;
+  box-shadow:
+    0 10px 28px rgba(14, 165, 233, .14),
+    inset 0 1px 0 rgba(255, 255, 255, .12);
+}
+
+.adminV4 .adminBrand b {
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 850;
+  letter-spacing: .10em;
+}
+
+.adminV4 .adminBrand span {
+  margin-top: 2px;
+  color: #718096;
+  font-size: 10px;
+  letter-spacing: .02em;
+}
+
+.adminV4 .adminSideNav {
+  padding: 16px 11px 26px;
+}
+
+.adminV4 .adminSideNav button {
+  min-height: 47px;
+  margin: 3px 0;
+  padding: 0 12px;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 8px;
+  border-radius: 12px;
+  color: #8493a6;
+  transition: transform .18s ease, background .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease;
+}
+
+.adminV4 .adminSideNav button:hover {
+  transform: translateX(2px);
+  color: #eaf6ff;
+  border-color: rgba(148, 163, 184, .10);
+  background: rgba(255, 255, 255, .035);
+}
+
+.adminV4 .adminSideNav button.active {
+  color: #f8fbff;
+  border-color: rgba(56, 189, 248, .22);
+  background:
+    linear-gradient(90deg, rgba(56, 189, 248, .16), rgba(99, 102, 241, .075)) !important;
+  box-shadow:
+    inset 3px 0 0 #38bdf8,
+    0 8px 24px rgba(14, 165, 233, .06);
+}
+
+.adminV4 .adminSideNav button i {
+  width: 29px;
+  height: 29px;
+  border-radius: 9px;
+  color: #718196;
+  background: rgba(255, 255, 255, .025);
+}
+
+.adminV4 .adminSideNav button.active i {
+  color: #7dd3fc;
+  background: rgba(56, 189, 248, .10);
+}
+
+.adminV4 .adminSideNav button > span {
+  font-size: 12px;
+  font-weight: 680;
+  letter-spacing: .005em;
+}
+
+.adminV4 .adminSideNav button em {
+  min-width: 23px;
+  padding: 3px 7px;
+  border: 1px solid rgba(251, 191, 36, .15);
+  background: rgba(251, 191, 36, .10);
+  color: #fcd34d;
+}
+
+.adminV4 .adminSideDivider {
+  border-top-color: rgba(148, 163, 184, .09);
+}
+
+.adminV4 .adminSideDivider span {
+  color: #4f6075;
+  font-size: 8px;
+  letter-spacing: .18em;
+}
+
+.adminV4 .adminSidebarFoot {
+  border-top-color: rgba(148, 163, 184, .09);
+  background: rgba(0, 0, 0, .14);
+}
+
+.adminV4 .adminTopbar {
+  min-height: 72px;
+  flex-basis: 72px;
+  padding: 10px 26px;
+  border-bottom: 1px solid rgba(148, 163, 184, .10);
+  background: rgba(5, 9, 16, .78) !important;
+  backdrop-filter: blur(28px) saturate(150%);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, .10);
+}
+
+.adminV4 .adminTopbar h1,
+.adminV4 .adminTopbar h2,
+.adminV4 .adminPageTitle {
+  color: #f8fafc !important;
+  font-weight: 780 !important;
+  letter-spacing: -.035em !important;
+}
+
+.adminV4 .adminTopbar span,
+.adminV4 .adminTopbar small {
+  color: #7f8da0;
+}
+
+.adminV4 .adminMenuButton,
+.adminV4 .adminBackButton,
+.adminV4 .adminRefreshButton,
+.adminV4 .adminTopbar button {
+  border-color: rgba(148, 163, 184, .13);
+  background: rgba(15, 23, 42, .62);
+  color: #dbeafe;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .035);
+}
+
+.adminV4 .adminMenuButton:hover,
+.adminV4 .adminBackButton:hover,
+.adminV4 .adminRefreshButton:hover,
+.adminV4 .adminTopbar button:hover {
+  border-color: rgba(56, 189, 248, .28);
+  background: rgba(30, 41, 59, .82);
+}
+
+.adminV4 .adminContent,
+.adminV4 .adminMain,
+.adminV4 .adminWorkspaceBody {
+  scrollbar-color: rgba(100, 116, 139, .36) transparent;
+}
+
+.adminV4 .adminSection,
+.adminV4 .adminListCard,
+.adminV4 .adminMetricCard,
+.adminV4 .adminMetricPrimary,
+.adminV4 .adminMetricCompact,
+.adminV4 .adminQuickCard,
+.adminV4 .adminRiskOverview,
+.adminV4 .adminFormCard,
+.adminV4 .adminCreatorCard,
+.adminV4 .adminPreviewCard,
+.adminV4 .adminBroadcastCard,
+.adminV4 .adminCorrectionCard {
+  border: 1px solid rgba(148, 163, 184, .12) !important;
+  background:
+    linear-gradient(145deg, rgba(18, 27, 42, .88), rgba(9, 15, 25, .88)) !important;
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, .18),
+    inset 0 1px 0 rgba(255, 255, 255, .035) !important;
+  backdrop-filter: blur(18px) saturate(125%);
+}
+
+.adminV4 .adminSection,
+.adminV4 .adminListCard {
+  border-radius: 18px !important;
+}
+
+.adminV4 .adminListCard {
+  position: relative;
+  overflow: hidden;
+  transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+
+.adminV4 .adminListCard::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: linear-gradient(180deg, transparent, rgba(56, 189, 248, .65), transparent);
+  opacity: .55;
+  pointer-events: none;
+}
+
+@media (hover: hover) {
+  .adminV4 .adminListCard:hover,
+  .adminV4 .adminSection:hover {
+    border-color: rgba(96, 165, 250, .20) !important;
+    box-shadow:
+      0 22px 58px rgba(0, 0, 0, .24),
+      inset 0 1px 0 rgba(255, 255, 255, .045) !important;
+  }
+
+  .adminV4 .adminListCard:hover {
+    transform: translateY(-2px);
+  }
+}
+
+.adminV4 .adminSectionHead > div > span,
+.adminV4 .adminEyebrow,
+.adminV4 .adminLabel {
+  color: #60a5fa !important;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.adminV4 .adminSectionHead h3,
+.adminV4 .adminListTop b,
+.adminV4 .adminGrow b {
+  color: #f8fafc;
+  letter-spacing: -.018em;
+}
+
+.adminV4 .adminGrow span,
+.adminV4 .adminFootnote,
+.adminV4 .adminMuted,
+.adminV4 .adminDataGrid span,
+.adminV4 .adminWalletLine > span {
+  color: #8492a6 !important;
+}
+
+.adminV4 .adminBadgeIcon {
+  border: 1px solid rgba(96, 165, 250, .18);
+  background:
+    linear-gradient(145deg, rgba(56, 189, 248, .12), rgba(99, 102, 241, .08)) !important;
+  color: #bae6fd;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+
+.adminV4 .adminDataGrid > div,
+.adminV4 .adminMiniStats > div,
+.adminV4 .adminStat,
+.adminV4 .adminMetric {
+  border: 1px solid rgba(148, 163, 184, .10) !important;
+  background: rgba(3, 8, 16, .34) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .018);
+}
+
+.adminV4 .adminDataGrid b,
+.adminV4 .adminMiniStats b,
+.adminV4 .adminStat b,
+.adminV4 .adminMetric b {
+  color: #f1f5f9;
+  font-weight: 760;
+  letter-spacing: -.025em;
+}
+
+.adminV4 input,
+.adminV4 select,
+.adminV4 textarea,
+.adminV4 .adminInput {
+  border: 1px solid rgba(148, 163, 184, .14) !important;
+  border-radius: 12px !important;
+  background: rgba(4, 9, 17, .72) !important;
+  color: #f8fafc !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .018);
+  outline: none;
+  transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
+}
+
+.adminV4 input::placeholder,
+.adminV4 textarea::placeholder {
+  color: #526174 !important;
+}
+
+.adminV4 input:focus,
+.adminV4 select:focus,
+.adminV4 textarea:focus,
+.adminV4 .adminInput:focus {
+  border-color: rgba(56, 189, 248, .58) !important;
+  background: rgba(7, 14, 25, .92) !important;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, .09) !important;
+}
+
+.adminV4 button {
+  font-family: inherit;
+}
+
+.adminV4 .adminActions button,
+.adminV4 .adminTableBtn,
+.adminV4 .adminPrimaryBtn,
+.adminV4 .adminSecondaryBtn {
+  min-height: 40px;
+  border-radius: 11px !important;
+  font-weight: 760;
+  letter-spacing: -.005em;
+  transition: transform .16s ease, filter .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+
+.adminV4 .adminActions button:not(.danger):not(.warn):not(.good):not(.taskDeleteBtn),
+.adminV4 .adminTableBtn,
+.adminV4 .adminSecondaryBtn {
+  border-color: rgba(148, 163, 184, .14) !important;
+  background: rgba(30, 41, 59, .62) !important;
+  color: #e2e8f0 !important;
+}
+
+.adminV4 button.good,
+.adminV4 .good {
+  border-color: rgba(52, 211, 153, .30) !important;
+  background: linear-gradient(135deg, rgba(16, 185, 129, .92), rgba(5, 150, 105, .92)) !important;
+  color: #ecfdf5 !important;
+  box-shadow: 0 9px 24px rgba(16, 185, 129, .12);
+}
+
+.adminV4 button.warn,
+.adminV4 .warn {
+  border-color: rgba(251, 191, 36, .28) !important;
+  background: linear-gradient(135deg, rgba(217, 119, 6, .90), rgba(180, 83, 9, .92)) !important;
+  color: #fffbeb !important;
+  box-shadow: 0 9px 24px rgba(245, 158, 11, .10);
+}
+
+/* Destructive actions. Existing End / Launch controls remain red-family.
+   Actual Delete buttons receive the brightest red treatment below. */
+.adminV4 button.danger,
+.adminV4 .danger {
+  border-color: rgba(251, 113, 133, .30) !important;
+  background: linear-gradient(135deg, rgba(190, 24, 55, .92), rgba(136, 19, 55, .94)) !important;
+  color: #fff1f2 !important;
+  box-shadow: 0 9px 24px rgba(225, 29, 72, .10);
+}
+
+.adminV4 .taskDeleteBtn,
+.adminV4 button[class*="delete" i],
+.adminV4 button[class*="Delete"] {
+  border: 1px solid rgba(255, 92, 111, .68) !important;
+  background: linear-gradient(135deg, #ff304f 0%, #e5092f 100%) !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  box-shadow:
+    0 10px 26px rgba(229, 9, 47, .24),
+    inset 0 1px 0 rgba(255, 255, 255, .20) !important;
+}
+
+@media (hover: hover) {
+  .adminV4 .adminActions button:not(:disabled):hover,
+  .adminV4 .adminTableBtn:not(:disabled):hover {
+    transform: translateY(-1px);
+    filter: brightness(1.08);
+  }
+
+  .adminV4 .taskDeleteBtn:not(:disabled):hover,
+  .adminV4 button[class*="delete" i]:not(:disabled):hover {
+    filter: brightness(1.10) saturate(1.08);
+    box-shadow:
+      0 13px 32px rgba(229, 9, 47, .32),
+      inset 0 1px 0 rgba(255, 255, 255, .22) !important;
+  }
+}
+
+.adminV4 button:disabled {
+  opacity: .48 !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+  filter: none !important;
+}
+
+.adminV4 table {
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, .10);
+  border-radius: 14px;
+  background: rgba(5, 10, 18, .35);
+}
+
+.adminV4 th {
+  border-bottom: 1px solid rgba(148, 163, 184, .12) !important;
+  background: rgba(15, 23, 42, .78) !important;
+  color: #94a3b8 !important;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.adminV4 td {
+  border-bottom-color: rgba(148, 163, 184, .075) !important;
+  color: #dbe3ee;
+}
+
+.adminV4 tbody tr {
+  transition: background .15s ease;
+}
+
+.adminV4 tbody tr:hover {
+  background: rgba(56, 189, 248, .035);
+}
+
+.adminV4 code {
+  border: 1px solid rgba(148, 163, 184, .09);
+  border-radius: 8px;
+  background: rgba(2, 6, 12, .42);
+  color: #b9d9ee;
+}
+
+.adminV4 .adminTabs,
+.adminV4 .adminModeTabs,
+.adminV4 .adminSegmented {
+  border: 1px solid rgba(148, 163, 184, .10) !important;
+  border-radius: 13px !important;
+  background: rgba(3, 8, 16, .38) !important;
+  padding: 4px;
+}
+
+.adminV4 .adminTabs button,
+.adminV4 .adminModeTabs button,
+.adminV4 .adminSegmented button {
+  border-radius: 9px !important;
+  color: #7f8da0 !important;
+}
+
+.adminV4 .adminTabs button.active,
+.adminV4 .adminModeTabs button.active,
+.adminV4 .adminSegmented button.active {
+  border-color: rgba(56, 189, 248, .18) !important;
+  background: linear-gradient(135deg, rgba(56, 189, 248, .16), rgba(99, 102, 241, .10)) !important;
+  color: #e0f2fe !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+}
+
+.adminV4 .adminStatus,
+.adminV4 [class*="Status"] {
+  font-weight: 780;
+  letter-spacing: .025em;
+}
+
+.adminV4 .adminModal,
+.adminV4 .adminModalCard,
+.adminV4 .adminDialog,
+.adminV4 .adminModalPanel {
+  border-color: rgba(148, 163, 184, .14) !important;
+  background:
+    linear-gradient(145deg, rgba(17, 25, 39, .98), rgba(7, 12, 21, .99)) !important;
+  box-shadow: 0 34px 100px rgba(0, 0, 0, .52) !important;
+  backdrop-filter: blur(28px);
+}
+
+.adminV4 .adminMobileShade {
+  background: rgba(0, 0, 0, .66) !important;
+  backdrop-filter: blur(4px);
+}
+
+.adminV4 ::selection {
+  background: rgba(56, 189, 248, .28);
+  color: #fff;
+}
+
+.adminV4 ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.adminV4 ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.adminV4 ::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, .34);
+  background-clip: padding-box;
+}
+
+.adminV4 ::-webkit-scrollbar-thumb:hover {
+  background: rgba(125, 211, 252, .34);
+  background-clip: padding-box;
+}
+
+/* Mobile polish — keeps the already-tested Telegram safe-area rules below
+   this visual system and changes only appearance/spacing. */
+@media (max-width: 959px) {
+  .adminV4 .adminSidebar {
+    width: min(86vw, 320px);
+    flex-basis: min(86vw, 320px);
+    box-shadow: 30px 0 80px rgba(0, 0, 0, .48);
+  }
+
+  .adminV4 .adminTopbar {
+    padding-left: 14px;
+    padding-right: 14px;
+    background: rgba(5, 9, 16, .90) !important;
+  }
+
+  .adminV4 .adminSection,
+  .adminV4 .adminListCard {
+    border-radius: 16px !important;
+  }
+
+  .adminV4 .adminListCard {
+    box-shadow:
+      0 12px 34px rgba(0, 0, 0, .18),
+      inset 0 1px 0 rgba(255, 255, 255, .03) !important;
+  }
+
+  .adminV4 .adminActions {
+    gap: 8px;
+  }
+
+  .adminV4 .adminActions button {
+    min-height: 44px;
+  }
+
+  .adminV4 input,
+  .adminV4 select,
+  .adminV4 textarea {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 520px) {
+  .adminV4 .adminDataGrid,
+  .adminV4 .adminMiniStats {
+    gap: 8px;
+  }
+
+  .adminV4 .adminDataGrid > div,
+  .adminV4 .adminMiniStats > div {
+    border-radius: 12px !important;
+  }
+
+  .adminV4 .adminListTop {
+    gap: 10px;
+  }
+
+  .adminV4 .adminBadgeIcon {
+    border-radius: 11px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .adminV4 *,
+  .adminV4 *::before,
+  .adminV4 *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+
+/* =========================================================
+   MAI ADMIN V5 — MOCKUP-MATCHING FINISHING LAYER
+   Presentation only. Existing data, handlers, APIs and calculations
+   remain owned by AdminPanel.js exactly as before.
+   ========================================================= */
+
+.adminV4 .adminWorkspace {
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 32% -10%, rgba(37, 99, 235, .08), transparent 28%),
+    radial-gradient(circle at 100% 12%, rgba(6, 182, 212, .055), transparent 22%);
+}
+
+.adminV4 .adminWorkspace::before {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  pointer-events: none;
+  inset: 72px 0 0 258px;
+  opacity: .16;
+  background-image:
+    linear-gradient(rgba(56, 189, 248, .025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, .025) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: linear-gradient(to bottom, rgba(0,0,0,.65), transparent 72%);
+}
+
+.adminV4 .adminBrandMark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: visible;
+}
+
+.adminV4 .adminBrandMark > span {
+  position: relative;
+  z-index: 2;
+  font-weight: 900;
+}
+
+.adminV4 .adminBrandMark > i {
+  position: absolute;
+  right: -5px;
+  bottom: -4px;
+  width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #08101b;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  color: #111827;
+  font-size: 7px;
+  font-style: normal;
+  box-shadow: 0 4px 14px rgba(245,158,11,.28);
+}
+
+.adminV4 .adminContent {
+  width: min(100%, 1680px);
+  margin: 0 auto;
+  padding: 24px 28px 42px !important;
+}
+
+.adminV4 .adminPageHeading {
+  min-height: 94px;
+  margin-bottom: 18px;
+  padding: 4px 2px;
+  align-items: center;
+}
+
+.adminV4 .adminPageHeading small {
+  color: #64748b !important;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .15em;
+}
+
+.adminV4 .adminPageHeading h1 {
+  margin: 5px 0 4px;
+  color: #f8fafc;
+  font-size: clamp(24px, 2vw, 34px);
+  line-height: 1.05;
+  font-weight: 820;
+  letter-spacing: -.045em;
+}
+
+.adminV4 .adminPageHeading p {
+  color: #8090a5;
+  font-size: 12px;
+}
+
+.adminV4 .adminRefresh {
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(96,165,250,.20) !important;
+  border-radius: 12px !important;
+  background: rgba(14, 23, 38, .72) !important;
+  color: #93c5fd !important;
+  box-shadow: 0 10px 28px rgba(0,0,0,.18);
+}
+
+.adminV4 .adminGlobalSearch {
+  width: min(360px, 34vw);
+  height: 42px;
+  border: 1px solid rgba(148,163,184,.12) !important;
+  border-radius: 12px !important;
+  background: rgba(5, 11, 21, .60) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.025);
+}
+
+.adminV4 .adminGlobalSearch:focus-within {
+  border-color: rgba(56,189,248,.38) !important;
+  box-shadow: 0 0 0 3px rgba(56,189,248,.07);
+}
+
+.adminV4 .adminGlobalSearch input {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.adminV4 .adminTopStatus {
+  min-width: 112px;
+  gap: 8px;
+}
+
+.adminV4 .adminTopStatus > div {
+  display: grid;
+  gap: 1px;
+}
+
+.adminV4 .adminTopStatus b {
+  color: #4ade80;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.adminV4 .adminTopStatus small {
+  color: #526174;
+  font-size: 8px;
+}
+
+.adminV4 .adminAdminChip {
+  padding: 5px 8px 5px 5px;
+  border: 1px solid rgba(148,163,184,.10);
+  border-radius: 12px;
+  background: rgba(15,23,42,.46);
+}
+
+.adminV4 .adminAdminChip > i {
+  background: linear-gradient(145deg, #2563eb, #4f46e5) !important;
+  box-shadow: 0 5px 18px rgba(37,99,235,.25);
+}
+
+.adminV4 .adminHeroPanel {
+  position: relative;
+  min-height: 108px;
+  margin-bottom: 15px;
+  padding: 20px 22px !important;
+  overflow: hidden;
+  border: 1px solid rgba(96,165,250,.14) !important;
+  border-radius: 18px !important;
+  background:
+    radial-gradient(circle at 80% 0%, rgba(37,99,235,.15), transparent 34%),
+    linear-gradient(120deg, rgba(15,27,45,.90), rgba(8,15,26,.88)) !important;
+  box-shadow: 0 18px 48px rgba(0,0,0,.17), inset 0 1px 0 rgba(255,255,255,.035);
+}
+
+.adminV4 .adminHeroPanel::after {
+  content: "";
+  position: absolute;
+  width: 280px;
+  height: 280px;
+  right: -90px;
+  top: -160px;
+  border: 1px solid rgba(56,189,248,.10);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 34px rgba(56,189,248,.025),
+    0 0 0 72px rgba(99,102,241,.018);
+  pointer-events: none;
+}
+
+.adminV4 .adminHeroPanel .adminEyebrow {
+  font-size: 9px;
+}
+
+.adminV4 .adminHeroPanel h2 {
+  margin: 5px 0 5px;
+  color: #f8fafc;
+  font-size: clamp(20px, 2vw, 29px);
+  font-weight: 820;
+  letter-spacing: -.04em;
+}
+
+.adminV4 .adminHeroPanel p {
+  color: #93a2b6;
+  font-size: 12px;
+}
+
+.adminV4 .adminDashboardClock {
+  min-width: 142px;
+  padding: 10px 13px;
+  border: 1px solid rgba(148,163,184,.10);
+  border-radius: 12px;
+  background: rgba(2,8,16,.32);
+}
+
+.adminV4 .adminDashboardClock b {
+  color: #e2e8f0;
+  font-size: 11px;
+}
+
+.adminV4 .adminDashboardClock span {
+  color: #4ade80;
+  font-size: 9px;
+}
+
+.adminV4 .adminMetricDeck {
+  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+  margin-bottom: 15px;
+}
+
+.adminV4 .adminMetricPrimary {
+  position: relative;
+  min-height: 126px !important;
+  padding: 15px !important;
+  overflow: hidden;
+  border-radius: 15px !important;
+}
+
+.adminV4 .adminMetricPrimary::after {
+  content: "";
+  position: absolute;
+  right: -20px;
+  bottom: -32px;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(56,189,248,.09), transparent 68%);
+  pointer-events: none;
+}
+
+.adminV4 .adminMetricPrimary:nth-child(2)::after {
+  background: radial-gradient(circle, rgba(52,211,153,.10), transparent 68%);
+}
+.adminV4 .adminMetricPrimary:nth-child(3)::after {
+  background: radial-gradient(circle, rgba(251,191,36,.09), transparent 68%);
+}
+.adminV4 .adminMetricPrimary:nth-child(4)::after {
+  background: radial-gradient(circle, rgba(139,92,246,.10), transparent 68%);
+}
+.adminV4 .adminMetricPrimary:nth-child(5)::after {
+  background: radial-gradient(circle, rgba(245,158,11,.10), transparent 68%);
+}
+
+.adminV4 .adminMetricIcon {
+  width: 35px !important;
+  height: 35px !important;
+  border: 1px solid rgba(96,165,250,.22);
+  border-radius: 10px !important;
+  background: linear-gradient(145deg, rgba(37,99,235,.40), rgba(14,165,233,.20)) !important;
+  color: #dbeafe;
+  box-shadow: 0 7px 20px rgba(37,99,235,.15);
+}
+
+.adminV4 .adminMetricPrimary:nth-child(2) .adminMetricIcon {
+  border-color: rgba(52,211,153,.22);
+  background: linear-gradient(145deg, rgba(16,185,129,.40), rgba(5,150,105,.18)) !important;
+}
+.adminV4 .adminMetricPrimary:nth-child(3) .adminMetricIcon {
+  border-color: rgba(251,191,36,.22);
+  background: linear-gradient(145deg, rgba(217,119,6,.36), rgba(180,83,9,.16)) !important;
+}
+.adminV4 .adminMetricPrimary:nth-child(4) .adminMetricIcon {
+  border-color: rgba(167,139,250,.22);
+  background: linear-gradient(145deg, rgba(124,58,237,.38), rgba(79,70,229,.17)) !important;
+}
+.adminV4 .adminMetricPrimary:nth-child(5) .adminMetricIcon {
+  border-color: rgba(251,191,36,.22);
+  background: linear-gradient(145deg, rgba(245,158,11,.38), rgba(217,119,6,.16)) !important;
+}
+
+.adminV4 .adminMetricPrimary > span {
+  margin-top: 11px;
+  color: #8fa0b5 !important;
+  font-size: 10px;
+}
+
+.adminV4 .adminMetricPrimary strong {
+  margin-top: 2px;
+  color: #f8fafc;
+  font-size: clamp(20px, 1.8vw, 29px) !important;
+  font-weight: 820;
+  letter-spacing: -.04em;
+}
+
+.adminV4 .adminMetricPrimary small {
+  color: #526174 !important;
+  font-size: 8px;
+}
+
+.adminV4 .adminAnalyticsGrid {
+  grid-template-columns: minmax(0, 2.2fr) minmax(260px, .8fr) !important;
+  gap: 14px !important;
+}
+
+.adminV4 .adminGrowthPanel,
+.adminV4 .adminSystemPanel {
+  min-height: 310px;
+}
+
+.adminV4 .adminGrowthChart {
+  min-height: 220px;
+  margin-top: 10px;
+  padding: 10px 6px 0;
+  color: #3b82f6;
+  background-image:
+    linear-gradient(rgba(96,165,250,.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(96,165,250,.08) 1px, transparent 1px);
+  background-size: 100% 25%, 14.285% 100%;
+  border-radius: 10px;
+}
+
+.adminV4 .adminGrowthChart svg {
+  height: 180px;
+  filter: drop-shadow(0 7px 10px rgba(37,99,235,.18));
+}
+
+.adminV4 .adminGrowthChart polyline {
+  stroke: #60a5fa !important;
+  stroke-width: 2.2px;
+}
+
+.adminV4 .adminChartLegend {
+  padding-top: 8px;
+  color: #64748b;
+  font-size: 9px;
+}
+
+.adminV4 .adminChartLegend b {
+  color: #dbeafe;
+  font-size: 10px;
+}
+
+.adminV4 .adminSystemList {
+  display: grid;
+  gap: 7px;
+}
+
+.adminV4 .adminSystemList > div {
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid rgba(148,163,184,.08);
+  border-radius: 10px;
+  background: rgba(2,8,16,.28);
+}
+
+.adminV4 .adminSystemList > div > span:first-child {
+  color: #a3b0c2;
+  font-size: 10px;
+}
+
+.adminV4 .adminPulseMetrics {
+  grid-template-columns: repeat(4, minmax(0,1fr)) !important;
+  gap: 12px !important;
+  margin: 15px 0;
+}
+
+.adminV4 .adminMetricCompact {
+  min-height: 88px !important;
+  padding: 13px 14px !important;
+  border-radius: 14px !important;
+}
+
+.adminV4 .adminMetricCompact span {
+  color: #7e8da1 !important;
+  font-size: 9px;
+}
+
+.adminV4 .adminMetricCompact strong {
+  margin: 4px 0 2px;
+  color: #f1f5f9;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.adminV4 .adminMetricCompact small {
+  color: #526174 !important;
+  font-size: 8px;
+}
+
+.adminV4 .adminDashboardSplit:not(.adminDashboardMainSplit) {
+  grid-template-columns: repeat(2, minmax(0,1fr)) !important;
+  gap: 14px !important;
+}
+
+.adminV4 .adminDashboardTable th,
+.adminV4 .adminDashboardTable td {
+  padding-top: 9px !important;
+  padding-bottom: 9px !important;
+  font-size: 9px !important;
+}
+
+.adminV4 .adminDashboardTable td b {
+  color: #e5edf7;
+  font-size: 10px;
+}
+
+.adminV4 .adminDashboardTable td small {
+  color: #607086;
+  font-size: 8px;
+}
+
+.adminV4 .adminOpsGrid {
+  display: grid;
+  grid-template-columns: minmax(0,1.25fr) minmax(0,.9fr) minmax(260px,.85fr) !important;
+  gap: 14px !important;
+  margin-top: 14px;
+}
+
+.adminV4 .adminQuickGrid {
+  grid-template-columns: repeat(2, minmax(0,1fr)) !important;
+  gap: 8px;
+}
+
+.adminV4 .adminQuickGrid button {
+  min-height: 58px;
+  justify-content: flex-start;
+  padding: 0 13px;
+  border: 1px solid rgba(96,165,250,.14) !important;
+  border-radius: 11px !important;
+  background: linear-gradient(145deg, rgba(30,64,175,.18), rgba(15,23,42,.58)) !important;
+  color: #dbeafe !important;
+  font-size: 10px;
+  font-weight: 720;
+}
+
+.adminV4 .adminQuickGrid button:nth-child(2) {
+  background: linear-gradient(145deg, rgba(109,40,217,.18), rgba(15,23,42,.58)) !important;
+}
+.adminV4 .adminQuickGrid button:nth-child(3) {
+  background: linear-gradient(145deg, rgba(217,119,6,.18), rgba(15,23,42,.58)) !important;
+}
+.adminV4 .adminQuickGrid button:nth-child(4) {
+  background: linear-gradient(145deg, rgba(5,150,105,.16), rgba(15,23,42,.58)) !important;
+}
+
+.adminV4 .adminRiskRing {
+  box-shadow: 0 0 34px rgba(56,189,248,.07);
+}
+
+.adminV4 .adminCompactList > div {
+  border-color: rgba(148,163,184,.08) !important;
+  background: rgba(2,8,16,.22) !important;
+}
+
+.adminV4 .adminSidebarFoot {
+  margin: 10px;
+  padding: 13px !important;
+  border: 1px solid rgba(96,165,250,.11);
+  border-radius: 13px;
+  background:
+    radial-gradient(circle at 100% 100%, rgba(37,99,235,.15), transparent 48%),
+    rgba(4,10,19,.45) !important;
+}
+
+.adminV4 .adminSidebarFoot b {
+  color: #dbeafe;
+  font-size: 10px;
+  letter-spacing: .09em;
+}
+
+.adminV4 .adminSidebarFoot span {
+  color: #64748b;
+  font-size: 8px;
+}
+
+.adminV4 .adminSidebarFoot small {
+  color: #3b82f6;
+  font-size: 7px;
+  letter-spacing: .10em;
+}
+
+/* All existing explicit Delete buttons are vivid red. */
+.adminV4 .taskDeleteBtn {
+  min-height: 42px !important;
+  padding-left: 18px !important;
+  padding-right: 18px !important;
+  border-color: rgba(255,94,115,.74) !important;
+  background: linear-gradient(135deg, #ff304f, #dc082e) !important;
+  color: #fff !important;
+  box-shadow: 0 10px 28px rgba(220,8,46,.27) !important;
+}
+
+/* Mobile keeps the existing Telegram safe-area behavior and turns the
+   dense desktop command center into readable stacked cards. */
+@media (max-width: 1180px) and (min-width: 960px) {
+  .adminV4 .adminMetricDeck {
+    grid-template-columns: repeat(3, minmax(0,1fr)) !important;
+  }
+  .adminV4 .adminOpsGrid {
+    grid-template-columns: repeat(2, minmax(0,1fr)) !important;
+  }
+  .adminV4 .adminRiskOverview {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 959px) {
+  .adminV4 .adminWorkspace::before {
+    left: 0;
+  }
+
+  .adminV4 .adminContent {
+    width: 100%;
+    padding: 14px 12px 32px !important;
+  }
+
+  .adminV4 .adminPageHeading {
+    min-height: 78px;
+    margin-bottom: 10px;
+  }
+
+  .adminV4 .adminPageHeading h1 {
+    font-size: 24px;
+  }
+
+  .adminV4 .adminGlobalSearch,
+  .adminV4 .adminTopStatus,
+  .adminV4 .adminAdminChip {
+    display: none !important;
+  }
+
+  .adminV4 .adminHeroPanel {
+    min-height: 0;
+    padding: 16px !important;
+  }
+
+  .adminV4 .adminDashboardClock {
+    min-width: 0;
+  }
+
+  .adminV4 .adminMetricDeck {
+    grid-template-columns: repeat(2, minmax(0,1fr)) !important;
+    gap: 8px !important;
+  }
+
+  .adminV4 .adminMetricPrimary {
+    min-height: 112px !important;
+    padding: 12px !important;
+  }
+
+  .adminV4 .adminMetricPrimary strong {
+    font-size: 21px !important;
+  }
+
+  .adminV4 .adminAnalyticsGrid,
+  .adminV4 .adminDashboardSplit:not(.adminDashboardMainSplit),
+  .adminV4 .adminOpsGrid {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  .adminV4 .adminGrowthPanel,
+  .adminV4 .adminSystemPanel {
+    min-height: 0;
+  }
+
+  .adminV4 .adminPulseMetrics {
+    grid-template-columns: repeat(2, minmax(0,1fr)) !important;
+    gap: 8px !important;
+  }
+
+  .adminV4 .adminQuickGrid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .adminV4 .adminHeroPanel {
+    display: block;
+  }
+
+  .adminV4 .adminDashboardClock {
+    margin-top: 12px;
+    width: fit-content;
+  }
+
+  .adminV4 .adminMetricDeck {
+    grid-template-columns: repeat(2, minmax(0,1fr)) !important;
+  }
+
+  .adminV4 .adminMetricPrimary {
+    min-width: 0;
+  }
+
+  .adminV4 .adminMetricPrimary > span {
+    font-size: 9px;
+  }
+
+  .adminV4 .adminMetricPrimary strong {
+    font-size: 18px !important;
+  }
+
+  .adminV4 .adminQuickGrid {
+    grid-template-columns: 1fr !important;
+  }
+}

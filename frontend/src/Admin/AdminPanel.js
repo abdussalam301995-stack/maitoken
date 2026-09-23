@@ -476,7 +476,7 @@
 
         return (
           <>
-            <section className="adminDashboardWelcome">
+            <section className="adminDashboardWelcome adminHeroPanel">
               <div>
                 <span className="adminEyebrow">MAI NETWORK COMMAND CENTER</span>
                 <h2>👋 Welcome Back, Admin</h2>
@@ -488,7 +488,7 @@
               </div>
             </section>
 
-            <div className="adminPrimaryMetrics">
+            <div className="adminPrimaryMetrics adminMetricDeck">
               {primaryCards.map(([label, value, sub, icon]) => (
                 <article className="adminMetric adminMetricPrimary" key={label}>
                   <div className="adminMetricIcon">{icon}</div>
@@ -499,7 +499,7 @@
               ))}
             </div>
 
-            <div className="adminDashboardSplit adminDashboardMainSplit">
+            <div className="adminDashboardSplit adminDashboardMainSplit adminAnalyticsGrid">
               <section className="adminSection adminGrowthPanel">
                 <div className="adminSectionHead">
                   <div><span>ANALYTICS</span><h3>User Growth</h3></div>
@@ -545,7 +545,7 @@
               </section>
             </div>
 
-            <div className="adminSecondaryMetrics">
+            <div className="adminSecondaryMetrics adminPulseMetrics">
               {secondaryCards.map(([label, value, sub]) => (
                 <article className="adminMetric adminMetricCompact" key={label}>
                   <span>{label}</span><strong>{fmt(value)}</strong><small>{sub}</small>
@@ -571,7 +571,7 @@
               </section>
             </div>
 
-            <div className="adminDashboardBottom">
+            <div className="adminDashboardBottom adminOpsGrid">
               <section className="adminSection adminSecurityAlerts">
                 <div className="adminSectionHead"><div><span>SECURITY</span><h3>Security Alerts</h3></div><button onClick={() => setTab('audit')}>Audit Logs →</button></div>
                 {securityAlerts.length ? <div className="adminCompactList">{securityAlerts.map(item => <div key={item.id}><div><b>{String(item.action || '').replaceAll('_', ' ')}</b><small>{item.target_id || 'System'} · {when(item.created_at)}</small></div><Status>{item.target_type || 'event'}</Status></div>)}</div> : <Empty text="No recent security-related admin events." />}
@@ -1772,7 +1772,7 @@
 
           <aside className="adminSidebar">
             <div className="adminBrand">
-              <div className="adminBrandMark">M</div>
+              <div className="adminBrandMark"><span>M</span><i>◆</i></div>
               <div>
                 <b>MAI NETWORK</b>
                 <span>Admin Command Center</span>
@@ -1820,7 +1820,7 @@
             <div className="adminSidebarFoot">
               <b>MAI NETWORK</b>
               <span>Secure • Fair • Auditable</span>
-              <small>Admin V4</small>
+              <small>ADMIN CONTROL • V5 UI</small>
             </div>
           </aside>
 
@@ -1860,7 +1860,7 @@
 
               <div className="adminTopStatus">
                 <span className="adminOnlineDot" />
-                <b>Online</b>
+                <div><b>System Online</b><small>Live control</small></div>
               </div>
 
               <div className="adminAdminChip">
