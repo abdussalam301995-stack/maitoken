@@ -10102,6 +10102,47 @@ await pool.query(`
           }
 
 
+          // Resume an unfinished sequence instead of creating a new session.
+          // This preserves 1/3 or 2/3 progress when AdsGram temporarily emits
+          // onNonStopShow and the user has to retry later.
+          const resumable = (
+            await pool.query(`
+              SELECT id,sequence_total,sequence_completed,reward_snapshot,daily_limit_snapshot,
+                     cooldown_snapshot,block_id_snapshot,mode_snapshot,status
+              FROM ad_sessions
+              WHERE telegram_id=$1
+                AND day=$2
+                AND campaign_id IS NOT DISTINCT FROM $3::bigint
+                AND claimed_at IS NULL
+                AND status IN ('started','completed')
+                AND sequence_completed < sequence_total
+              ORDER BY started_at DESC
+              LIMIT 1
+            `,[req.auth.id,day,campaign.id])
+          ).rows[0];
+
+          if (resumable) {
+            const resumeBase = {
+              success:true,
+              resumed:true,
+              sessionId:resumable.id,
+              campaignId:campaign.id,
+              campaignName:campaign.name,
+              reward:Number(resumable.reward_snapshot ?? campaignReward),
+              dailyLimit:Number(resumable.daily_limit_snapshot ?? campaignDailyLimit),
+              cooldown:Number(resumable.cooldown_snapshot ?? campaignCooldown),
+              adsPerClaim:Math.max(1,Math.min(3,Number(resumable.sequence_total || campaign.ads_per_claim || 1))),
+              sequenceCompleted:Math.max(0,Number(resumable.sequence_completed || 0)),
+              url:''
+            };
+            if (campaign.provider === 'adsgram') {
+              return res.json({ ...resumeBase, provider:'adsgram', blockId:resumable.block_id_snapshot || campaign.block_id, debug:resumable.mode_snapshot === 'test' });
+            }
+            if (campaign.provider === 'monetag') {
+              return res.json({ ...resumeBase, provider:'monetag', zoneId:resumable.block_id_snapshot || campaign.block_id, testOnly:resumable.mode_snapshot === 'test' });
+            }
+          }
+
           const last =
             (
               await pool.query(
@@ -10233,6 +10274,7 @@ await pool.query(`
               dailyLimit: campaignDailyLimit,
               cooldown: campaignCooldown,
               adsPerClaim: Math.max(1, Math.min(3, Number(campaign.ads_per_claim || 1))),
+              sequenceCompleted: 0,
               url: ''
             });
 
@@ -10250,6 +10292,7 @@ await pool.query(`
               dailyLimit: campaignDailyLimit,
               cooldown: campaignCooldown,
               adsPerClaim: Math.max(1, Math.min(3, Number(campaign.ads_per_claim || 1))),
+              sequenceCompleted: 0,
               // Test mode only: production rewards stay activation-locked until
               // a provider-side server confirmation/postback is configured.
               testOnly: campaign.mode === 'test',
@@ -10372,7 +10415,19 @@ await pool.query(`
           if(session.status==='claimed'){ await client.query('COMMIT'); return res.json({success:true,verified:true,complete:true,completed:Number(session.sequence_total||1),total:Number(session.sequence_total||1)}); }
           if(session.status!=='started' && session.status!=='completed'){ await client.query('ROLLBACK'); return res.status(409).json({success:false,message:'Ad session cannot be completed'}); }
           const total=Math.max(1,Math.min(3,Number(session.sequence_total||1)));
-          const completed=Math.min(total,Number(session.sequence_completed||0)+1);
+          const current=Math.max(0,Math.min(total,Number(session.sequence_completed||0)));
+          const requestedStep=Math.max(1,Math.min(total,Math.trunc(Number(req.body?.expectedStep || (current+1)))));
+          // Idempotent step confirmation: a repeated confirmation for an already
+          // stored step returns current progress instead of incrementing twice.
+          if(requestedStep<=current){
+            await client.query('COMMIT');
+            return res.json({success:true,verified:current>=total,complete:current>=total,completed:current,total,remaining:Math.max(0,total-current),replayed:true});
+          }
+          if(requestedStep!==current+1){
+            await client.query('ROLLBACK');
+            return res.status(409).json({success:false,message:'Ad sequence step is out of order',completed:current,total});
+          }
+          const completed=requestedStep;
           const isComplete=completed>=total;
           await client.query(`
             UPDATE ad_sessions

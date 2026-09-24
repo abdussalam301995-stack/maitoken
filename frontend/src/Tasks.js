@@ -269,10 +269,11 @@ export default function Tasks({ initData, onUserUpdate }) {
       document.body.appendChild(script);
     });
 
-  const markTestAdStep = (sessionId, initDataValue) =>
+  const markTestAdStep = (sessionId, initDataValue, expectedStep) =>
     api(`/api/ads/test-step-complete/${sessionId}`, {
       method: 'POST',
-      initData: initDataValue
+      initData: initDataValue,
+      body: { expectedStep }
     });
 
   const startAd = async campaign => {
@@ -300,41 +301,51 @@ export default function Tasks({ initData, onUserUpdate }) {
           debugBannerType: 'FullscreenMedia'
         });
 
-        // AdsGram can reject back-to-back show() calls with onNonStopShow.
-        // Treat every rewarded view as a separate step: verify it first, show a
-        // short confirmation state, then allow the SDK time to settle before
-        // requesting the next rewarded banner. The final MAI reward is still
-        // granted only after every server-side sequence step is complete.
-        const waitForNextAdsgramStep = ms => new Promise(resolve => setTimeout(resolve, ms));
+        const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+        const firstStep = Math.max(1, Math.min(totalAds, Number(data.sequenceCompleted || 0) + 1));
 
-        for (let step = 1; step <= totalAds; step += 1) {
-          setMessage(totalAds > 1 ? `Ad ${step}/${totalAds} — watch to the end.` : 'Watch the ad to the end.');
+        // A sequence is resumable. If AdsGram temporarily blocks a consecutive
+        // show with onNonStopShow, keep the already-confirmed server progress,
+        // wait 3 seconds and retry the SAME next step automatically.
+        for (let step = firstStep; step <= totalAds; step += 1) {
+          let shown = false;
 
-          let nonStopShow = false;
-          const onNonStopShow = () => { nonStopShow = true; };
-          controller.addEventListener?.('onNonStopShow', onNonStopShow);
+          for (let attempt = 1; attempt <= 8 && !shown; attempt += 1) {
+            setMessage(
+              attempt === 1
+                ? (totalAds > 1 ? `Ad ${step}/${totalAds} — watch to the end.` : 'Watch the ad to the end.')
+                : `Preparing ad ${step}/${totalAds}... retrying automatically.`
+            );
 
-          try {
-            await controller.show();
-          } catch (showError) {
-            if (nonStopShow) {
-              throw new Error(`AdsGram is preparing the next ad. Please wait a moment and try again.`);
+            let nonStopShow = false;
+            const onNonStopShow = () => { nonStopShow = true; };
+            controller.addEventListener?.('onNonStopShow', onNonStopShow);
+
+            try {
+              await controller.show();
+              shown = true;
+            } catch (showError) {
+              if (!nonStopShow) throw showError;
+              if (attempt >= 8) {
+                throw new Error(`Ad ${step}/${totalAds} is not ready yet. Tap WATCH again to continue from this step.`);
+              }
+              setMessage(`AdsGram is preparing ad ${step}/${totalAds}. Retrying in 3 seconds...`);
+              await wait(3000);
+            } finally {
+              controller.removeEventListener?.('onNonStopShow', onNonStopShow);
             }
-            throw showError;
-          } finally {
-            controller.removeEventListener?.('onNonStopShow', onNonStopShow);
           }
 
           setMessage(totalAds > 1 ? `Confirming ad ${step} with AdsGram...` : 'Confirming ad with AdsGram...');
-          const progress = await markTestAdStep(sessionId, initData);
+          const progress = await markTestAdStep(sessionId, initData, step);
+          if (Number(progress.completed || 0) < step) {
+            throw new Error(`Ad ${step}/${totalAds} could not be confirmed.`);
+          }
           if (step < totalAds && progress.complete) throw new Error('Ad sequence completed earlier than expected.');
 
           if (step < totalAds) {
-            // AdsGram documents onNonStopShow for consecutive views but does not
-            // publish a required interval. This small app-side pacing avoids an
-            // immediate second show() while keeping the sequence automatic.
             setMessage(`Ad ${step}/${totalAds} confirmed. Preparing ad ${step + 1}/${totalAds}...`);
-            await waitForNextAdsgramStep(3000);
+            await wait(3000);
           }
         }
 
