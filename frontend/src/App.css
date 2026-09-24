@@ -14046,3 +14046,50 @@ body.maiAdminOpen .adminPanel.adminV4 {
   transform: none !important;
   filter: none !important;
 }
+
+/* =========================================================
+   MAI ADMIN V4 — ADS MANAGEMENT
+   Matches the existing cyan / dark command-center system.
+   ========================================================= */
+.adminV4 .adminAdsHero{border-color:rgba(53,230,242,.18)!important;background:linear-gradient(145deg,rgba(7,31,43,.98),rgba(4,18,27,.98))!important}
+.adminV4 .adminAdsMetrics{margin-bottom:12px}
+.adminV4 .adminAdsMetrics .adminMetric:first-child strong{font-size:20px!important;word-break:break-all}
+.adminV4 .adminAdsControl{overflow:visible!important}
+.adminV4 .adminAdsTabs{margin:14px 0 12px}
+.adminV4 .adminAdsList{display:grid;gap:10px}
+.adminV4 .adminAdCard{position:relative;overflow:hidden}
+.adminV4 .adminAdCard.isActive{border-color:rgba(101,230,167,.3)!important;box-shadow:0 0 0 1px rgba(101,230,167,.04),0 16px 38px rgba(0,0,0,.27)!important}
+.adminV4 .adminAdCard.isActive:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--admin-green)}
+.adminV4 .adminAdStats{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0 0}
+.adminV4 .adminAdStats span{padding:6px 8px;border:1px solid var(--admin-line);border-radius:9px;background:rgba(255,255,255,.025);color:var(--admin-muted);font-size:10px;font-weight:750}
+.adminV4 .adminAdStats b{color:var(--admin-text);font-weight:900}
+.adminV4 .adminActionRow{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.adminV4 .adminActionRow button{min-height:38px;padding:8px 12px;border-radius:10px;border:1px solid var(--admin-line);background:rgba(53,230,242,.055);color:var(--admin-cyan);font-size:12px;font-weight:850}
+.adminV4 .adminActionRow button.primary{color:#031417;background:linear-gradient(135deg,#77f4fb,#35e6f2);border-color:transparent}
+.adminV4 .adminActionRow button.danger{color:var(--admin-red);background:rgba(255,113,133,.055);border-color:rgba(255,113,133,.18)}
+.adminV4 .adminActionRow button:disabled{opacity:.45}
+.adminV4 .adminAdWarning{margin:10px 0 0!important;padding:9px 10px;border:1px solid rgba(247,201,107,.14);border-radius:10px;background:rgba(247,201,107,.045);color:var(--admin-amber)!important}
+.adminV4 .adminAdComposer{width:min(680px,100%)!important}
+.adminV4 .adminFormGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.adminV4 .adminFormGrid label{display:flex;min-width:0;flex-direction:column;gap:6px}
+.adminV4 .adminFormGrid label.wide{grid-column:1/-1}
+.adminV4 .adminFormGrid label>span{color:var(--admin-muted);font-size:10px;font-weight:900;letter-spacing:.65px;text-transform:uppercase}
+.adminV4 .adminFormGrid input,.adminV4 .adminFormGrid select{width:100%;min-height:44px;padding:10px 11px;border:1px solid var(--admin-line);border-radius:11px;outline:0;color:var(--admin-text);background:#061923;font-size:13px;font-weight:700}
+.adminV4 .adminFormGrid input:focus,.adminV4 .adminFormGrid select:focus{border-color:rgba(53,230,242,.48);box-shadow:0 0 0 3px rgba(53,230,242,.06)}
+.adminV4 .adminAdSafety{display:flex;align-items:flex-start;gap:10px;margin-top:12px;padding:11px;border:1px solid rgba(101,230,167,.15);border-radius:12px;background:rgba(101,230,167,.045)}
+.adminV4 .adminAdSafety b{flex:0 0 auto;color:var(--admin-green);font-size:11px;font-weight:950;text-transform:uppercase}
+.adminV4 .adminAdSafety span{color:var(--admin-soft);font-size:11px;line-height:1.5}
+.adminV4 .adminModalActions{display:flex;justify-content:flex-end;gap:8px;margin-top:15px;padding-top:12px;border-top:1px solid var(--admin-line)}
+.adminV4 .adminModalActions button{min-height:42px;padding:9px 14px;border-radius:11px;border:1px solid var(--admin-line);background:#0a202c;color:var(--admin-soft);font-size:12px;font-weight:900}
+.adminV4 .adminModalActions button.primary{color:#031417;background:linear-gradient(135deg,#77f4fb,#35e6f2);border-color:transparent}
+@media(max-width:640px){
+  .adminV4 .adminAdsHero{align-items:flex-start}
+  .adminV4 .adminAdsTabs{display:grid!important;grid-template-columns:1fr!important}
+  .adminV4 .adminAdsTabs button{width:100%;min-width:0}
+  .adminV4 .adminFormGrid{grid-template-columns:1fr}
+  .adminV4 .adminFormGrid label.wide{grid-column:auto}
+  .adminV4 .adminActionRow{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .adminV4 .adminActionRow button{width:100%}
+  .adminV4 .adminModalActions{display:grid;grid-template-columns:1fr 1fr}
+  .adminV4 .adminModalActions button{width:100%}
+}

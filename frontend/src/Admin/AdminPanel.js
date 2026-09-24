@@ -66,6 +66,7 @@
 
     const MODULE_NAV = [
       ['tasks', '✓', 'Tasks & Missions'],
+      ['ads', '▣', 'Ads Management'],
       ['giveaway', '🎁', 'Giveaway'],
       ['broadcast', '📣', 'Broadcast Message'],
       ['invites', '👥', 'Active Invites'],
@@ -157,6 +158,15 @@
       const [correctionConfirm, setCorrectionConfirm] = useState('');
       const [correctionRequestKey, setCorrectionRequestKey] = useState('');
       const [moduleStatus, setModuleStatus] = useState(null);
+      const [adCampaigns, setAdCampaigns] = useState([]);
+      const [adActive, setAdActive] = useState(null);
+      const [adMode, setAdMode] = useState('active');
+      const [adComposerOpen, setAdComposerOpen] = useState(false);
+      const [adEditingId, setAdEditingId] = useState(null);
+      const [adForm, setAdForm] = useState({
+        name:'MAI Rewarded Ads', provider:'adsgram', blockId:'', reward:'2',
+        dailyLimit:'20', cooldownSeconds:'5', mode:'test'
+      });
       const [taskMode, setTaskMode] = useState('tasks');
       const [taskComposerOpen, setTaskComposerOpen] = useState(false);
       const [missionComposerOpen, setMissionComposerOpen] = useState(false);
@@ -202,6 +212,7 @@
           ['security', adminApi('/admin/security/config')],
           ['managedTasks', adminApi('/admin/tasks')],
           ['managedMissions', adminApi('/admin/missions')],
+          ['ads', adminApi('/admin/ads')],
           ['giveaways', adminApi('/admin/giveaways')],
           ['giveawayWinners', adminApi('/admin/giveaway-winners')],
           ['broadcasts', adminApi('/admin/broadcasts')],
@@ -225,6 +236,7 @@
             if (key === 'security') setSecurityConfig(data.config || {});
             if (key === 'managedTasks') setManagedTasks(data.items || []);
             if (key === 'managedMissions') setManagedMissions(data.items || []);
+            if (key === 'ads') { setAdCampaigns(data.items || []); setAdActive(data.active || null); }
             if (key === 'giveaways') setGiveaways(data.items || []);
             if (key === 'giveawayWinners') setGiveawayWinners(data.items || []);
             if (key === 'broadcasts') setBroadcasts(data.items || []);
@@ -1125,6 +1137,102 @@
       const promptValue = (label, fallback = '') =>
         String(window.prompt(label, fallback) || '').trim();
 
+      const resetAdForm = () => {
+        setAdEditingId(null);
+        setAdForm({name:'MAI Rewarded Ads',provider:'adsgram',blockId:'',reward:'2',dailyLimit:'20',cooldownSeconds:'5',mode:'test'});
+      };
+
+      const openAdEditor = item => {
+        setAdEditingId(item.id);
+        setAdForm({
+          name:item.name || '', provider:item.provider || 'adsgram', blockId:item.block_id || '',
+          reward:String(item.reward ?? ''), dailyLimit:String(item.daily_limit ?? ''),
+          cooldownSeconds:String(item.cooldown_seconds ?? 5), mode:item.mode || 'test'
+        });
+        setAdComposerOpen(true);
+      };
+
+      const saveAdCampaign = async () => {
+        const payload={...adForm,reward:Number(adForm.reward),dailyLimit:Number(adForm.dailyLimit),cooldownSeconds:Number(adForm.cooldownSeconds)};
+        if(!payload.name.trim() || !/^\d+$/.test(String(payload.blockId).trim())) { setError('Ad name and numeric AdsGram Block ID are required.'); return; }
+        setBusy('ad-save'); setError('');
+        try {
+          await adminApi(adEditingId ? `/admin/ads/${adEditingId}` : '/admin/ads',{method:adEditingId?'PATCH':'POST',body:JSON.stringify(payload)});
+          setNotice(adEditingId ? 'Ad campaign updated.' : 'New ad campaign created as Paused.');
+          setAdComposerOpen(false); resetAdForm(); await loadAll(true);
+        } catch(e){ setError(e.message); } finally { setBusy(''); }
+      };
+
+      const setAdCampaignStatus = async (item,status) => {
+        const warning=status==='active' ? `Activate ${item.name}? This becomes the ad configuration used for new sessions.` : `Pause ${item.name}?`;
+        if(!window.confirm(warning)) return;
+        setBusy(`ad-status-${item.id}`); setError('');
+        try { await adminApi(`/admin/ads/${item.id}/status`,{method:'POST',body:JSON.stringify({status})}); setNotice(status==='active'?'Ad campaign activated.':'Ad campaign paused.'); await loadAll(true); }
+        catch(e){setError(e.message)} finally{setBusy('')}
+      };
+
+      const removeAdCampaign = async item => {
+        if(!window.confirm(`Remove ${item.name} from Admin view? Reward/session history will be preserved.`)) return;
+        setBusy(`ad-delete-${item.id}`); setError('');
+        try { await adminApi(`/admin/ads/${item.id}`,{method:'DELETE'}); setNotice('Ad campaign removed. History preserved.'); await loadAll(true); }
+        catch(e){setError(e.message)} finally{setBusy('')}
+      };
+
+      const renderAds = () => {
+        const visible=adMode==='active' ? adCampaigns.filter(x=>x.status==='active') : adMode==='history' ? adCampaigns.filter(x=>x.status!=='active') : adCampaigns;
+        return <>
+          <section className="adminHero adminAdsHero">
+            <div><span className="adminEyebrow">REWARDED AD CONTROL</span><h2>Ads Management</h2><p>Manage AdsGram blocks, MAI rewards, daily limits and test campaigns without changing frontend code.</p></div>
+            <button className="adminRefresh" onClick={()=>loadAll(true)} disabled={!!busy}>↻</button>
+          </section>
+
+          <div className="adminMetricGrid adminAdsMetrics">
+            <div className="adminMetric"><span>ACTIVE BLOCK</span><strong>{adActive?.block_id || '—'}</strong><small>{adActive?.name || 'No active campaign'}</small></div>
+            <div className="adminMetric"><span>REWARD</span><strong>{adActive ? `${fmt(adActive.reward)} MAI` : '—'}</strong><small>Server-authoritative</small></div>
+            <div className="adminMetric"><span>DAILY LIMIT</span><strong>{adActive?.daily_limit || '—'}</strong><small>Per user / UTC day</small></div>
+            <div className="adminMetric"><span>MODE</span><strong>{String(adActive?.mode || '—').toUpperCase()}</strong><small>{adActive?.mode==='test'?'AdsGram debug/test':'Production activation protected'}</small></div>
+          </div>
+
+          <section className="adminSection adminAdsControl">
+            <div className="adminSectionHead"><div><span>CAMPAIGN CONTROL</span><h3>Rewarded Ad Projects</h3></div><button onClick={()=>{resetAdForm();setAdComposerOpen(true)}}>＋ New Ad</button></div>
+            <div className="adminModeTabs adminAdsTabs">
+              <button className={adMode==='active'?'active':''} onClick={()=>setAdMode('active')}>Active</button>
+              <button className={adMode==='all'?'active':''} onClick={()=>setAdMode('all')}>All Campaigns</button>
+              <button className={adMode==='history'?'active':''} onClick={()=>setAdMode('history')}>Paused / History</button>
+            </div>
+            <div className="adminList adminAdsList">
+              {visible.map(item=><article className={`adminListCard adminAdCard ${item.status==='active'?'isActive':''}`} key={item.id}>
+                <div className="adminListTop"><div className="adminBadgeIcon">▣</div><div className="adminGrow"><b>{item.name}</b><span>AdsGram Block {item.block_id} · {String(item.mode).toUpperCase()}</span></div><Status>{item.status}</Status></div>
+                <div className="adminDataGrid"><div><span>Reward</span><b>{fmt(item.reward)} MAI</b></div><div><span>Daily Limit</span><b>{item.daily_limit}</b></div><div><span>Cooldown</span><b>{item.cooldown_seconds}s</b></div><div><span>Rewards Paid</span><b>{fmt(item.rewards_paid)} MAI</b></div></div>
+                <div className="adminAdStats"><span>Started <b>{fmt(item.started_count)}</b></span><span>Claimed <b>{fmt(item.claimed_count)}</b></span><span>Updated <b>{when(item.updated_at)}</b></span></div>
+                <div className="adminActionRow">
+                  <button onClick={()=>openAdEditor(item)} disabled={!!busy}>Edit</button>
+                  {item.status==='active' ? <button onClick={()=>setAdCampaignStatus(item,'paused')} disabled={!!busy}>Pause</button> : <button className="primary" onClick={()=>setAdCampaignStatus(item,'active')} disabled={!!busy}>Activate</button>}
+                  <button className="danger" onClick={()=>removeAdCampaign(item)} disabled={!!busy || item.status==='active'}>Remove</button>
+                </div>
+                {item.mode==='production' && <p className="adminFootnote adminAdWarning">Production activation remains server-locked until secure AdsGram server confirmation is configured.</p>}
+              </article>)}
+              {!visible.length && <Empty text="No ad campaigns in this view." />}
+            </div>
+          </section>
+
+          {adComposerOpen && <div className="adminModalBackdrop"><div className="adminModal adminAdComposer">
+            <div className="adminModalHead"><div><span>ADS MANAGEMENT</span><h3>{adEditingId?'Edit Ad Campaign':'Create New Ad Campaign'}</h3></div><button onClick={()=>{setAdComposerOpen(false);resetAdForm()}}>×</button></div>
+            <div className="adminFormGrid">
+              <label className="wide"><span>Campaign Name</span><input value={adForm.name} onChange={e=>setAdForm({...adForm,name:e.target.value})} placeholder="MAI Rewarded Ads" /></label>
+              <label><span>Provider</span><select value={adForm.provider} onChange={e=>setAdForm({...adForm,provider:e.target.value})}><option value="adsgram">AdsGram</option></select></label>
+              <label><span>AdsGram Block ID</span><input inputMode="numeric" value={adForm.blockId} onChange={e=>setAdForm({...adForm,blockId:e.target.value.replace(/\D/g,'')})} placeholder="49496" /></label>
+              <label><span>Reward (MAI)</span><input type="number" min="0" step="0.0001" value={adForm.reward} onChange={e=>setAdForm({...adForm,reward:e.target.value})} /></label>
+              <label><span>Daily Limit</span><input type="number" min="1" max="1000" value={adForm.dailyLimit} onChange={e=>setAdForm({...adForm,dailyLimit:e.target.value})} /></label>
+              <label><span>Cooldown (seconds)</span><input type="number" min="0" max="86400" value={adForm.cooldownSeconds} onChange={e=>setAdForm({...adForm,cooldownSeconds:e.target.value})} /></label>
+              <label><span>Mode</span><select value={adForm.mode} onChange={e=>setAdForm({...adForm,mode:e.target.value})}><option value="test">Test / Debug</option><option value="production">Production</option></select></label>
+            </div>
+            <div className="adminAdSafety"><b>Security</b><span>New campaigns are created Paused. Production campaigns cannot be activated until server-side AdsGram reward confirmation is implemented.</span></div>
+            <div className="adminModalActions"><button onClick={()=>{setAdComposerOpen(false);resetAdForm()}}>Cancel</button><button className="primary" onClick={saveAdCampaign} disabled={busy==='ad-save'}>{busy==='ad-save'?'Saving…':adEditingId?'Save Changes':'Create Campaign'}</button></div>
+          </div></div>}
+        </>;
+      };
+
       const renderTasksMissions = () => {
         const setTaskField = (key, value) => setTaskForm(old => ({...old,[key]:value}));
         const resetTaskForm = () => setTaskForm({title:'',targetUrl:'',reward:'',taskType:'telegram_join',telegramChatId:'',description:'',limitMode:'all',customLimit:'',refreshMode:'once',customHours:'',inviteCount:'1',holdingAmount:'0',miningClaims:'1',botVerification:'external_gate',botEventType:''});
@@ -1805,6 +1913,7 @@
         if (tab === 'payments') return renderPayments();
         if (tab === 'audit') return renderAudit();
         if (tab === 'tasks') return renderTasksMissions();
+        if (tab === 'ads') return renderAds();
         if (tab === 'giveaway') return renderGiveaway();
         if (tab === 'broadcast') return renderBroadcast();
         if (tab === 'invites') return renderInvites();
@@ -1873,6 +1982,7 @@
                   <i>{icon}</i>
                   <span>{label}</span>
                   {key === 'tasks' && managedTasks.filter(x => x.status === 'active').length > 0 && <em>{managedTasks.filter(x => x.status === 'active').length}</em>}
+                  {key === 'ads' && adCampaigns.filter(x => x.status === 'active').length > 0 && <em>{adCampaigns.filter(x => x.status === 'active').length}</em>}
                   {key === 'giveaway' && giveaways.filter(x => x.status === 'live').length > 0 && <em>{giveaways.filter(x => x.status === 'live').length}</em>}
                 </button>
               ))}
