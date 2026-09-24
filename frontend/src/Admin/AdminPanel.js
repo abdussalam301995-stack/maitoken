@@ -2330,5 +2330,4 @@
         </div>
       );
     }
-
     export default AdminPanel;
