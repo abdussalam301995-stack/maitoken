@@ -1264,7 +1264,7 @@
             </div>
           </section>
 
-          {adComposerOpen && <div className="adminModalBackdrop"><div className="adminModal adminAdComposer">
+          {adComposerOpen && <div className="adminModalBackdrop adminAdComposerBackdrop"><div className="adminModal adminAdComposer">
             <div className="adminModalHead"><div><span>ADS MANAGEMENT</span><h3>{adEditingId?'Edit Ad Campaign':'Create New Ad Campaign'}</h3></div><button onClick={closeAdComposer}>×</button></div>
             <div className="adminFormGrid">
               <label className="wide"><span>Campaign Name</span><input value={adForm.name} onChange={e=>setAdForm(old=>({...old,name:e.target.value}))} placeholder="MAI Rewarded Ads" /></label>
