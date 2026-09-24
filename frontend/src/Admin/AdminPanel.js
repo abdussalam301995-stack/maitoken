@@ -165,7 +165,7 @@
       const [adEditingId, setAdEditingId] = useState(null);
       const [adForm, setAdForm] = useState({
         name:'MAI Rewarded Ads', provider:'adsgram', blockId:'', reward:'2',
-        dailyLimit:'20', cooldownSeconds:'5', mode:'test'
+        dailyLimit:'20', cooldownSeconds:'5', mode:'test', adsPerClaim:'1'
       });
       const [taskMode, setTaskMode] = useState('tasks');
       const [taskComposerOpen, setTaskComposerOpen] = useState(false);
@@ -1139,7 +1139,7 @@
 
       const resetAdForm = () => {
         setAdEditingId(null);
-        setAdForm({name:'MAI Rewarded Ads',provider:'adsgram',blockId:'',reward:'2',dailyLimit:'20',cooldownSeconds:'5',mode:'test'});
+        setAdForm({name:'MAI Rewarded Ads',provider:'adsgram',blockId:'',reward:'2',dailyLimit:'20',cooldownSeconds:'5',mode:'test',adsPerClaim:'1'});
       };
 
       const openAdEditor = item => {
@@ -1147,14 +1147,16 @@
         setAdForm({
           name:item.name || '', provider:item.provider || 'adsgram', blockId:item.block_id || '',
           reward:String(item.reward ?? ''), dailyLimit:String(item.daily_limit ?? ''),
-          cooldownSeconds:String(item.cooldown_seconds ?? 5), mode:item.mode || 'test'
+          cooldownSeconds:String(item.cooldown_seconds ?? 5), mode:item.mode || 'test', adsPerClaim:String(item.ads_per_claim ?? 1)
         });
         setAdComposerOpen(true);
       };
 
       const saveAdCampaign = async () => {
-        const payload={...adForm,reward:Number(adForm.reward),dailyLimit:Number(adForm.dailyLimit),cooldownSeconds:Number(adForm.cooldownSeconds)};
-        if(!payload.name.trim() || !/^\d+$/.test(String(payload.blockId).trim())) { setError('Ad name and numeric AdsGram Block ID are required.'); return; }
+        const payload={...adForm,reward:Number(adForm.reward),dailyLimit:Number(adForm.dailyLimit),cooldownSeconds:Number(adForm.cooldownSeconds),adsPerClaim:Number(adForm.adsPerClaim)};
+        if(!payload.name.trim() || !/^\d+$/.test(String(payload.blockId).trim())) { setError(`Ad name and numeric ${payload.provider==='monetag'?'Monetag Zone ID':'AdsGram Block ID'} are required.`); return; }
+        if(![1,2,3].includes(payload.adsPerClaim)){setError('Ads per claim must be 1, 2, or 3.');return;}
+        if(payload.provider==='monetag' && payload.mode==='test' && Number(payload.reward)!==0){setError('For safe Monetag integration testing, set Reward to 0 MAI. Production rewards need server-side postback verification.');return;}
         setBusy('ad-save'); setError('');
         try {
           await adminApi(adEditingId ? `/admin/ads/${adEditingId}` : '/admin/ads',{method:adEditingId?'PATCH':'POST',body:JSON.stringify(payload)});
@@ -1182,7 +1184,7 @@
         const visible=adMode==='active' ? adCampaigns.filter(x=>x.status==='active') : adMode==='history' ? adCampaigns.filter(x=>x.status!=='active') : adCampaigns;
         return <>
           <section className="adminHero adminAdsHero">
-            <div><span className="adminEyebrow">REWARDED AD CONTROL</span><h2>Ads Management</h2><p>Manage AdsGram blocks, MAI rewards, daily limits and test campaigns without changing frontend code.</p></div>
+            <div><span className="adminEyebrow">REWARDED AD CONTROL</span><h2>Ads Management</h2><p>Manage AdsGram and Monetag rewarded campaigns, multi-ad sequences, MAI rewards and daily limits from one place.</p></div>
             <button className="adminRefresh" onClick={()=>loadAll(true)} disabled={!!busy}>↻</button>
           </section>
 
@@ -1202,7 +1204,7 @@
             </div>
             <div className="adminList adminAdsList">
               {visible.map(item=><article className={`adminListCard adminAdCard ${item.status==='active'?'isActive':''}`} key={item.id}>
-                <div className="adminListTop"><div className="adminBadgeIcon">▣</div><div className="adminGrow"><b>{item.name}</b><span>AdsGram Block {item.block_id} · {String(item.mode).toUpperCase()}</span></div><Status>{item.status}</Status></div>
+                <div className="adminListTop"><div className="adminBadgeIcon">▣</div><div className="adminGrow"><b>{item.name}</b><span>{String(item.provider||'adsgram').toUpperCase()} {item.provider==='monetag'?'Zone':'Block'} {item.block_id} · {String(item.mode).toUpperCase()} · {Number(item.ads_per_claim||1)} Ad{Number(item.ads_per_claim||1)>1?'s':''}/Claim</span></div><Status>{item.status}</Status></div>
                 <div className="adminDataGrid"><div><span>Reward</span><b>{fmt(item.reward)} MAI</b></div><div><span>Daily Limit</span><b>{item.daily_limit}</b></div><div><span>Cooldown</span><b>{item.cooldown_seconds}s</b></div><div><span>Rewards Paid</span><b>{fmt(item.rewards_paid)} MAI</b></div></div>
                 <div className="adminAdStats"><span>Started <b>{fmt(item.started_count)}</b></span><span>Claimed <b>{fmt(item.claimed_count)}</b></span><span>Updated <b>{when(item.updated_at)}</b></span></div>
                 <div className="adminActionRow">
@@ -1210,7 +1212,7 @@
                   {item.status==='active' ? <button onClick={()=>setAdCampaignStatus(item,'paused')} disabled={!!busy}>Pause</button> : <button className="primary" onClick={()=>setAdCampaignStatus(item,'active')} disabled={!!busy}>Activate</button>}
                   <button className="danger" onClick={()=>removeAdCampaign(item)} disabled={!!busy || item.status==='active'}>Remove</button>
                 </div>
-                {item.mode==='production' && <p className="adminFootnote adminAdWarning">Production activation remains server-locked until secure AdsGram server confirmation is configured.</p>}
+                {item.mode==='production' && <p className="adminFootnote adminAdWarning">Production reward activation remains server-locked until secure provider-side confirmation/postback is configured.</p>}
               </article>)}
               {!visible.length && <Empty text="No ad campaigns in this view." />}
             </div>
@@ -1220,14 +1222,15 @@
             <div className="adminModalHead"><div><span>ADS MANAGEMENT</span><h3>{adEditingId?'Edit Ad Campaign':'Create New Ad Campaign'}</h3></div><button onClick={()=>{setAdComposerOpen(false);resetAdForm()}}>×</button></div>
             <div className="adminFormGrid">
               <label className="wide"><span>Campaign Name</span><input value={adForm.name} onChange={e=>setAdForm({...adForm,name:e.target.value})} placeholder="MAI Rewarded Ads" /></label>
-              <label><span>Provider</span><select value={adForm.provider} onChange={e=>setAdForm({...adForm,provider:e.target.value})}><option value="adsgram">AdsGram</option></select></label>
-              <label><span>AdsGram Block ID</span><input inputMode="numeric" value={adForm.blockId} onChange={e=>setAdForm({...adForm,blockId:e.target.value.replace(/\D/g,'')})} placeholder="49496" /></label>
+              <label><span>Provider</span><select value={adForm.provider} onChange={e=>setAdForm({...adForm,provider:e.target.value,reward:e.target.value==='monetag'&&adForm.mode==='test'?'0':adForm.reward})}><option value="adsgram">AdsGram</option><option value="monetag">Monetag</option></select></label>
+              <label><span>{adForm.provider==='monetag'?'Monetag Zone ID':'AdsGram Block ID'}</span><input inputMode="numeric" value={adForm.blockId} onChange={e=>setAdForm({...adForm,blockId:e.target.value.replace(/\D/g,'')})} placeholder={adForm.provider==='monetag'?'Zone ID':'49496'} /></label>
               <label><span>Reward (MAI)</span><input type="number" min="0" step="0.0001" value={adForm.reward} onChange={e=>setAdForm({...adForm,reward:e.target.value})} /></label>
               <label><span>Daily Limit</span><input type="number" min="1" max="1000" value={adForm.dailyLimit} onChange={e=>setAdForm({...adForm,dailyLimit:e.target.value})} /></label>
               <label><span>Cooldown (seconds)</span><input type="number" min="0" max="86400" value={adForm.cooldownSeconds} onChange={e=>setAdForm({...adForm,cooldownSeconds:e.target.value})} /></label>
-              <label><span>Mode</span><select value={adForm.mode} onChange={e=>setAdForm({...adForm,mode:e.target.value})}><option value="test">Test / Debug</option><option value="production">Production</option></select></label>
+              <label><span>Ads per Claim</span><select value={adForm.adsPerClaim} onChange={e=>setAdForm({...adForm,adsPerClaim:e.target.value})}><option value="1">1 Ad</option><option value="2">2 Ads Auto Sequence</option><option value="3">3 Ads Auto Sequence</option></select></label>
+              <label><span>Mode</span><select value={adForm.mode} onChange={e=>setAdForm({...adForm,mode:e.target.value,reward:adForm.provider==='monetag'&&e.target.value==='test'?'0':adForm.reward})}><option value="test">Test / Integration</option><option value="production">Production</option></select></label>
             </div>
-            <div className="adminAdSafety"><b>Security</b><span>New campaigns are created Paused. Production campaigns cannot be activated until server-side AdsGram reward confirmation is implemented.</span></div>
+            <div className="adminAdSafety"><b>Security</b><span>New campaigns are created Paused. AdsGram test sequences can reward during testing. Monetag test campaigns are restricted to 0 MAI; production rewards stay locked until secure provider-side postback verification is configured.</span></div>
             <div className="adminModalActions"><button onClick={()=>{setAdComposerOpen(false);resetAdForm()}}>Cancel</button><button className="primary" onClick={saveAdCampaign} disabled={busy==='ad-save'}>{busy==='ad-save'?'Saving…':adEditingId?'Save Changes':'Create Campaign'}</button></div>
           </div></div>}
         </>;

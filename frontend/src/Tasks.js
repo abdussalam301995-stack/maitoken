@@ -227,6 +227,54 @@ export default function Tasks({ initData, onUserUpdate }) {
       document.head.appendChild(script);
     });
 
+  const loadMonetagSdk = zoneId =>
+    new Promise((resolve, reject) => {
+      const zone = String(zoneId || '').trim();
+      if (!/^\d+$/.test(zone)) {
+        reject(new Error('Invalid Monetag Zone ID.'));
+        return;
+      }
+
+      const handlerName = `show_${zone}`;
+      if (typeof window[handlerName] === 'function') {
+        resolve(window[handlerName]);
+        return;
+      }
+
+      const selector = `script[data-mai-monetag-zone="${zone}"]`;
+      const existing = document.querySelector(selector);
+      const finish = () => {
+        const handler = window[handlerName];
+        if (typeof handler === 'function') resolve(handler);
+        else reject(new Error('Monetag SDK loaded but the ad handler is unavailable.'));
+      };
+
+      if (existing) {
+        existing.addEventListener('load', finish, { once: true });
+        existing.addEventListener('error', () => reject(new Error('Monetag SDK failed to load.')), { once: true });
+        setTimeout(() => {
+          if (typeof window[handlerName] === 'function') resolve(window[handlerName]);
+        }, 250);
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://libtl.com/sdk.js';
+      script.async = true;
+      script.dataset.zone = zone;
+      script.dataset.sdk = handlerName;
+      script.dataset.maiMonetagZone = zone;
+      script.onload = finish;
+      script.onerror = () => reject(new Error('Monetag SDK failed to load.'));
+      document.body.appendChild(script);
+    });
+
+  const markTestAdStep = (sessionId, initDataValue) =>
+    api(`/api/ads/test-step-complete/${sessionId}`, {
+      method: 'POST',
+      initData: initDataValue
+    });
+
   const startAd = async campaign => {
     if (busy === 'ad') return;
     setMessage('');
@@ -239,37 +287,51 @@ export default function Tasks({ initData, onUserUpdate }) {
       if (!sessionId) throw new Error('Ad session was not created.');
       setActiveAdCampaign({ ...campaign, reward: Number(data.reward ?? campaign?.reward ?? 0), limit: Number(data.dailyLimit ?? campaign?.limit ?? 0) });
 
+      const totalAds = Math.max(1, Math.min(3, Number(data.adsPerClaim || campaign?.adsPerClaim || 1)));
+
       if (data.provider === 'adsgram') {
         const Adsgram = await loadAdsgramSdk();
         if (!Adsgram?.init) throw new Error('AdsGram is unavailable.');
 
         const controller = Adsgram.init({
-          blockId: String(data.blockId || '49496'),
+          blockId: String(data.blockId || campaign?.blockId || ''),
           debug: Boolean(data.debug),
           debugConsole: false,
           debugBannerType: 'FullscreenMedia'
         });
 
-        // AdsGram resolves show() only after the rewarded ad is completed.
-        await controller.show();
+        for (let step = 1; step <= totalAds; step += 1) {
+          setMessage(totalAds > 1 ? `Ad ${step}/${totalAds} — watch to the end.` : 'Watch the ad to the end.');
+          await controller.show();
+          const progress = await markTestAdStep(sessionId, initData);
+          if (step < totalAds && progress.complete) throw new Error('Ad sequence completed earlier than expected.');
+        }
 
-        // This completion endpoint is restricted by the backend to the
-        // adsgram_test provider mode. The existing claim endpoint remains
-        // authoritative and idempotent for the actual MAI credit.
-        await api(`/api/ads/adsgram-complete/${sessionId}`, {
-          method: 'POST',
-          initData
-        });
-
-        const claimed = await api(`/api/ads/claim/${sessionId}`, {
-          method: 'POST',
-          initData
-        });
-
+        const claimed = await api(`/api/ads/claim/${sessionId}`, { method: 'POST', initData });
         onUserUpdate?.(claimed.user);
         setAdCount(c => c + 1);
         setActiveAdCampaign(null);
         setMessage(`+${Number(claimed.reward || 0).toFixed(4)} MAI received.`);
+        await loadTasks();
+        return;
+      }
+
+      if (data.provider === 'monetag') {
+        if (!data.testOnly) throw new Error('Production Monetag rewards require secure server-side postback verification.');
+        const showMonetag = await loadMonetagSdk(data.zoneId || campaign?.blockId);
+
+        for (let step = 1; step <= totalAds; step += 1) {
+          setMessage(totalAds > 1 ? `Ad ${step}/${totalAds} — complete it to continue.` : 'Complete the ad to continue.');
+          await showMonetag();
+          const progress = await markTestAdStep(sessionId, initData);
+          if (step < totalAds && progress.complete) throw new Error('Ad sequence completed earlier than expected.');
+        }
+
+        const claimed = await api(`/api/ads/claim/${sessionId}`, { method: 'POST', initData });
+        onUserUpdate?.(claimed.user);
+        setAdCount(c => c + 1);
+        setActiveAdCampaign(null);
+        setMessage(Number(claimed.reward || 0) > 0 ? `+${Number(claimed.reward).toFixed(4)} MAI received.` : 'Monetag test sequence completed.');
         await loadTasks();
         return;
       }
@@ -802,7 +864,7 @@ export default function Tasks({ initData, onUserUpdate }) {
                 <div className="task-icon ad-icon"><PremiumTaskIcon name="ad" /></div>
                 <div className="task-info">
                   <b>{campaign.name || 'Sponsored Ad'}</b>
-                  <span>Reward +{smartNumber(campaign.reward, 4)} MAI · Daily {Number(campaign.completed || 0)}/{Number(campaign.limit || 0)}</span>
+                  <span>{String(campaign.provider || 'adsgram').toUpperCase()} · {Number(campaign.adsPerClaim || 1)} Ad{Number(campaign.adsPerClaim || 1) > 1 ? 's' : ''} · Reward +{smartNumber(campaign.reward, 4)} MAI · Daily {Number(campaign.completed || 0)}/{Number(campaign.limit || 0)}</span>
                 </div>
                 <button
                   className="task-btn"

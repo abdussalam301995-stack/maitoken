@@ -3160,7 +3160,8 @@ if (
           created_by TEXT,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          admin_hidden BOOLEAN NOT NULL DEFAULT FALSE
+          admin_hidden BOOLEAN NOT NULL DEFAULT FALSE,
+          ads_per_claim INTEGER NOT NULL DEFAULT 1 CHECK(ads_per_claim BETWEEN 1 AND 3)
         );
       `);
 
@@ -3170,6 +3171,9 @@ if (
       await pool.query(`ALTER TABLE ad_sessions ADD COLUMN IF NOT EXISTS cooldown_snapshot INTEGER`);
       await pool.query(`ALTER TABLE ad_sessions ADD COLUMN IF NOT EXISTS block_id_snapshot TEXT`);
       await pool.query(`ALTER TABLE ad_sessions ADD COLUMN IF NOT EXISTS mode_snapshot TEXT`);
+      await pool.query(`ALTER TABLE ad_campaigns ADD COLUMN IF NOT EXISTS ads_per_claim INTEGER NOT NULL DEFAULT 1`);
+      await pool.query(`ALTER TABLE ad_sessions ADD COLUMN IF NOT EXISTS sequence_total INTEGER NOT NULL DEFAULT 1`);
+      await pool.query(`ALTER TABLE ad_sessions ADD COLUMN IF NOT EXISTS sequence_completed INTEGER NOT NULL DEFAULT 0`);
 
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_ad_campaigns_status ON ad_campaigns(status, admin_hidden)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_ad_sessions_campaign ON ad_sessions(campaign_id)`);
@@ -6665,7 +6669,7 @@ await pool.query(`
 
 
       const activeAdRows = (await pool.query(`
-        SELECT c.id,c.name,c.provider,c.block_id,c.reward,c.daily_limit,c.cooldown_seconds,c.mode,
+        SELECT c.id,c.name,c.provider,c.block_id,c.reward,c.daily_limit,c.cooldown_seconds,c.mode,c.ads_per_claim,
           COUNT(s.id) FILTER (WHERE s.claimed_at IS NOT NULL)::int AS completed
         FROM ad_campaigns c
         LEFT JOIN ad_sessions s
@@ -6686,6 +6690,7 @@ await pool.query(`
         remaining: Math.max(0, Number(row.daily_limit || 0) - Number(row.completed || 0)),
         cooldown: Number(row.cooldown_seconds || 0),
         mode: row.mode,
+        adsPerClaim: Math.max(1, Math.min(3, Number(row.ads_per_claim || 1))),
         resetAt: nextUtcResetAt()
       }));
 
@@ -6694,7 +6699,7 @@ await pool.query(`
         const campaignCount = Number((await pool.query(`SELECT COUNT(*)::int AS c FROM ad_campaigns WHERE COALESCE(admin_hidden,FALSE)=FALSE`)).rows[0]?.c || 0);
         if (campaignCount === 0 && cfg.adsgramBlockId) {
           const fallbackCount = Number((await pool.query(`SELECT COUNT(*)::int AS c FROM ad_sessions WHERE telegram_id=$1 AND day=$2 AND campaign_id IS NULL AND claimed_at IS NOT NULL`,[userId,day])).rows[0]?.c || 0);
-          adCampaigns.push({id:null,name:'MAI Rewarded Ads',provider:'adsgram',blockId:cfg.adsgramBlockId,reward:cfg.adReward,limit:cfg.adDailyLimit,completed:fallbackCount,remaining:Math.max(0,cfg.adDailyLimit-fallbackCount),cooldown:cfg.adCooldown,mode:(cfg.adProviderMode==='adsgram_test'||cfg.adsgramDebug)?'test':'production',resetAt:nextUtcResetAt()});
+          adCampaigns.push({id:null,name:'MAI Rewarded Ads',provider:'adsgram',blockId:cfg.adsgramBlockId,reward:cfg.adReward,limit:cfg.adDailyLimit,completed:fallbackCount,remaining:Math.max(0,cfg.adDailyLimit-fallbackCount),cooldown:cfg.adCooldown,mode:(cfg.adProviderMode==='adsgram_test'||cfg.adsgramDebug)?'test':'production',adsPerClaim:1,resetAt:nextUtcResetAt()});
         }
       }
 
@@ -7167,17 +7172,20 @@ await pool.query(`
       const dailyLimit=Math.trunc(Number(b.dailyLimit));
       const cooldown=Math.trunc(Number(b.cooldownSeconds));
       const mode=String(b.mode||'test').toLowerCase();
+      const adsPerClaim=Math.trunc(Number(b.adsPerClaim||1));
       if(!name) return res.status(400).json({success:false,message:'Ad name is required.'});
-      if(provider!=='adsgram') return res.status(400).json({success:false,message:'Only AdsGram is supported by the current Mini App integration.'});
-      if(!blockId || !/^\d+$/.test(blockId)) return res.status(400).json({success:false,message:'A valid numeric AdsGram Block ID is required.'});
+      if(!['adsgram','monetag'].includes(provider)) return res.status(400).json({success:false,message:'Provider must be AdsGram or Monetag.'});
+      if(!blockId || !/^\d+$/.test(blockId)) return res.status(400).json({success:false,message:provider==='monetag'?'A valid numeric Monetag Zone ID is required.':'A valid numeric AdsGram Block ID is required.'});
+      if(!Number.isInteger(adsPerClaim) || adsPerClaim<1 || adsPerClaim>3) return res.status(400).json({success:false,message:'Ads per claim must be 1, 2, or 3.'});
       if(!Number.isFinite(reward) || reward<0 || reward>1000000) return res.status(400).json({success:false,message:'Reward must be between 0 and 1,000,000 MAI.'});
       if(!Number.isInteger(dailyLimit) || dailyLimit<1 || dailyLimit>1000) return res.status(400).json({success:false,message:'Daily limit must be between 1 and 1000.'});
       if(!Number.isInteger(cooldown) || cooldown<0 || cooldown>86400) return res.status(400).json({success:false,message:'Cooldown must be between 0 and 86400 seconds.'});
       if(!['test','production'].includes(mode)) return res.status(400).json({success:false,message:'Mode must be test or production.'});
+      if(provider==='monetag' && mode==='test' && reward!==0) return res.status(400).json({success:false,message:'Monetag test campaigns must use 0 MAI reward until secure server-side postback verification is configured.'});
       // Production campaigns may be prepared here, but cannot be activated until
       // a server-confirmed AdsGram production reward callback is implemented.
-      const r=await pool.query(`INSERT INTO ad_campaigns(name,provider,block_id,reward,daily_limit,cooldown_seconds,mode,status,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,'paused',$8) RETURNING *`,[name,provider,blockId,reward,dailyLimit,cooldown,mode,req.admin?.telegramId||'server-admin']);
-      await pool.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,metadata,ip_hash) VALUES($1,'ad_campaign_created','ad_campaign',$2,$3,$4)`,[req.admin?.telegramId||null,String(r.rows[0].id),{name,provider,blockId,reward,dailyLimit,cooldown,mode},hash(req.ip).slice(0,32)]);
+      const r=await pool.query(`INSERT INTO ad_campaigns(name,provider,block_id,reward,daily_limit,cooldown_seconds,mode,status,created_by,ads_per_claim) VALUES($1,$2,$3,$4,$5,$6,$7,'paused',$8,$9) RETURNING *`,[name,provider,blockId,reward,dailyLimit,cooldown,mode,req.admin?.telegramId||'server-admin',adsPerClaim]);
+      await pool.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,metadata,ip_hash) VALUES($1,'ad_campaign_created','ad_campaign',$2,$3,$4)`,[req.admin?.telegramId||null,String(r.rows[0].id),{name,provider,blockId,reward,dailyLimit,cooldown,mode,adsPerClaim},hash(req.ip).slice(0,32)]);
       res.json({success:true,item:r.rows[0]});
     }catch(e){next(e)}});
 
@@ -7191,9 +7199,13 @@ await pool.query(`
       const dailyLimit=Math.trunc(Number(b.dailyLimit ?? current.daily_limit));
       const cooldown=Math.trunc(Number(b.cooldownSeconds ?? current.cooldown_seconds));
       const mode=String(b.mode ?? current.mode).toLowerCase();
+      const provider=String(b.provider ?? current.provider).trim().toLowerCase();
+      const adsPerClaim=Math.trunc(Number(b.adsPerClaim ?? current.ads_per_claim ?? 1));
+      if(!['adsgram','monetag'].includes(provider) || !Number.isInteger(adsPerClaim) || adsPerClaim<1 || adsPerClaim>3) return res.status(400).json({success:false,message:'Invalid provider or ads-per-claim setting.'});
       if(!name || !/^\d+$/.test(blockId) || !Number.isFinite(reward) || reward<0 || reward>1000000 || !Number.isInteger(dailyLimit) || dailyLimit<1 || dailyLimit>1000 || !Number.isInteger(cooldown) || cooldown<0 || cooldown>86400 || !['test','production'].includes(mode)) return res.status(400).json({success:false,message:'Invalid ad campaign settings.'});
-      const r=await pool.query(`UPDATE ad_campaigns SET name=$2,block_id=$3,reward=$4,daily_limit=$5,cooldown_seconds=$6,mode=$7,updated_at=NOW() WHERE id=$1 RETURNING *`,[req.params.id,name,blockId,reward,dailyLimit,cooldown,mode]);
-      await pool.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,metadata,ip_hash) VALUES($1,'ad_campaign_updated','ad_campaign',$2,$3,$4)`,[req.admin?.telegramId||null,String(req.params.id),{name,blockId,reward,dailyLimit,cooldown,mode},hash(req.ip).slice(0,32)]);
+      if(provider==='monetag' && mode==='test' && reward!==0) return res.status(400).json({success:false,message:'Monetag test campaigns must use 0 MAI reward until secure server-side postback verification is configured.'});
+      const r=await pool.query(`UPDATE ad_campaigns SET name=$2,block_id=$3,reward=$4,daily_limit=$5,cooldown_seconds=$6,mode=$7,provider=$8,ads_per_claim=$9,updated_at=NOW() WHERE id=$1 RETURNING *`,[req.params.id,name,blockId,reward,dailyLimit,cooldown,mode,provider,adsPerClaim]);
+      await pool.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,metadata,ip_hash) VALUES($1,'ad_campaign_updated','ad_campaign',$2,$3,$4)`,[req.admin?.telegramId||null,String(req.params.id),{name,provider,blockId,reward,dailyLimit,cooldown,mode,adsPerClaim},hash(req.ip).slice(0,32)]);
       res.json({success:true,item:r.rows[0]});
     }catch(e){next(e)}});
 
@@ -7205,7 +7217,7 @@ await pool.query(`
       if(!current){await client.query('ROLLBACK');return res.status(404).json({success:false,message:'Ad campaign not found.'});}
       if(status==='active' && current.mode==='production'){
         await client.query('ROLLBACK');
-        return res.status(409).json({success:false,message:'Production AdsGram activation is locked until secure server-side AdsGram reward confirmation is configured. Test campaigns can be activated now.'});
+        return res.status(409).json({success:false,message:'Production rewarded-ad activation is locked until secure provider-side server confirmation is configured. Test campaigns can be activated now.'});
       }
       const r=await client.query(`UPDATE ad_campaigns SET status=$2,updated_at=NOW() WHERE id=$1 RETURNING *`,[req.params.id,status]);
       await client.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,metadata,ip_hash) VALUES($1,'ad_campaign_status_changed','ad_campaign',$2,$3,$4)`,[req.admin?.telegramId||null,String(req.params.id),{status,mode:current.mode,blockId:current.block_id},hash(req.ip).slice(0,32)]);
@@ -9976,7 +9988,7 @@ await pool.query(`
     async function activeAdCampaign(campaignId = null, client = pool) {
       if (campaignId !== null && campaignId !== undefined && String(campaignId).trim() !== '') {
         const result = await client.query(`
-          SELECT id,name,provider,block_id,reward,daily_limit,cooldown_seconds,mode,status
+          SELECT id,name,provider,block_id,reward,daily_limit,cooldown_seconds,mode,status,ads_per_claim
           FROM ad_campaigns
           WHERE id=$1 AND status='active' AND COALESCE(admin_hidden,FALSE)=FALSE
           LIMIT 1
@@ -9985,7 +9997,7 @@ await pool.query(`
       }
 
       const result = await client.query(`
-        SELECT id,name,provider,block_id,reward,daily_limit,cooldown_seconds,mode,status
+        SELECT id,name,provider,block_id,reward,daily_limit,cooldown_seconds,mode,status,ads_per_claim
         FROM ad_campaigns
         WHERE status='active' AND COALESCE(admin_hidden,FALSE)=FALSE
         ORDER BY updated_at DESC,id DESC
@@ -10177,11 +10189,13 @@ await pool.query(`
               cooldown_snapshot,
               block_id_snapshot,
               mode_snapshot,
+              sequence_total,
+              sequence_completed,
               metadata
             )
 
             VALUES(
-              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10
+              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
             )
             `,
             [
@@ -10194,6 +10208,8 @@ await pool.query(`
               campaignCooldown,
               campaign.block_id || null,
               campaign.mode,
+              Math.max(1, Math.min(3, Number(campaign.ads_per_claim || 1))),
+              0,
               { campaignName: campaign.name, provider: campaign.provider }
             ]
           );
@@ -10216,9 +10232,29 @@ await pool.query(`
               reward: campaignReward,
               dailyLimit: campaignDailyLimit,
               cooldown: campaignCooldown,
+              adsPerClaim: Math.max(1, Math.min(3, Number(campaign.ads_per_claim || 1))),
               url: ''
             });
 
+          }
+
+          if (campaign.provider === 'monetag') {
+            return res.json({
+              success: true,
+              sessionId: id,
+              provider: 'monetag',
+              campaignId: campaign.id,
+              campaignName: campaign.name,
+              zoneId: campaign.block_id,
+              reward: campaignReward,
+              dailyLimit: campaignDailyLimit,
+              cooldown: campaignCooldown,
+              adsPerClaim: Math.max(1, Math.min(3, Number(campaign.ads_per_claim || 1))),
+              // Test mode only: production rewards stay activation-locked until
+              // a provider-side server confirmation/postback is configured.
+              testOnly: campaign.mode === 'test',
+              url: ''
+            });
           }
 
 
@@ -10320,51 +10356,42 @@ await pool.query(`
        server confirmation before this gate is enabled for real rewards.
        ========================================================= */
 
-    app.post(
-      '/api/ads/adsgram-complete/:id',
-      authenticate,
-      rateLimit(20, 60000),
-      async (req, res, next) => {
+    async function completeTestAdStep(req, res, next) {
+      try {
+        const client = await pool.connect();
         try {
-          const result = await pool.query(
-            `
+          await client.query('BEGIN');
+          const session = (await client.query(`
+            SELECT id,status,mode_snapshot,sequence_total,sequence_completed,metadata
+            FROM ad_sessions
+            WHERE id=$1 AND telegram_id=$2
+            FOR UPDATE
+          `,[req.params.id,req.auth.id])).rows[0];
+          if(!session){ await client.query('ROLLBACK'); return res.status(404).json({success:false,message:'Ad session not found'}); }
+          if(session.mode_snapshot!=='test'){ await client.query('ROLLBACK'); return res.status(409).json({success:false,message:'Client completion is disabled for production ads.'}); }
+          if(session.status==='claimed'){ await client.query('COMMIT'); return res.json({success:true,verified:true,complete:true,completed:Number(session.sequence_total||1),total:Number(session.sequence_total||1)}); }
+          if(session.status!=='started' && session.status!=='completed'){ await client.query('ROLLBACK'); return res.status(409).json({success:false,message:'Ad session cannot be completed'}); }
+          const total=Math.max(1,Math.min(3,Number(session.sequence_total||1)));
+          const completed=Math.min(total,Number(session.sequence_completed||0)+1);
+          const isComplete=completed>=total;
+          await client.query(`
             UPDATE ad_sessions
-            SET
-              status='completed',
-              completed_at=COALESCE(completed_at, NOW()),
-              provider_ref=COALESCE(provider_ref, 'adsgram-test')
-            WHERE
-              id=$1
-              AND telegram_id=$2
-              AND status='started'
-              AND mode_snapshot='test'
-            RETURNING id
-            `,
-            [req.params.id, req.auth.id]
-          );
+            SET sequence_completed=$3,
+                status=CASE WHEN $4 THEN 'completed' ELSE 'started' END,
+                completed_at=CASE WHEN $4 THEN COALESCE(completed_at,NOW()) ELSE completed_at END,
+                provider_ref=COALESCE(provider_ref,$5)
+            WHERE id=$1 AND telegram_id=$2
+          `,[req.params.id,req.auth.id,completed,isComplete,`${String(session.metadata?.provider||'ad')}-test`]);
+          await client.query('COMMIT');
+          return res.json({success:true,verified:isComplete,complete:isComplete,completed,total,remaining:Math.max(0,total-completed)});
+        } catch(e){ try{await client.query('ROLLBACK')}catch{}; throw e; }
+        finally{ client.release(); }
+      } catch(error){ next(error); }
+    }
 
-          if (!result.rowCount) {
-            const existing = await pool.query(
-              `SELECT status FROM ad_sessions WHERE id=$1 AND telegram_id=$2`,
-              [req.params.id, req.auth.id]
-            );
-
-            if (!existing.rowCount) {
-              return res.status(404).json({ success:false, message:'Ad session not found' });
-            }
-
-            if (!['completed', 'claimed'].includes(existing.rows[0].status)) {
-              return res.status(409).json({ success:false, message:'Ad session cannot be completed' });
-            }
-          }
-
-          return res.json({ success:true, verified:true, provider:'adsgram-test' });
-        } catch (error) {
-          next(error);
-        }
-      }
-    );
-
+    app.post('/api/ads/test-step-complete/:id', authenticate, rateLimit(30,60000), completeTestAdStep);
+    // Backward-compatible alias for already deployed AdsGram test clients.
+    app.post('/api/ads/adsgram-complete/:id', authenticate, rateLimit(30,60000), completeTestAdStep);
 
     /* =========================================================
        ADS WEBHOOK
