@@ -14093,3 +14093,86 @@ body.maiAdminOpen .adminPanel.adminV4 {
   .adminV4 .adminModalActions{display:grid;grid-template-columns:1fr 1fr}
   .adminV4 .adminModalActions button{width:100%}
 }
+
+
+/* =========================================================
+   MAI ADMIN — ADMIN PROTECTION / LOGO / MOBILE KEYBOARD FIX
+   2026-09-24
+   Keep this block LAST in App.css.
+   ========================================================= */
+.adminV4 .adminBrandMark {
+  overflow: hidden !important;
+  padding: 0 !important;
+  background: #fff !important;
+  border-color: rgba(247, 201, 107, .48) !important;
+  box-shadow: 0 0 0 1px rgba(247,201,107,.08), 0 8px 22px rgba(0,0,0,.24) !important;
+}
+.adminV4 .adminBrandMark > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  border-radius: inherit;
+  pointer-events: none;
+  user-select: none;
+}
+.adminV4 .adminProtectedBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 1px solid rgba(247,201,107,.28);
+  border-radius: 10px;
+  background: rgba(247,201,107,.07);
+  color: var(--admin-amber);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+/* Telegram Android WebView: avoid a fixed #root while the software
+   keyboard is resizing the visual viewport. Nested fixed roots + modal
+   scroll surfaces can leave later text controls focused but unable to
+   reopen the IME after an Ad composer closes. */
+@media (max-width: 959px) {
+  body.maiAdminOpen #root {
+    position: relative !important;
+    inset: auto !important;
+    height: auto !important;
+    min-height: 100dvh !important;
+    max-height: none !important;
+    overflow-x: hidden !important;
+    overflow-y: visible !important;
+  }
+
+  body.maiAdminOpen {
+    height: auto !important;
+    min-height: 100dvh !important;
+    max-height: none !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
+
+  .adminV4 .adminModalBackdrop {
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .adminV4 .adminModal.adminAdComposer {
+    max-height: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    overflow-y: auto !important;
+    overscroll-behavior-y: contain !important;
+  }
+
+  .adminV4 .adminAdComposer input,
+  .adminV4 .adminAdComposer textarea,
+  .adminV4 .adminAdComposer select,
+  .adminV4 input,
+  .adminV4 textarea,
+  .adminV4 select {
+    touch-action: manipulation !important;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+}

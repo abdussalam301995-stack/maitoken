@@ -360,7 +360,30 @@
         return String(reason || '').trim();
       };
 
+      const isProtectedAdmin = user => Boolean(user?.is_admin);
+
+      const releaseAdminInputFocus = () => {
+        try {
+          const active = document.activeElement;
+          if (active && typeof active.blur === 'function') active.blur();
+          window.getSelection?.()?.removeAllRanges?.();
+          window.requestAnimationFrame(() => {
+            try { tg()?.expand?.(); } catch (e) {}
+          });
+        } catch (e) {}
+      };
+
+      const closeAdComposer = () => {
+        releaseAdminInputFocus();
+        setAdComposerOpen(false);
+        resetAdForm();
+      };
+
       const banUser = user => {
+        if (isProtectedAdmin(user)) {
+          setError('Protected admin accounts cannot be banned.');
+          return;
+        }
         const reason = askReason(`Ban ${user.first_name || user.telegram_id}?`);
         if (!reason) return;
         runAction(
@@ -371,6 +394,10 @@
       };
 
       const suspendUser = user => {
+        if (isProtectedAdmin(user)) {
+          setError('Protected admin accounts cannot be suspended.');
+          return;
+        }
         const reason = askReason(`Suspend ${user.first_name || user.telegram_id}?`);
         if (!reason) return;
 
@@ -694,7 +721,9 @@
                   </button>
                   <button className="adminMessageBtn" onClick={() => messageUser(user)}>Message</button>
 
-                  {user.account_status === 'active' ? (
+                  {isProtectedAdmin(user) ? (
+                    <span className="adminProtectedBadge">🔒 Protected Admin</span>
+                  ) : user.account_status === 'active' ? (
                     <>
                       <button className="warn" onClick={() => suspendUser(user)}>Suspend</button>
                       <button className="danger" onClick={() => banUser(user)}>Ban</button>
@@ -1161,7 +1190,8 @@
         try {
           await adminApi(adEditingId ? `/admin/ads/${adEditingId}` : '/admin/ads',{method:adEditingId?'PATCH':'POST',body:JSON.stringify(payload)});
           setNotice(adEditingId ? 'Ad campaign updated.' : 'New ad campaign created as Paused.');
-          setAdComposerOpen(false); resetAdForm(); await loadAll(true);
+          closeAdComposer();
+          await loadAll(true);
         } catch(e){ setError(e.message); } finally { setBusy(''); }
       };
 
@@ -1219,19 +1249,19 @@
           </section>
 
           {adComposerOpen && <div className="adminModalBackdrop"><div className="adminModal adminAdComposer">
-            <div className="adminModalHead"><div><span>ADS MANAGEMENT</span><h3>{adEditingId?'Edit Ad Campaign':'Create New Ad Campaign'}</h3></div><button onClick={()=>{setAdComposerOpen(false);resetAdForm()}}>×</button></div>
+            <div className="adminModalHead"><div><span>ADS MANAGEMENT</span><h3>{adEditingId?'Edit Ad Campaign':'Create New Ad Campaign'}</h3></div><button onClick={closeAdComposer}>×</button></div>
             <div className="adminFormGrid">
-              <label className="wide"><span>Campaign Name</span><input value={adForm.name} onChange={e=>setAdForm({...adForm,name:e.target.value})} placeholder="MAI Rewarded Ads" /></label>
+              <label className="wide"><span>Campaign Name</span><input value={adForm.name} onChange={e=>setAdForm(old=>({...old,name:e.target.value}))} placeholder="MAI Rewarded Ads" /></label>
               <label><span>Provider</span><select value={adForm.provider} onChange={e=>setAdForm({...adForm,provider:e.target.value,reward:e.target.value==='monetag'&&adForm.mode==='test'?'0':adForm.reward})}><option value="adsgram">AdsGram</option><option value="monetag">Monetag</option></select></label>
-              <label><span>{adForm.provider==='monetag'?'Monetag Zone ID':'AdsGram Block ID'}</span><input inputMode="numeric" value={adForm.blockId} onChange={e=>setAdForm({...adForm,blockId:e.target.value.replace(/\D/g,'')})} placeholder={adForm.provider==='monetag'?'Zone ID':'49496'} /></label>
-              <label><span>Reward (MAI)</span><input type="number" min="0" step="0.0001" value={adForm.reward} onChange={e=>setAdForm({...adForm,reward:e.target.value})} /></label>
-              <label><span>Daily Limit</span><input type="number" min="1" max="1000" value={adForm.dailyLimit} onChange={e=>setAdForm({...adForm,dailyLimit:e.target.value})} /></label>
-              <label><span>Cooldown (seconds)</span><input type="number" min="0" max="86400" value={adForm.cooldownSeconds} onChange={e=>setAdForm({...adForm,cooldownSeconds:e.target.value})} /></label>
-              <label><span>Ads per Claim</span><select value={adForm.adsPerClaim} onChange={e=>setAdForm({...adForm,adsPerClaim:e.target.value})}><option value="1">1 Ad</option><option value="2">2 Ads Auto Sequence</option><option value="3">3 Ads Auto Sequence</option></select></label>
+              <label><span>{adForm.provider==='monetag'?'Monetag Zone ID':'AdsGram Block ID'}</span><input inputMode="numeric" value={adForm.blockId} onChange={e=>setAdForm(old=>({...old,blockId:e.target.value.replace(/\D/g,'')}))} placeholder={adForm.provider==='monetag'?'Zone ID':'49496'} /></label>
+              <label><span>Reward (MAI)</span><input type="number" min="0" step="0.0001" value={adForm.reward} onChange={e=>setAdForm(old=>({...old,reward:e.target.value}))} /></label>
+              <label><span>Daily Limit</span><input type="number" min="1" max="1000" value={adForm.dailyLimit} onChange={e=>setAdForm(old=>({...old,dailyLimit:e.target.value}))} /></label>
+              <label><span>Cooldown (seconds)</span><input type="number" min="0" max="86400" value={adForm.cooldownSeconds} onChange={e=>setAdForm(old=>({...old,cooldownSeconds:e.target.value}))} /></label>
+              <label><span>Ads per Claim</span><select value={adForm.adsPerClaim} onChange={e=>setAdForm(old=>({...old,adsPerClaim:e.target.value}))}><option value="1">1 Ad</option><option value="2">2 Ads Auto Sequence</option><option value="3">3 Ads Auto Sequence</option></select></label>
               <label><span>Mode</span><select value={adForm.mode} onChange={e=>setAdForm({...adForm,mode:e.target.value,reward:adForm.provider==='monetag'&&e.target.value==='test'?'0':adForm.reward})}><option value="test">Test / Integration</option><option value="production">Production</option></select></label>
             </div>
             <div className="adminAdSafety"><b>Security</b><span>New campaigns are created Paused. AdsGram test sequences can reward during testing. Monetag test campaigns are restricted to 0 MAI; production rewards stay locked until secure provider-side postback verification is configured.</span></div>
-            <div className="adminModalActions"><button onClick={()=>{setAdComposerOpen(false);resetAdForm()}}>Cancel</button><button className="primary" onClick={saveAdCampaign} disabled={busy==='ad-save'}>{busy==='ad-save'?'Saving…':adEditingId?'Save Changes':'Create Campaign'}</button></div>
+            <div className="adminModalActions"><button onClick={closeAdComposer}>Cancel</button><button className="primary" onClick={saveAdCampaign} disabled={busy==='ad-save'}>{busy==='ad-save'?'Saving…':adEditingId?'Save Changes':'Create Campaign'}</button></div>
           </div></div>}
         </>;
       };
@@ -1945,7 +1975,7 @@
 
           <aside className="adminSidebar">
             <div className="adminBrand">
-              <div className="adminBrandMark"><span>M</span><i>◆</i></div>
+              <div className="adminBrandMark"><img src="/mai-admin-logo.png" alt="MAI" /></div>
               <div>
                 <b>MAI NETWORK</b>
                 <span>Admin Command Center</span>
@@ -2258,7 +2288,9 @@
 
                     <div className="adminInspectorActions">
                       <button onClick={() => messageUser(userDetail.user)}>Message</button>
-                      {userDetail.user?.account_status === 'active' ? (
+                      {isProtectedAdmin(userDetail.user) ? (
+                        <span className="adminProtectedBadge">🔒 Protected Admin</span>
+                      ) : userDetail.user?.account_status === 'active' ? (
                         <>
                           <button className="warn" onClick={() => suspendUser(userDetail.user)}>Suspend</button>
                           <button className="danger" onClick={() => banUser(userDetail.user)}>Ban</button>

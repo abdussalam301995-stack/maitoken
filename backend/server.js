@@ -133,6 +133,9 @@
       .filter(id => /^\d+$/.test(id))
   );
 
+    const isProtectedAdminTelegramId = value =>
+      ADMIN_TELEGRAM_IDS.has(String(value || '').trim());
+
     // SECURITY: Telegram adds this value to every genuine webhook request.
     // Configure TELEGRAM_WEBHOOK_SECRET in Render with 32+ random characters.
     const TELEGRAM_WEBHOOK_SECRET =
@@ -17344,7 +17347,10 @@ app.get(
 
       res.json({
         success: true,
-        items: result.rows
+        items: result.rows.map(row => ({
+          ...row,
+          is_admin: isProtectedAdminTelegramId(row.telegram_id)
+        }))
       });
 
     } catch (error) {
@@ -17477,8 +17483,10 @@ app.get(
       res.json({
         success: true,
 
-        user:
-          userResult.rows[0],
+        user: {
+          ...userResult.rows[0],
+          is_admin: isProtectedAdminTelegramId(userResult.rows[0]?.telegram_id)
+        },
 
         security: {
           devices:
@@ -17520,7 +17528,7 @@ app.get(
           const reason = String(req.body?.reason || '').trim().slice(0,1000);
           if (!/^\d+$/.test(telegramId)) return res.status(400).json({success:false,message:'Invalid Telegram user id'});
           if (!reason) return res.status(400).json({success:false,message:'Reason is required'});
-          if (telegramId === String(req.auth.id)) return res.status(409).json({success:false,message:'You cannot ban your own admin account'});
+          if (isProtectedAdminTelegramId(telegramId)) return res.status(409).json({success:false,message:'Protected admin accounts cannot be banned'});
 
           const result = await pool.query(
             `UPDATE users
@@ -17555,7 +17563,7 @@ app.get(
           if (!/^\d+$/.test(telegramId)) return res.status(400).json({success:false,message:'Invalid Telegram user id'});
           if (!reason) return res.status(400).json({success:false,message:'Reason is required'});
           if (!untilRaw || Number.isNaN(until.getTime()) || until.getTime() <= Date.now()) return res.status(400).json({success:false,message:'A valid future suspension time is required'});
-          if (telegramId === String(req.auth.id)) return res.status(409).json({success:false,message:'You cannot suspend your own admin account'});
+          if (isProtectedAdminTelegramId(telegramId)) return res.status(409).json({success:false,message:'Protected admin accounts cannot be suspended'});
 
           const result = await pool.query(
             `UPDATE users
