@@ -14293,3 +14293,130 @@ body.maiAdminOpen .adminPanel.adminV4 {
     padding-right: 4px !important;
   }
 }
+
+/* =========================================================
+   MAI ADMIN — TOUCH IME + TRUE FULL-BLEED V7
+   2026-09-24
+   - Touch phones stay keyboard-resizable even in Telegram Desktop View.
+   - Real desktop >=960px keeps the existing sidebar/workspace grid.
+   - While Admin is open, remove the parent Mini App 520px shell/gutters so
+     the Admin surface owns the full available width.
+   - No task/reward/payment/business logic is changed here.
+   ========================================================= */
+html.maiAdminOpen.maiAdminTouchDevice,
+body.maiAdminOpen.maiAdminTouchDevice {
+  width: 100% !important;
+  max-width: none !important;
+  height: auto !important;
+  min-height: 100% !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior-y: auto !important;
+  background: #061019 !important;
+}
+
+body.maiAdminOpen.maiAdminTouchDevice #root {
+  position: relative !important;
+  inset: auto !important;
+  width: 100% !important;
+  max-width: none !important;
+  height: auto !important;
+  min-height: 100dvh !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  background: #061019 !important;
+}
+
+/* Break Admin out of the normal Mini App max-width/padded shell. */
+body.maiAdminOpen.maiAdminTouchDevice .app {
+  width: 100% !important;
+  max-width: none !important;
+  min-height: 100dvh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  background: #061019 !important;
+}
+
+body.maiAdminOpen.maiAdminTouchDevice .adminPanel.adminV4 {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  background:
+    radial-gradient(circle at 82% 3%, rgba(0,174,194,.09), transparent 30%),
+    radial-gradient(circle at 25% 100%, rgba(14,116,144,.08), transparent 32%),
+    #061019 !important;
+}
+
+/* Normal phone/tablet view: full-width Admin with natural keyboard resize. */
+@media (max-width: 959px) {
+  body.maiAdminOpen.maiAdminTouchDevice .adminPanel.adminV4 {
+    position: relative !important;
+    inset: auto !important;
+    min-height: 100dvh !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow-x: hidden !important;
+    overflow-y: visible !important;
+  }
+
+  body.maiAdminOpen.maiAdminTouchDevice .adminWorkspace {
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  body.maiAdminOpen.maiAdminTouchDevice .adminContent {
+    width: 100% !important;
+    max-width: none !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  /* Keep readable inner spacing on cards/sections, but remove the outer
+     Mini App strip so the Admin background reaches both screen edges. */
+  body.maiAdminOpen.maiAdminTouchDevice .adminContent > * {
+    max-width: 100% !important;
+  }
+}
+
+/* Phone using Telegram Desktop View: preserve the existing desktop grid,
+   but make the root/document keyboard-resizable and keep the Ad modal in
+   normal flow so closing/activating it cannot poison later IME focus. */
+@media (min-width: 960px) {
+  body.maiAdminOpen.maiAdminTouchDevice .adminPanel.adminV4 {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
+  body.maiAdminOpen.maiAdminTouchDevice .adminModalBackdrop.adminAdComposerBackdrop {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    min-height: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  body.maiAdminOpen.maiAdminTouchDevice .adminModalBackdrop.adminAdComposerBackdrop .adminModal.adminAdComposer {
+    position: relative !important;
+    width: min(680px, calc(100% - 20px)) !important;
+    max-width: 680px !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 12px auto !important;
+    transform: none !important;
+  }
+}
+

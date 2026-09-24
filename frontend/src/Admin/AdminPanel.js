@@ -254,17 +254,27 @@
         loadAll();
       }, [loadAll]);
 
-      // Admin Command Center should use the largest Telegram viewport available.
-      // expand() is widely supported. requestFullscreen() is used only when the
-      // current Telegram client exposes it; failures are intentionally ignored.
+      const isTouchAdminDevice = () => {
+        try {
+          return Number(navigator.maxTouchPoints || 0) > 0 ||
+            window.matchMedia?.('(hover: none) and (pointer: coarse)')?.matches === true;
+        } catch (e) {
+          return false;
+        }
+      };
+
+      // Keep the desktop command-center shell unchanged. On touch devices,
+      // including Telegram's phone "Desktop View", avoid fullscreen/root locks
+      // that can leave Android's IME unable to reopen after an Ad modal closes.
       useEffect(() => {
         const web = tg();
+        const touchAdminDevice = isTouchAdminDevice();
 
         try {
           web?.ready?.();
           web?.expand?.();
 
-          if (typeof web?.requestFullscreen === 'function') {
+          if (!touchAdminDevice && typeof web?.requestFullscreen === 'function') {
             web.requestFullscreen();
           }
         } catch (e) {
@@ -277,13 +287,18 @@
 
         document.documentElement.classList.add('maiAdminOpen');
         document.body.classList.add('maiAdminOpen');
-        document.documentElement.style.overflow = 'hidden';
-        document.body.style.overflow = 'hidden';
-        document.body.style.overscrollBehavior = 'none';
+        if (touchAdminDevice) {
+          document.documentElement.classList.add('maiAdminTouchDevice');
+          document.body.classList.add('maiAdminTouchDevice');
+        } else {
+          document.documentElement.style.overflow = 'hidden';
+          document.body.style.overflow = 'hidden';
+          document.body.style.overscrollBehavior = 'none';
+        }
 
         return () => {
-          document.documentElement.classList.remove('maiAdminOpen');
-          document.body.classList.remove('maiAdminOpen');
+          document.documentElement.classList.remove('maiAdminOpen', 'maiAdminTouchDevice');
+          document.body.classList.remove('maiAdminOpen', 'maiAdminTouchDevice');
           document.documentElement.style.overflow = previousHtmlOverflow;
           document.body.style.overflow = previousBodyOverflow;
           document.body.style.overscrollBehavior = previousBodyOverscroll;
@@ -383,9 +398,14 @@
           const active = document.activeElement;
           if (active && typeof active.blur === 'function') active.blur();
           window.getSelection?.()?.removeAllRanges?.();
-          window.requestAnimationFrame(() => {
-            try { tg()?.expand?.(); } catch (e) {}
-          });
+
+          // Re-expanding immediately after a modal closes can strand the Android
+          // keyboard in Telegram Desktop View. Real desktop keeps old behavior.
+          if (!isTouchAdminDevice()) {
+            window.requestAnimationFrame(() => {
+              try { tg()?.expand?.(); } catch (e) {}
+            });
+          }
         } catch (e) {}
       };
 
