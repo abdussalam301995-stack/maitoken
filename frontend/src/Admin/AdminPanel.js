@@ -254,26 +254,39 @@
         loadAll();
       }, [loadAll]);
 
-      // Keep Telegram expanded, but do not request fullscreen or force-lock the
-      // document scroll. Android Telegram WebView can leave its IME/focus state
-      // stuck after a form modal closes when fullscreen and body overflow locks
-      // are combined. The admin CSS class remains for scoped styling only.
+      // Admin Command Center should use the largest Telegram viewport available.
+      // expand() is widely supported. requestFullscreen() is used only when the
+      // current Telegram client exposes it; failures are intentionally ignored.
       useEffect(() => {
         const web = tg();
 
         try {
           web?.ready?.();
           web?.expand?.();
+
+          if (typeof web?.requestFullscreen === 'function') {
+            web.requestFullscreen();
+          }
         } catch (e) {
-          // Older Telegram clients may not expose every viewport helper.
+          // Older Telegram clients may not support fullscreen.
         }
+
+        const previousHtmlOverflow = document.documentElement.style.overflow;
+        const previousBodyOverflow = document.body.style.overflow;
+        const previousBodyOverscroll = document.body.style.overscrollBehavior;
 
         document.documentElement.classList.add('maiAdminOpen');
         document.body.classList.add('maiAdminOpen');
+        document.documentElement.style.overflow = 'hidden';
+        document.body.style.overflow = 'hidden';
+        document.body.style.overscrollBehavior = 'none';
 
         return () => {
           document.documentElement.classList.remove('maiAdminOpen');
           document.body.classList.remove('maiAdminOpen');
+          document.documentElement.style.overflow = previousHtmlOverflow;
+          document.body.style.overflow = previousBodyOverflow;
+          document.body.style.overscrollBehavior = previousBodyOverscroll;
         };
       }, []);
 
@@ -281,6 +294,22 @@
         setNotice(message);
         window.setTimeout(() => setNotice(''), 2600);
       };
+
+      /*
+       * Safety net for admin notices:
+       * some actions call setNotice(...) directly instead of flash(...).
+       * Always dismiss any visible admin toast so it cannot remain mounted
+       * over later form interactions in Telegram WebView.
+       */
+      useEffect(() => {
+        if (!notice) return undefined;
+
+        const noticeTimer = window.setTimeout(() => {
+          setNotice('');
+        }, 2600);
+
+        return () => window.clearTimeout(noticeTimer);
+      }, [notice]);
 
       const runAction = async (key, path, body) => {
         setBusy(key);

@@ -14231,3 +14231,21 @@ body.maiAdminOpen .adminPanel.adminV4 {
     pointer-events: auto !important;
   }
 }
+
+
+/* =========================================================
+   MAI ADMIN — NOTICE / TOAST INTERACTION SAFETY
+   Added 2026-09-24
+
+   The admin success toast is informational only. It must never capture
+   taps/clicks or interfere with input focus in Telegram WebView.
+   JavaScript also auto-dismisses every notice after 2.6 seconds.
+   ========================================================= */
+.adminV4 .adminToast,
+.adminPanel .adminToast,
+.adminToast {
+  pointer-events: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  touch-action: none !important;
+}
