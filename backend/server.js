@@ -177,6 +177,31 @@
 
 
     /* =========================================================
+       ADSGRAM PRODUCTION REWARD CALLBACK
+
+       AdsGram Reward URL sends only the Telegram user ID.
+       For production integrity, MAI accepts this callback only
+       when a strong server-only secret is configured.
+
+       IMPORTANT:
+       - Keep this secret only in Render + AdsGram Reward URL.
+       - Production callback mode is intentionally limited to
+         1 Ads/Claim because AdsGram Reward URL does not provide
+         a unique impression/session ID for idempotent 2/3-step
+         sequence confirmation.
+       ========================================================= */
+
+    const ADSGRAM_REWARD_SECRET =
+      String(
+        process.env.ADSGRAM_REWARD_SECRET ||
+        ''
+      ).trim();
+
+    const ADSGRAM_PRODUCTION_CALLBACK_ENABLED =
+      ADSGRAM_REWARD_SECRET.length >= 32;
+
+
+    /* =========================================================
        SUPPORT / COMMUNITY
        ========================================================= */
 
@@ -7219,8 +7244,18 @@ await pool.query(`
       const current=(await client.query(`SELECT * FROM ad_campaigns WHERE id=$1 AND COALESCE(admin_hidden,FALSE)=FALSE FOR UPDATE`,[req.params.id])).rows[0];
       if(!current){await client.query('ROLLBACK');return res.status(404).json({success:false,message:'Ad campaign not found.'});}
       if(status==='active' && current.mode==='production'){
-        await client.query('ROLLBACK');
-        return res.status(409).json({success:false,message:'Production rewarded-ad activation is locked until secure provider-side server confirmation is configured. Test campaigns can be activated now.'});
+        if(current.provider!=='adsgram'){
+          await client.query('ROLLBACK');
+          return res.status(409).json({success:false,message:'Production activation is not enabled for this ad provider yet.'});
+        }
+        if(!ADSGRAM_PRODUCTION_CALLBACK_ENABLED){
+          await client.query('ROLLBACK');
+          return res.status(409).json({success:false,message:'Production AdsGram activation requires ADSGRAM_REWARD_SECRET (32+ characters) and the matching AdsGram Reward URL.'});
+        }
+        if(Number(current.ads_per_claim||1)!==1){
+          await client.query('ROLLBACK');
+          return res.status(409).json({success:false,message:'Secure AdsGram Reward URL confirmation supports 1 Ad/Claim. AdsGram Reward URL provides only Telegram userId, so multi-ad sequence callbacks cannot be made safely idempotent with one block.'});
+        }
       }
       const r=await client.query(`UPDATE ad_campaigns SET status=$2,updated_at=NOW() WHERE id=$1 RETURNING *`,[req.params.id,status]);
       await client.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,metadata,ip_hash) VALUES($1,'ad_campaign_status_changed','ad_campaign',$2,$3,$4)`,[req.admin?.telegramId||null,String(req.params.id),{status,mode:current.mode,blockId:current.block_id},hash(req.ip).slice(0,32)]);
@@ -10450,6 +10485,95 @@ await pool.query(`
     app.post('/api/ads/test-step-complete/:id', authenticate, rateLimit(30,60000), completeTestAdStep);
     // Backward-compatible alias for already deployed AdsGram test clients.
     app.post('/api/ads/adsgram-complete/:id', authenticate, rateLimit(30,60000), completeTestAdStep);
+
+    /* =========================================================
+       ADSGRAM PRODUCTION REWARD CALLBACK
+
+       AdsGram calls Reward URL with a GET request after a real
+       rewarded impression. Official Reward URL only supplies the
+       Telegram user ID, so this endpoint deliberately supports
+       production campaigns configured as 1 Ads/Claim only.
+
+       Reward URL format (do not expose the real secret publicly):
+       https://<backend>/webhooks/adsgram/reward?userId=[userId]&token=<secret>
+       ========================================================= */
+
+    app.get(
+      '/webhooks/adsgram/reward',
+      rateLimit(120, 60000),
+      async (req, res, next) => {
+        const client = await pool.connect();
+
+        try {
+          if (!ADSGRAM_PRODUCTION_CALLBACK_ENABLED) {
+            return res.status(503).json({ success:false, message:'AdsGram production callback is not configured.' });
+          }
+
+          const suppliedToken = String(req.query?.token || '');
+          const expectedToken = ADSGRAM_REWARD_SECRET;
+          const suppliedBuffer = Buffer.from(suppliedToken);
+          const expectedBuffer = Buffer.from(expectedToken);
+
+          if (
+            suppliedBuffer.length !== expectedBuffer.length ||
+            !crypto.timingSafeEqual(suppliedBuffer, expectedBuffer)
+          ) {
+            return res.status(401).json({ success:false });
+          }
+
+          const telegramId = String(req.query?.userId || '').trim();
+          if (!/^\d+$/.test(telegramId)) {
+            return res.status(400).json({ success:false, message:'Invalid Telegram user ID.' });
+          }
+
+          await client.query('BEGIN');
+
+          const session = (await client.query(`
+            SELECT s.*, c.provider, c.status AS campaign_status, c.admin_hidden
+            FROM ad_sessions s
+            JOIN ad_campaigns c ON c.id=s.campaign_id
+            WHERE s.telegram_id=$1
+              AND s.mode_snapshot='production'
+              AND c.provider='adsgram'
+              AND c.status='active'
+              AND COALESCE(c.admin_hidden,FALSE)=FALSE
+              AND s.claimed_at IS NULL
+              AND s.status='started'
+              AND s.sequence_total=1
+              AND s.sequence_completed=0
+            ORDER BY s.started_at DESC
+            LIMIT 1
+            FOR UPDATE OF s
+          `,[telegramId])).rows[0];
+
+          if (!session) {
+            await client.query('ROLLBACK');
+            // Return 200 so provider retries cannot create a reward later
+            // for a callback that had no matching active MAI session.
+            return res.json({ success:true, matched:false });
+          }
+
+          await client.query(`
+            UPDATE ad_sessions
+            SET sequence_completed=1,
+                status='completed',
+                completed_at=COALESCE(completed_at,NOW()),
+                provider_ref=COALESCE(provider_ref,'adsgram-reward-url')
+            WHERE id=$1
+          `,[session.id]);
+
+          await client.query('COMMIT');
+          return res.json({ success:true, matched:true });
+
+        } catch (error) {
+          try { await client.query('ROLLBACK'); } catch {}
+          next(error);
+        } finally {
+          client.release();
+        }
+      }
+    );
+
 
     /* =========================================================
        ADS WEBHOOK
