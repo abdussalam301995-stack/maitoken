@@ -300,11 +300,42 @@ export default function Tasks({ initData, onUserUpdate }) {
           debugBannerType: 'FullscreenMedia'
         });
 
+        // AdsGram can reject back-to-back show() calls with onNonStopShow.
+        // Treat every rewarded view as a separate step: verify it first, show a
+        // short confirmation state, then allow the SDK time to settle before
+        // requesting the next rewarded banner. The final MAI reward is still
+        // granted only after every server-side sequence step is complete.
+        const waitForNextAdsgramStep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
         for (let step = 1; step <= totalAds; step += 1) {
           setMessage(totalAds > 1 ? `Ad ${step}/${totalAds} — watch to the end.` : 'Watch the ad to the end.');
-          await controller.show();
+
+          let nonStopShow = false;
+          const onNonStopShow = () => { nonStopShow = true; };
+          controller.addEventListener?.('onNonStopShow', onNonStopShow);
+
+          try {
+            await controller.show();
+          } catch (showError) {
+            if (nonStopShow) {
+              throw new Error(`AdsGram is preparing the next ad. Please wait a moment and try again.`);
+            }
+            throw showError;
+          } finally {
+            controller.removeEventListener?.('onNonStopShow', onNonStopShow);
+          }
+
+          setMessage(totalAds > 1 ? `Confirming ad ${step} with AdsGram...` : 'Confirming ad with AdsGram...');
           const progress = await markTestAdStep(sessionId, initData);
           if (step < totalAds && progress.complete) throw new Error('Ad sequence completed earlier than expected.');
+
+          if (step < totalAds) {
+            // AdsGram documents onNonStopShow for consecutive views but does not
+            // publish a required interval. This small app-side pacing avoids an
+            // immediate second show() while keeping the sequence automatic.
+            setMessage(`Ad ${step}/${totalAds} confirmed. Preparing ad ${step + 1}/${totalAds}...`);
+            await waitForNextAdsgramStep(3000);
+          }
         }
 
         const claimed = await api(`/api/ads/claim/${sessionId}`, { method: 'POST', initData });
