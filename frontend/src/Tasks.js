@@ -201,17 +201,84 @@ export default function Tasks({ initData, onUserUpdate }) {
     return () => clearInterval(id);
   }, [adSession, adSeconds]);
 
+  const loadAdsgramSdk = () =>
+    new Promise((resolve, reject) => {
+      if (window.Adsgram?.init) {
+        resolve(window.Adsgram);
+        return;
+      }
+
+      const existing = document.querySelector('script[data-mai-adsgram-sdk="1"]');
+      if (existing) {
+        existing.addEventListener('load', () => resolve(window.Adsgram), { once: true });
+        existing.addEventListener('error', () => reject(new Error('AdsGram SDK failed to load.')), { once: true });
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://sad.adsgram.ai/js/sad.min.js';
+      script.async = true;
+      script.dataset.maiAdsgramSdk = '1';
+      script.onload = () => resolve(window.Adsgram);
+      script.onerror = () => reject(new Error('AdsGram SDK failed to load.'));
+      document.head.appendChild(script);
+    });
+
   const startAd = async () => {
+    if (busy === 'ad') return;
     setMessage('');
+    setBusy('ad');
+
     try {
       const data = await api('/api/ads/start', { method: 'POST', initData });
-      setAdSession(data.sessionId);
+      const sessionId = String(data.sessionId || '');
+
+      if (!sessionId) throw new Error('Ad session was not created.');
+
+      if (data.provider === 'adsgram') {
+        const Adsgram = await loadAdsgramSdk();
+        if (!Adsgram?.init) throw new Error('AdsGram is unavailable.');
+
+        const controller = Adsgram.init({
+          blockId: String(data.blockId || '49496'),
+          debug: Boolean(data.debug),
+          debugConsole: false,
+          debugBannerType: 'FullscreenMedia'
+        });
+
+        // AdsGram resolves show() only after the rewarded ad is completed.
+        await controller.show();
+
+        // This completion endpoint is restricted by the backend to the
+        // adsgram_test provider mode. The existing claim endpoint remains
+        // authoritative and idempotent for the actual MAI credit.
+        await api(`/api/ads/adsgram-complete/${sessionId}`, {
+          method: 'POST',
+          initData
+        });
+
+        const claimed = await api(`/api/ads/claim/${sessionId}`, {
+          method: 'POST',
+          initData
+        });
+
+        onUserUpdate?.(claimed.user);
+        setAdCount(c => c + 1);
+        setMessage(`+${Number(claimed.reward || 0).toFixed(4)} MAI received.`);
+        await loadTasks();
+        return;
+      }
+
+      // Preserve the existing URL-provider flow for non-AdsGram providers.
+      setAdSession(sessionId);
       setAdUrl(String(data.url || ''));
-      // Countdown is UI guidance only. The backend/provider completion status
-      // remains authoritative for whether the reward can be claimed.
       setAdSeconds(10);
       setAdOpened(false);
-    } catch (e) { setMessage(e.message); }
+    } catch (e) {
+      setMessage(e.message);
+    } finally {
+      setBusy('');
+    }
   };
 
   const openAd = async () => {
@@ -723,7 +790,7 @@ export default function Tasks({ initData, onUserUpdate }) {
           <div className="task-card ad-card">
             <div className="task-icon ad-icon"><PremiumTaskIcon name="ad" /></div>
             <div className="task-info"><b>Sponsored Ad</b><span>10s engagement · Daily {adCount}/20</span></div>
-            <button className="task-btn" onClick={startAd} disabled={!!adSession}>{adSession ? `${adSeconds}s` : 'WATCH'}</button>
+            <button className="task-btn" onClick={startAd} disabled={!!adSession || busy === 'ad'}>{busy === 'ad' ? 'LOADING…' : adSession ? `${adSeconds}s` : 'WATCH'}</button>
           </div>
 
           <div className="task-label">SOCIAL TASKS</div>
