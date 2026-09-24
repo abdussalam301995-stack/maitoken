@@ -3192,6 +3192,30 @@ if (
         );
       }
 
+      // One-time compatibility bridge for sessions created before campaign_id
+      // existed. If exactly one visible campaign exists, those legacy sessions
+      // unambiguously belong to it, so preserve the user's current daily count
+      // and historical analytics instead of resetting them during this upgrade.
+      const visibleAdCampaigns = (await pool.query(`
+        SELECT id,reward,daily_limit,cooldown_seconds,block_id,mode
+        FROM ad_campaigns
+        WHERE COALESCE(admin_hidden,FALSE)=FALSE
+        ORDER BY id
+      `)).rows;
+      if (visibleAdCampaigns.length === 1) {
+        const only = visibleAdCampaigns[0];
+        await pool.query(`
+          UPDATE ad_sessions
+          SET campaign_id=$1,
+              reward_snapshot=COALESCE(reward_snapshot,$2),
+              daily_limit_snapshot=COALESCE(daily_limit_snapshot,$3),
+              cooldown_snapshot=COALESCE(cooldown_snapshot,$4),
+              block_id_snapshot=COALESCE(block_id_snapshot,$5),
+              mode_snapshot=COALESCE(mode_snapshot,$6)
+          WHERE campaign_id IS NULL
+        `,[only.id,only.reward,only.daily_limit,only.cooldown_seconds,only.block_id,only.mode]);
+      }
+
 
     /* =========================================================
        REFERRAL MILESTONES
@@ -6640,31 +6664,41 @@ await pool.query(`
         );
 
 
-      const adCount =
-        (
-          await pool.query(
-            `
-            SELECT
+      const activeAdRows = (await pool.query(`
+        SELECT c.id,c.name,c.provider,c.block_id,c.reward,c.daily_limit,c.cooldown_seconds,c.mode,
+          COUNT(s.id) FILTER (WHERE s.claimed_at IS NOT NULL)::int AS completed
+        FROM ad_campaigns c
+        LEFT JOIN ad_sessions s
+          ON s.campaign_id=c.id AND s.telegram_id=$1 AND s.day=$2
+        WHERE c.status='active' AND COALESCE(c.admin_hidden,FALSE)=FALSE
+        GROUP BY c.id
+        ORDER BY c.updated_at DESC,c.id DESC
+      `,[userId,day])).rows;
 
-              COUNT(*)::int AS c
+      const adCampaigns = activeAdRows.map(row => ({
+        id: String(row.id),
+        name: row.name,
+        provider: row.provider,
+        blockId: row.block_id,
+        reward: Number(row.reward || 0),
+        limit: Number(row.daily_limit || 0),
+        completed: Number(row.completed || 0),
+        remaining: Math.max(0, Number(row.daily_limit || 0) - Number(row.completed || 0)),
+        cooldown: Number(row.cooldown_seconds || 0),
+        mode: row.mode,
+        resetAt: nextUtcResetAt()
+      }));
 
-            FROM ad_sessions
+      // Bootstrap fallback only for installations that have never created an ad campaign.
+      if (!adCampaigns.length) {
+        const campaignCount = Number((await pool.query(`SELECT COUNT(*)::int AS c FROM ad_campaigns WHERE COALESCE(admin_hidden,FALSE)=FALSE`)).rows[0]?.c || 0);
+        if (campaignCount === 0 && cfg.adsgramBlockId) {
+          const fallbackCount = Number((await pool.query(`SELECT COUNT(*)::int AS c FROM ad_sessions WHERE telegram_id=$1 AND day=$2 AND campaign_id IS NULL AND claimed_at IS NOT NULL`,[userId,day])).rows[0]?.c || 0);
+          adCampaigns.push({id:null,name:'MAI Rewarded Ads',provider:'adsgram',blockId:cfg.adsgramBlockId,reward:cfg.adReward,limit:cfg.adDailyLimit,completed:fallbackCount,remaining:Math.max(0,cfg.adDailyLimit-fallbackCount),cooldown:cfg.adCooldown,mode:(cfg.adProviderMode==='adsgram_test'||cfg.adsgramDebug)?'test':'production',resetAt:nextUtcResetAt()});
+        }
+      }
 
-            WHERE
-
-              telegram_id=$1
-
-              AND day=$2
-
-              AND claimed_at
-                IS NOT NULL
-            `,
-            [
-              userId,
-              day
-            ]
-          )
-        ).rows[0].c;
+      const adCount = adCampaigns.reduce((sum,item)=>sum+Number(item.completed||0),0);
 
 
       const joins =
@@ -6731,32 +6765,10 @@ await pool.query(`
 
 
         ads: {
-
-          limit:
-            cfg.adDailyLimit,
-
-          completed:
-            adCount,
-
-          remaining:
-            Math.max(
-
-              0,
-
-              cfg.adDailyLimit -
-              adCount
-
-            ),
-
-          reward:
-            cfg.adReward,
-
-          cooldown:
-            cfg.adCooldown,
-
-          resetAt:
-            nextUtcResetAt()
-
+          campaigns: adCampaigns,
+          completed: adCount,
+          activeCount: adCampaigns.length,
+          resetAt: nextUtcResetAt()
         },
 
 
@@ -6765,8 +6777,7 @@ await pool.query(`
 
         hasIncomplete:
 
-          adCount <
-          cfg.adDailyLimit ||
+          adCampaigns.some(item => Number(item.completed||0) < Number(item.limit||0)) ||
 
           joins.some(
             task =>
@@ -7142,8 +7153,9 @@ await pool.query(`
         WHERE COALESCE(c.admin_hidden,FALSE)=FALSE
         ORDER BY CASE WHEN c.status='active' THEN 0 WHEN c.status='paused' THEN 1 ELSE 2 END,c.updated_at DESC,c.id DESC
       `)).rows;
-      const active=items.find(x=>x.status==='active') || null;
-      res.json({success:true,items,active,fallback:{reward:cfg.adReward,dailyLimit:cfg.adDailyLimit,cooldown:cfg.adCooldown,blockId:cfg.adsgramBlockId}});
+      const activeItems=items.filter(x=>x.status==='active');
+      const active=activeItems[0] || null;
+      res.json({success:true,items,active,activeItems,activeCount:activeItems.length,fallback:{reward:cfg.adReward,dailyLimit:cfg.adDailyLimit,cooldown:cfg.adCooldown,blockId:cfg.adsgramBlockId}});
     }catch(e){next(e)}});
 
     app.post('/admin/ads', authenticate, admin, async (req,res,next)=>{try{
@@ -7195,7 +7207,6 @@ await pool.query(`
         await client.query('ROLLBACK');
         return res.status(409).json({success:false,message:'Production AdsGram activation is locked until secure server-side AdsGram reward confirmation is configured. Test campaigns can be activated now.'});
       }
-      if(status==='active') await client.query(`UPDATE ad_campaigns SET status='paused',updated_at=NOW() WHERE status='active' AND id<>$1`,[req.params.id]);
       const r=await client.query(`UPDATE ad_campaigns SET status=$2,updated_at=NOW() WHERE id=$1 RETURNING *`,[req.params.id,status]);
       await client.query(`INSERT INTO admin_audit_logs(admin_id,action,target_type,target_id,metadata,ip_hash) VALUES($1,'ad_campaign_status_changed','ad_campaign',$2,$3,$4)`,[req.admin?.telegramId||null,String(req.params.id),{status,mode:current.mode,blockId:current.block_id},hash(req.ip).slice(0,32)]);
       await client.query('COMMIT');
@@ -9962,7 +9973,17 @@ await pool.query(`
        ========================================================= */
 
 
-    async function activeAdCampaign(client = pool) {
+    async function activeAdCampaign(campaignId = null, client = pool) {
+      if (campaignId !== null && campaignId !== undefined && String(campaignId).trim() !== '') {
+        const result = await client.query(`
+          SELECT id,name,provider,block_id,reward,daily_limit,cooldown_seconds,mode,status
+          FROM ad_campaigns
+          WHERE id=$1 AND status='active' AND COALESCE(admin_hidden,FALSE)=FALSE
+          LIMIT 1
+        `,[String(campaignId)]);
+        return result.rows[0] || null;
+      }
+
       const result = await client.query(`
         SELECT id,name,provider,block_id,reward,daily_limit,cooldown_seconds,mode,status
         FROM ad_campaigns
@@ -9970,17 +9991,17 @@ await pool.query(`
         ORDER BY updated_at DESC,id DESC
         LIMIT 1
       `);
-
       if (result.rowCount) return result.rows[0];
 
-      // Backward-compatible emergency fallback if no DB campaign is active.
+      // Environment fallback is bootstrap-only: use it only when no DB campaigns
+      // exist at all. Pausing every campaign must genuinely pause ads for users.
+      const count = Number((await client.query(`SELECT COUNT(*)::int AS c FROM ad_campaigns WHERE COALESCE(admin_hidden,FALSE)=FALSE`)).rows[0]?.c || 0);
+      if (count > 0) return null;
+
       return {
-        id: null,
-        name: 'Environment fallback',
+        id: null, name: 'Environment fallback',
         provider: (cfg.adProviderMode === 'adsgram' || cfg.adProviderMode === 'adsgram_test') ? 'adsgram' : cfg.adProviderMode,
-        block_id: cfg.adsgramBlockId,
-        reward: cfg.adReward,
-        daily_limit: cfg.adDailyLimit,
+        block_id: cfg.adsgramBlockId, reward: cfg.adReward, daily_limit: cfg.adDailyLimit,
         cooldown_seconds: cfg.adCooldown,
         mode: (cfg.adProviderMode === 'adsgram_test' || cfg.adsgramDebug) ? 'test' : 'production',
         status: 'active'
@@ -10012,7 +10033,11 @@ await pool.query(`
           const day =
             utcDay();
 
-          const campaign = await activeAdCampaign();
+          const requestedCampaignId = req.body?.campaignId ?? null;
+          const campaign = await activeAdCampaign(requestedCampaignId);
+          if (!campaign) {
+            return res.status(404).json({ success:false, message:'Ad campaign is not active.' });
+          }
           const campaignDailyLimit = Math.max(1, Number(campaign.daily_limit || cfg.adDailyLimit));
           const campaignCooldown = Math.max(0, Number(campaign.cooldown_seconds ?? cfg.adCooldown));
           const campaignReward = Math.max(0, Number(campaign.reward ?? cfg.adReward));
@@ -10029,15 +10054,14 @@ await pool.query(`
 
                 WHERE
                   telegram_id=$1
-
                   AND day=$2
-
-                  AND claimed_at
-                  IS NOT NULL
+                  AND campaign_id IS NOT DISTINCT FROM $3::bigint
+                  AND claimed_at IS NOT NULL
                 `,
                 [
                   req.auth.id,
-                  day
+                  day,
+                  campaign.id
                 ]
               )
             ).rows[0].c;
@@ -10080,6 +10104,7 @@ await pool.query(`
 
                 WHERE
                   telegram_id=$1
+                  AND campaign_id IS NOT DISTINCT FROM $2::bigint
 
                 ORDER BY
                   started_at DESC
@@ -10087,7 +10112,8 @@ await pool.query(`
                 LIMIT 1
                 `,
                 [
-                  req.auth.id
+                  req.auth.id,
+                  campaign.id
                 ]
               )
             ).rows[0];
@@ -10740,17 +10766,15 @@ await pool.query(`
                 FROM ad_sessions
 
                 WHERE
-
                   telegram_id=$1
-
                   AND day=$2
-
-                  AND claimed_at
-                  IS NOT NULL
+                  AND campaign_id IS NOT DISTINCT FROM $3::bigint
+                  AND claimed_at IS NOT NULL
                 `,
                 [
                   req.auth.id,
-                  ad.day
+                  ad.day,
+                  ad.campaign_id
                 ]
               )
             ).rows[0].c;

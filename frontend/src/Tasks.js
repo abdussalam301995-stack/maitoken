@@ -168,6 +168,8 @@ export default function Tasks({ initData, onUserUpdate }) {
   const [adOpened, setAdOpened] = useState(false);
   const [adUrl, setAdUrl] = useState('');
   const [adCount, setAdCount] = useState(0);
+  const [adCampaigns, setAdCampaigns] = useState([]);
+  const [activeAdCampaign, setActiveAdCampaign] = useState(null);
   const [payMethod, setPayMethod] = useState('MAI');
   const [category, setCategory] = useState('Channel');
   const [selectedTier, setSelectedTier] = useState(null);
@@ -190,6 +192,7 @@ export default function Tasks({ initData, onUserUpdate }) {
       const overview = data.tasks || {};
       setTasks(Array.isArray(overview) ? overview : (overview.joins || []));
       setAdCount(Number(overview?.ads?.completed || 0));
+      setAdCampaigns(Array.isArray(overview?.ads?.campaigns) ? overview.ads.campaigns : []);
     } catch (e) { setMessage(e.message); }
   };
 
@@ -224,16 +227,17 @@ export default function Tasks({ initData, onUserUpdate }) {
       document.head.appendChild(script);
     });
 
-  const startAd = async () => {
+  const startAd = async campaign => {
     if (busy === 'ad') return;
     setMessage('');
     setBusy('ad');
 
     try {
-      const data = await api('/api/ads/start', { method: 'POST', initData });
+      const data = await api('/api/ads/start', { method: 'POST', initData, body: { campaignId: campaign?.id ?? null } });
       const sessionId = String(data.sessionId || '');
 
       if (!sessionId) throw new Error('Ad session was not created.');
+      setActiveAdCampaign({ ...campaign, reward: Number(data.reward ?? campaign?.reward ?? 0), limit: Number(data.dailyLimit ?? campaign?.limit ?? 0) });
 
       if (data.provider === 'adsgram') {
         const Adsgram = await loadAdsgramSdk();
@@ -264,6 +268,7 @@ export default function Tasks({ initData, onUserUpdate }) {
 
         onUserUpdate?.(claimed.user);
         setAdCount(c => c + 1);
+        setActiveAdCampaign(null);
         setMessage(`+${Number(claimed.reward || 0).toFixed(4)} MAI received.`);
         await loadTasks();
         return;
@@ -306,6 +311,7 @@ export default function Tasks({ initData, onUserUpdate }) {
       setAdSession(null);
       setAdUrl('');
       setAdOpened(false);
+      setActiveAdCampaign(null);
       setMessage(`+${Number(data.reward || 0).toFixed(4)} MAI received.`);
       await loadTasks();
     } catch (e) { setMessage(e.message); }
@@ -787,11 +793,28 @@ export default function Tasks({ initData, onUserUpdate }) {
             <p>Rewards are verified by the server.</p>
           </div>
 
-          <div className="task-card ad-card">
-            <div className="task-icon ad-icon"><PremiumTaskIcon name="ad" /></div>
-            <div className="task-info"><b>Sponsored Ad</b><span>10s engagement · Daily {adCount}/20</span></div>
-            <button className="task-btn" onClick={startAd} disabled={!!adSession || busy === 'ad'}>{busy === 'ad' ? 'LOADING…' : adSession ? `${adSeconds}s` : 'WATCH'}</button>
-          </div>
+          {adCampaigns.map(campaign => {
+            const campaignBusy = busy === 'ad' && String(activeAdCampaign?.id ?? '') === String(campaign.id ?? '');
+            const campaignOpen = !!adSession && String(activeAdCampaign?.id ?? '') === String(campaign.id ?? '');
+            const exhausted = Number(campaign.completed || 0) >= Number(campaign.limit || 0);
+            return (
+              <div className="task-card ad-card" key={`ad-${campaign.id ?? campaign.blockId}`}>
+                <div className="task-icon ad-icon"><PremiumTaskIcon name="ad" /></div>
+                <div className="task-info">
+                  <b>{campaign.name || 'Sponsored Ad'}</b>
+                  <span>Reward +{smartNumber(campaign.reward, 4)} MAI · Daily {Number(campaign.completed || 0)}/{Number(campaign.limit || 0)}</span>
+                </div>
+                <button
+                  className="task-btn"
+                  onClick={() => startAd(campaign)}
+                  disabled={!!adSession || busy === 'ad' || exhausted}
+                >
+                  {exhausted ? 'DONE' : campaignBusy ? 'LOADING…' : campaignOpen ? `${adSeconds}s` : 'WATCH'}
+                </button>
+              </div>
+            );
+          })}
+          {!adCampaigns.length && <div className="task-empty-card">No active sponsored ads right now.</div>}
 
           <div className="task-label">SOCIAL TASKS</div>
           {tasks.map(task => (
@@ -820,8 +843,8 @@ export default function Tasks({ initData, onUserUpdate }) {
                 <div className="ad-countdown">{adSeconds > 0 ? `${adSeconds}s` : 'READY'}</div>
                 <p>Keep this window open, then tap Open Now and claim when the timer finishes.</p>
                 <button className="task-btn full" onClick={openAd}>{adOpened ? '✓ OPENED' : 'OPEN NOW'}</button>
-                <button className="cancel-btn" onClick={() => setAdSession(null)}>CANCEL</button>
-                <button className="gold-btn full" disabled={adSeconds > 0 || !adOpened || busy === 'ad'} onClick={claimAd}>CLAIM +2 MAI</button>
+                <button className="cancel-btn" onClick={() => { setAdSession(null); setActiveAdCampaign(null); }}>CANCEL</button>
+                <button className="gold-btn full" disabled={adSeconds > 0 || !adOpened || busy === 'ad'} onClick={claimAd}>CLAIM +{smartNumber(activeAdCampaign?.reward, 4)} MAI</button>
               </div>
             </div>
           )}

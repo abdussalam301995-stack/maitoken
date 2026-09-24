@@ -1164,10 +1164,10 @@
       };
 
       const setAdCampaignStatus = async (item,status) => {
-        const warning=status==='active' ? `Activate ${item.name}? This becomes the ad configuration used for new sessions.` : `Pause ${item.name}?`;
+        const warning=status==='active' ? `Activate ${item.name}? It will appear as an additional rewarded ad in the user Tasks tab.` : `Pause ${item.name}? It will stop appearing for new ad sessions.`;
         if(!window.confirm(warning)) return;
         setBusy(`ad-status-${item.id}`); setError('');
-        try { await adminApi(`/admin/ads/${item.id}/status`,{method:'POST',body:JSON.stringify({status})}); setNotice(status==='active'?'Ad campaign activated.':'Ad campaign paused.'); await loadAll(true); }
+        try { await adminApi(`/admin/ads/${item.id}/status`,{method:'POST',body:JSON.stringify({status})}); setNotice(status==='active'?'Ad campaign activated. Active campaigns can run together.':'Ad campaign paused.'); await loadAll(true); }
         catch(e){setError(e.message)} finally{setBusy('')}
       };
 
@@ -1187,10 +1187,10 @@
           </section>
 
           <div className="adminMetricGrid adminAdsMetrics">
-            <div className="adminMetric"><span>ACTIVE BLOCK</span><strong>{adActive?.block_id || '—'}</strong><small>{adActive?.name || 'No active campaign'}</small></div>
-            <div className="adminMetric"><span>REWARD</span><strong>{adActive ? `${fmt(adActive.reward)} MAI` : '—'}</strong><small>Server-authoritative</small></div>
-            <div className="adminMetric"><span>DAILY LIMIT</span><strong>{adActive?.daily_limit || '—'}</strong><small>Per user / UTC day</small></div>
-            <div className="adminMetric"><span>MODE</span><strong>{String(adActive?.mode || '—').toUpperCase()}</strong><small>{adActive?.mode==='test'?'AdsGram debug/test':'Production activation protected'}</small></div>
+            <div className="adminMetric"><span>ACTIVE ADS</span><strong>{adCampaigns.filter(x=>x.status==='active').length}</strong><small>Shown together in Tasks → Daily</small></div>
+            <div className="adminMetric"><span>ACTIVE BLOCKS</span><strong>{adCampaigns.filter(x=>x.status==='active').map(x=>x.block_id).join(', ') || '—'}</strong><small>Each campaign keeps its own Block ID</small></div>
+            <div className="adminMetric"><span>REWARDS PAID</span><strong>{fmt(adCampaigns.reduce((sum,x)=>sum+Number(x.rewards_paid||0),0))} MAI</strong><small>Across visible ad campaigns</small></div>
+            <div className="adminMetric"><span>MODE</span><strong>{adCampaigns.some(x=>x.status==='active'&&x.mode==='test')?'TEST':'—'}</strong><small>Production activation remains protected</small></div>
           </div>
 
           <section className="adminSection adminAdsControl">
