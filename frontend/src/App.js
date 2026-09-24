@@ -4793,11 +4793,11 @@ function Home({
   }, [refresh]);
 
   // Display-only smooth live counter. The backend remains authoritative for claims.
-  // 50ms visual ticks make the unclaimed amount move like a running timer.
+  // 100ms visual ticks keep the unclaimed amount moving like a calm digital counter.
   useEffect(() => {
     if (!user?.farm?.active) return undefined;
 
-    const tickMs = 50;
+    const tickMs = 100;
     const rewardPerTick = farmRateSecond * (tickMs / 1000);
     const timer = setInterval(() => {
       setLivePending(value => value + rewardPerTick);
@@ -5026,7 +5026,7 @@ function Home({
       <section className="unclaimedRewardCard glass" aria-live="polite">
         <span className="unclaimedRewardLabel">UNCLAIMED MINING REWARD</span>
         <div className="unclaimedRewardValue">
-          {fmtSmart(livePending, 8)}
+          {fmtSmart(livePending, 4)}
           <small>MAI</small>
         </div>
         <div className="unclaimedRewardPower">
@@ -7372,196 +7372,128 @@ function TasksPage({
 
 
   /* =======================================================
+     ADSGRAM REWARDED AD
+     Loads the official AdsGram browser SDK only when needed.
+     Existing external-provider flow remains available.
+     ======================================================= */
+
+  const loadAdsgramSdk =
+    () =>
+      new Promise((resolve, reject) => {
+        if (window.Adsgram?.init) {
+          resolve(window.Adsgram);
+          return;
+        }
+
+        const existing = document.querySelector(
+          'script[data-mai-adsgram-sdk="1"]'
+        );
+
+        if (existing) {
+          existing.addEventListener('load', () => resolve(window.Adsgram), { once: true });
+          existing.addEventListener('error', () => reject(new Error('AdsGram SDK failed to load')), { once: true });
+          return;
+        }
+
+        const script = document.createElement('script');
+        script.src = 'https://sad.adsgram.ai/js/sad.min.js';
+        script.async = true;
+        script.dataset.maiAdsgramSdk = '1';
+        script.onload = () => resolve(window.Adsgram);
+        script.onerror = () => reject(new Error('AdsGram SDK failed to load'));
+        document.head.appendChild(script);
+      });
+
+  const claimCompletedAd =
+    async sessionId => {
+      const claim = await api(
+        `/api/ads/claim/${sessionId}`,
+        { method: 'POST' }
+      );
+
+      setBoot(old => ({ ...old, user: claim.user }));
+      setTasks(claim.tasks);
+      setCooldown(Number(claim?.tasks?.ads?.cooldown || 0));
+      playReward();
+      toast(`+${fmtSmart(claim.reward, 4)} MAI`);
+    };
+
+  /* =======================================================
      WATCH AD
      ======================================================= */
 
   const watchAd =
     () => {
-
       action(
         async () => {
-
-          if (
-            adsBusy ||
-            cooldown > 0
-          ) {
-
-            return;
-
-          }
-
+          if (adsBusy || cooldown > 0) return;
 
           playClick();
-
-
-          setAdsBusy(
-            true
-          );
-
+          setAdsBusy(true);
 
           try {
+            const started = await api('/api/ads/start', { method: 'POST' });
 
-            const started =
-              await api(
-                '/api/ads/start',
-                {
-                  method:
-                    'POST'
-                }
-              );
+            /* AdsGram Reward flow. The SDK promise resolves only after a
+               rewarded ad is completed. The backend session is still the
+               authority for limits, cooldown and the actual MAI credit. */
+            if (started.provider === 'adsgram') {
+              const Adsgram = await loadAdsgramSdk();
+              if (!Adsgram?.init) {
+                throw new Error('AdsGram is unavailable');
+              }
 
+              const controller = Adsgram.init({
+                blockId: String(started.blockId || '49496'),
+                debug: Boolean(started.debug),
+                debugConsole: false,
+                debugBannerType: 'FullscreenMedia'
+              });
 
-            if (
-              !started.url
-            ) {
+              await controller.show();
 
-              throw new Error(
-                'Ad provider did not return a URL'
-              );
+              await api(`/api/ads/adsgram-complete/${started.sessionId}`, {
+                method: 'POST'
+              });
 
+              await claimCompletedAd(started.sessionId);
+              return;
             }
 
+            /* Preserve the existing external-provider integration. */
+            if (!started.url) {
+              throw new Error('Ad provider did not return a URL');
+            }
 
-            openLink(
-              started.url
-            );
+            openLink(started.url);
+            toast('Finish the ad, then return to MAI.');
 
+            let attempts = 0;
+            const poll = setInterval(async () => {
+              attempts += 1;
+              try {
+                const status = await api(`/api/ads/status/${started.sessionId}`);
 
-            toast(
-              'Finish the ad, then return to MAI.'
-            );
-
-
-            let attempts =
-              0;
-
-
-            const poll =
-              setInterval(
-                async () => {
-
-                  attempts +=
-                    1;
-
-
-                  try {
-
-                    const status =
-                      await api(
-
-                        `/api/ads/status/${started.sessionId}`
-
-                      );
-
-
-                    if (
-                      status.status ===
-                        'completed' &&
-                      !status.claimed_at
-                    ) {
-
-                      clearInterval(
-                        poll
-                      );
-
-
-                      const claim =
-                        await api(
-
-                          `/api/ads/claim/${started.sessionId}`,
-
-                          {
-                            method:
-                              'POST'
-                          }
-
-                        );
-
-
-                      setBoot(
-                        old => ({
-
-                          ...old,
-
-                          user:
-                            claim.user
-
-                        })
-                      );
-
-
-                      setTasks(
-                        claim.tasks
-                      );
-
-
-                      setCooldown(
-                        Number(
-                          claim
-                            ?.tasks
-                            ?.ads
-                            ?.cooldown ||
-                          0
-                        )
-                      );
-
-
-                      playReward();
-
-
-                      toast(
-
-                        `+${fmtSmart(
-                          claim.reward,
-                          4
-                        )} MAI`
-
-                      );
-
-
-                    } else if (
-                      attempts >
-                      90
-                    ) {
-
-                      clearInterval(
-                        poll
-                      );
-
-
-                      toast(
-                        'Ad was not completed.'
-                      );
-
-                    }
-
-
-                  } catch {
-
-                    /*
-                      Poll errors are ignored
-                      temporarily.
-                    */
-
-                  }
-
-                },
-                2000
-              );
-
-
+                if (status.status === 'completed' && !status.claimed_at) {
+                  clearInterval(poll);
+                  await claimCompletedAd(started.sessionId);
+                } else if (attempts > 90) {
+                  clearInterval(poll);
+                  toast('Ad was not completed.');
+                }
+              } catch {
+                /* Temporary poll errors are intentionally ignored. */
+              }
+            }, 2000);
+          } catch (error) {
+            const message = String(error?.description || error?.message || 'Ad was not completed.');
+            toast(message);
           } finally {
-
-            setAdsBusy(
-              false
-            );
-
+            setAdsBusy(false);
           }
-
         }
       );
-
-  };
+    };
 
 
   /* =======================================================

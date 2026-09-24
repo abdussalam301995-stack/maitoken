@@ -490,6 +490,20 @@
         ),
 
 
+      adsgramBlockId:
+        String(
+          process.env.ADSGRAM_BLOCK_ID ||
+          '49496'
+        ).trim(),
+
+
+      adsgramDebug:
+        String(
+          process.env.ADSGRAM_DEBUG ||
+          'false'
+        ).toLowerCase() === 'true',
+
+
       /* -------------------------------------------------------
          DAILY TELEGRAM TASK
          ------------------------------------------------------- */
@@ -9985,6 +9999,25 @@ await pool.query(`
 
 
           if (
+            cfg.adProviderMode === 'adsgram' ||
+            cfg.adProviderMode === 'adsgram_test'
+          ) {
+
+            return res.json({
+              success: true,
+              sessionId: id,
+              provider: 'adsgram',
+              blockId: cfg.adsgramBlockId,
+              debug:
+                cfg.adProviderMode === 'adsgram_test' ||
+                cfg.adsgramDebug,
+              url: ''
+            });
+
+          }
+
+
+          if (
             cfg.adProviderMode ===
             'external'
           ) {
@@ -10071,6 +10104,62 @@ await pool.query(`
 
         }
 
+      }
+    );
+
+
+    /* =========================================================
+       ADSGRAM TEST COMPLETION
+       Test blocks do not call Reward URL. This route is therefore
+       enabled ONLY in adsgram_test mode. Production AdsGram must use
+       server confirmation before this gate is enabled for real rewards.
+       ========================================================= */
+
+    app.post(
+      '/api/ads/adsgram-complete/:id',
+      authenticate,
+      rateLimit(20, 60000),
+      async (req, res, next) => {
+        try {
+          if (cfg.adProviderMode !== 'adsgram_test') {
+            return res.status(404).end();
+          }
+
+          const result = await pool.query(
+            `
+            UPDATE ad_sessions
+            SET
+              status='completed',
+              completed_at=COALESCE(completed_at, NOW()),
+              provider_ref=COALESCE(provider_ref, 'adsgram-test')
+            WHERE
+              id=$1
+              AND telegram_id=$2
+              AND status='started'
+            RETURNING id
+            `,
+            [req.params.id, req.auth.id]
+          );
+
+          if (!result.rowCount) {
+            const existing = await pool.query(
+              `SELECT status FROM ad_sessions WHERE id=$1 AND telegram_id=$2`,
+              [req.params.id, req.auth.id]
+            );
+
+            if (!existing.rowCount) {
+              return res.status(404).json({ success:false, message:'Ad session not found' });
+            }
+
+            if (!['completed', 'claimed'].includes(existing.rows[0].status)) {
+              return res.status(409).json({ success:false, message:'Ad session cannot be completed' });
+            }
+          }
+
+          return res.json({ success:true, verified:true, provider:'adsgram-test' });
+        } catch (error) {
+          next(error);
+        }
       }
     );
 
