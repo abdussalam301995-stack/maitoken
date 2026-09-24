@@ -14176,3 +14176,58 @@ body.maiAdminOpen .adminPanel.adminV4 {
     user-select: text;
   }
 }
+
+/* =========================================================
+   MAI ADMIN — TELEGRAM ANDROID IME ROOT FIX V2
+   The Admin JS now uses Telegram expand() only (no requestFullscreen).
+   Keep the mobile document/root in normal flow so Android can resize the
+   visual viewport when the software keyboard opens after modal submits.
+   ========================================================= */
+@media (max-width: 959px) {
+  html.maiAdminOpen,
+  body.maiAdminOpen {
+    height: auto !important;
+    min-height: 100% !important;
+    max-height: none !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior-y: auto !important;
+  }
+
+  body.maiAdminOpen #root {
+    position: relative !important;
+    inset: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  body.maiAdminOpen .adminPanel.adminV4 {
+    position: relative !important;
+    inset: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 100dvh !important;
+    max-height: none !important;
+    overflow-x: hidden !important;
+    overflow-y: visible !important;
+  }
+
+  .adminV4 .adminModalBackdrop {
+    position: fixed !important;
+    inset: 0 !important;
+    height: 100dvh !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .adminV4 .adminAdComposer input,
+  .adminV4 .adminAdComposer textarea,
+  .adminV4 .adminAdComposer select {
+    position: relative;
+    z-index: 1;
+    pointer-events: auto !important;
+  }
+}
