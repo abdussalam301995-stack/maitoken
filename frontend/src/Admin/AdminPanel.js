@@ -254,25 +254,39 @@
         loadAll();
       }, [loadAll]);
 
-      // Admin viewport safety.
-      // Keep Telegram expanded, but do not force fullscreen or lock html/body.
-      // This is important when a phone is using Telegram's Desktop View:
-      // the viewport crosses the desktop breakpoint while Android still needs
-      // the document viewport to resize normally for the software keyboard.
+      // Admin Command Center should use the largest Telegram viewport available.
+      // expand() is widely supported. requestFullscreen() is used only when the
+      // current Telegram client exposes it; failures are intentionally ignored.
       useEffect(() => {
         const web = tg();
 
         try {
           web?.ready?.();
           web?.expand?.();
-        } catch (e) {}
+
+          if (typeof web?.requestFullscreen === 'function') {
+            web.requestFullscreen();
+          }
+        } catch (e) {
+          // Older Telegram clients may not support fullscreen.
+        }
+
+        const previousHtmlOverflow = document.documentElement.style.overflow;
+        const previousBodyOverflow = document.body.style.overflow;
+        const previousBodyOverscroll = document.body.style.overscrollBehavior;
 
         document.documentElement.classList.add('maiAdminOpen');
         document.body.classList.add('maiAdminOpen');
+        document.documentElement.style.overflow = 'hidden';
+        document.body.style.overflow = 'hidden';
+        document.body.style.overscrollBehavior = 'none';
 
         return () => {
           document.documentElement.classList.remove('maiAdminOpen');
           document.body.classList.remove('maiAdminOpen');
+          document.documentElement.style.overflow = previousHtmlOverflow;
+          document.body.style.overflow = previousBodyOverflow;
+          document.body.style.overscrollBehavior = previousBodyOverscroll;
         };
       }, []);
 
@@ -280,6 +294,22 @@
         setNotice(message);
         window.setTimeout(() => setNotice(''), 2600);
       };
+
+      /*
+       * Safety net for admin notices:
+       * some actions call setNotice(...) directly instead of flash(...).
+       * Always dismiss any visible admin toast so it cannot remain mounted
+       * over later form interactions in Telegram WebView.
+       */
+      useEffect(() => {
+        if (!notice) return undefined;
+
+        const noticeTimer = window.setTimeout(() => {
+          setNotice('');
+        }, 2600);
+
+        return () => window.clearTimeout(noticeTimer);
+      }, [notice]);
 
       const runAction = async (key, path, body) => {
         setBusy(key);
@@ -353,6 +383,9 @@
           const active = document.activeElement;
           if (active && typeof active.blur === 'function') active.blur();
           window.getSelection?.()?.removeAllRanges?.();
+          window.requestAnimationFrame(() => {
+            try { tg()?.expand?.(); } catch (e) {}
+          });
         } catch (e) {}
       };
 
@@ -1155,8 +1188,6 @@
       };
 
       const openAdEditor = item => {
-        setNotice('');
-        setError('');
         setAdEditingId(item.id);
         setAdForm({
           name:item.name || '', provider:item.provider || 'adsgram', blockId:item.block_id || '',
@@ -1174,7 +1205,7 @@
         setBusy('ad-save'); setError('');
         try {
           await adminApi(adEditingId ? `/admin/ads/${adEditingId}` : '/admin/ads',{method:adEditingId?'PATCH':'POST',body:JSON.stringify(payload)});
-          flash(adEditingId ? 'Ad campaign updated.' : 'New ad campaign created as Paused.');
+          setNotice(adEditingId ? 'Ad campaign updated.' : 'New ad campaign created as Paused.');
           closeAdComposer();
           await loadAll(true);
         } catch(e){ setError(e.message); } finally { setBusy(''); }
@@ -1184,14 +1215,14 @@
         const warning=status==='active' ? `Activate ${item.name}? It will appear as an additional rewarded ad in the user Tasks tab.` : `Pause ${item.name}? It will stop appearing for new ad sessions.`;
         if(!window.confirm(warning)) return;
         setBusy(`ad-status-${item.id}`); setError('');
-        try { await adminApi(`/admin/ads/${item.id}/status`,{method:'POST',body:JSON.stringify({status})}); flash(status==='active'?'Ad campaign activated. Active campaigns can run together.':'Ad campaign paused.'); await loadAll(true); }
+        try { await adminApi(`/admin/ads/${item.id}/status`,{method:'POST',body:JSON.stringify({status})}); setNotice(status==='active'?'Ad campaign activated. Active campaigns can run together.':'Ad campaign paused.'); await loadAll(true); }
         catch(e){setError(e.message)} finally{setBusy('')}
       };
 
       const removeAdCampaign = async item => {
         if(!window.confirm(`Remove ${item.name} from Admin view? Reward/session history will be preserved.`)) return;
         setBusy(`ad-delete-${item.id}`); setError('');
-        try { await adminApi(`/admin/ads/${item.id}`,{method:'DELETE'}); flash('Ad campaign removed. History preserved.'); await loadAll(true); }
+        try { await adminApi(`/admin/ads/${item.id}`,{method:'DELETE'}); setNotice('Ad campaign removed. History preserved.'); await loadAll(true); }
         catch(e){setError(e.message)} finally{setBusy('')}
       };
 

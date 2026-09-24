@@ -14232,82 +14232,20 @@ body.maiAdminOpen .adminPanel.adminV4 {
   }
 }
 
+
 /* =========================================================
-   MAI ADMIN — NON-BLOCKING AUTO-DISMISS TOAST FIX
-   2026-09-24
-   Informational admin notices must never intercept input/taps.
-   AdminPanel.js auto-clears Ad-management notices via flash().
+   MAI ADMIN — NOTICE / TOAST INTERACTION SAFETY
+   Added 2026-09-24
+
+   The admin success toast is informational only. It must never capture
+   taps/clicks or interfere with input focus in Telegram WebView.
+   JavaScript also auto-dismisses every notice after 2.6 seconds.
    ========================================================= */
 .adminV4 .adminToast,
-.adminPanel .adminToast {
+.adminPanel .adminToast,
+.adminToast {
   pointer-events: none !important;
   user-select: none !important;
   -webkit-user-select: none !important;
   touch-action: none !important;
 }
-
-/* =========================================================
-   MAI ADMIN — DESKTOP-VIEW KEYBOARD + MOBILE WIDTH FIX
-   2026-09-24
-   A phone can report a desktop-width viewport in Telegram Desktop View.
-   Do not use fixed #root/admin shells or a locked document at any width:
-   Android must be allowed to resize/re-focus the document for the IME.
-   ========================================================= */
-html.maiAdminOpen,
-body.maiAdminOpen {
-  width: 100% !important;
-  max-width: none !important;
-  height: auto !important;
-  min-height: 100% !important;
-  max-height: none !important;
-  overflow-x: hidden !important;
-  overflow-y: auto !important;
-  overscroll-behavior-y: auto !important;
-}
-
-body.maiAdminOpen #root {
-  position: relative !important;
-  inset: auto !important;
-  width: 100% !important;
-  max-width: none !important;
-  height: auto !important;
-  min-height: 100% !important;
-  max-height: none !important;
-  overflow: visible !important;
-}
-
-body.maiAdminOpen .adminPanel.adminV4 {
-  position: relative !important;
-  inset: auto !important;
-  width: 100% !important;
-  max-width: none !important;
-  height: auto !important;
-  min-height: 100dvh !important;
-  max-height: none !important;
-  overflow-x: hidden !important;
-  overflow-y: visible !important;
-}
-
-.adminV4 .adminWorkspace {
-  min-height: 100dvh !important;
-}
-
-/* Phone layout: use a little more of the available width.
-   Vertical spacing is intentionally unchanged. */
-@media (max-width: 959px) {
-  .adminV4 .adminContent {
-    padding-left: 12px !important;
-    padding-right: 12px !important;
-  }
-
-  .adminV4 .adminPageHeading,
-  .adminV4 .adminDashboardWelcome,
-  .adminV4 .adminHero,
-  .adminV4 .adminSection,
-  .adminV4 .adminMetricGrid,
-  .adminV4 .adminDashboardSplit,
-  .adminV4 .adminDashboardBottom {
-    max-width: none !important;
-  }
-}
-
