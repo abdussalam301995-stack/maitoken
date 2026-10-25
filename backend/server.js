@@ -1,3 +1,5 @@
+'use strict';
+throw new Error('LEGACY_CUTOVER_FREEZE_BRANCH: original Telegram/TON/DB server intentionally disabled. Run npm start for standalone freeze health service.');
     require('dotenv').config();
 
     const express = require('express');
