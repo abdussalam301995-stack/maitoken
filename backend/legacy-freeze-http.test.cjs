@@ -14,11 +14,11 @@ function read(port,path,method='GET'){
  });
 }
 test('cannot start without explicit freeze flag',async()=>{
- await assert.rejects(()=>startFrozenServer({...base,MAI_LEGACY_CUTOVER_FROZEN:'false'}),
+ assert.throws(()=>startFrozenServer({...base,MAI_LEGACY_CUTOVER_FROZEN:'false'}),
   /REFUSE_LEGACY_FREEZE_START_WITHOUT_EXPLICIT_FLAG/);
 });
 test('cannot start if old auto payout enabled',async()=>{
- await assert.rejects(()=>startFrozenServer({...base,MAI_PAYOUT_ENABLED:'true'}),
+ assert.throws(()=>startFrozenServer({...base,MAI_PAYOUT_ENABLED:'true'}),
   /REFUSE_FREEZE_WHILE_AUTO_PAYOUT_ENABLED/);
 });
 test('health only; Telegram, user, admin, payment and mining routes are all inert',async t=>{
