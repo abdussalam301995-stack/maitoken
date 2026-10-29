@@ -5449,6 +5449,11 @@ await pool.query(`
        ========================================================= */
 
     async function registerTelegramWebhook() {
+      if (process.env.MAI_LEGACY_WEBHOOK_REGISTRATION_DISABLED === 'true') {
+        console.log('[MAI LEGACY WEBHOOK] registration disabled for official cutover');
+        return false;
+      }
+
 
       if (
         !BOT_TOKEN ||
